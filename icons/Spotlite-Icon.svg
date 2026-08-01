@@ -1,0 +1,39 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="28%" cy="18%" r="100%">
+      <stop offset="0%" stop-color="#2BA5FF"></stop>
+      <stop offset="46%" stop-color="#1B72E8"></stop>
+      <stop offset="100%" stop-color="#0A4FC9"></stop>
+    </radialGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.42"></stop>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"></stop>
+    </linearGradient>
+    <clipPath id="round">
+      <rect x="16" y="16" width="480" height="480" rx="116"></rect>
+    </clipPath>
+  </defs>
+
+  
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#bg)"></rect>
+  
+  <g clip-path="url(#round)">
+    <ellipse cx="256" cy="70" rx="300" ry="150" fill="url(#sheen)"></ellipse>
+  </g>
+
+  
+  <g>
+    
+    <line x1="316" y1="312" x2="392" y2="388" stroke="#ffffff" stroke-width="46" stroke-linecap="round"></line>
+    
+    <circle cx="226" cy="222" r="104" fill="#ffffff" fill-opacity="0.16" stroke="#ffffff" stroke-width="26"></circle>
+
+    
+    <g fill="#ffffff">
+      <rect x="180" y="228" width="92" height="30" rx="15"></rect>
+      <circle cx="201" cy="226" r="24"></circle>
+      <circle cx="232" cy="219" r="30"></circle>
+      <circle cx="258" cy="232" r="20"></circle>
+    </g>
+  </g>
+</svg>
