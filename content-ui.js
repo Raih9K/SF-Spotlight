@@ -25396,13 +25396,7 @@ const Hn = [
       placeholder: "Search apps & tabs...",
       icon: "🚀",
     },
-    {
-      id: "objectdetails",
-      label: "Object Details",
-      placeholder: "Search object fields & details...",
-      icon: "📦",
-    },
-  ],
+],
   Fa = ["apps"],
   $s = [
     { kind: "tab", id: "home", label: "Home", icon: "🏠" },
@@ -32909,6 +32903,10 @@ ${at.error}`),
           }
           if (x === "objectdetails") {
             renderObjectDetails(C, he, Pe);
+            return;
+          }
+          if (x === "bulkfieldcreator") {
+            renderBulkFieldCreator(C, he, Pe);
             return;
           }
           if (x === "release") {
