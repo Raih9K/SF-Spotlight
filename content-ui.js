@@ -29573,10 +29573,17 @@ function Xu(o, t, e, n) {
 }
 function $n() {
   const o = document.getElementById("sf-log-analyzer-spotlight-container");
+  if (o) {
+    const t = document.getElementById("sf-log-analyzer-modal-content");
+    (o.style.display = "flex", o.style.pointerEvents = "auto");
+    if (t) t.style.pointerEvents = "auto";
+    const u = document.getElementById("sf-spotlight-input");
+    if (u) u.focus();
+    return;
+  }
   if (
-    (o && o.remove(),
     (!Na || Ma) && (Qt = Yt = Kt = rn = Fn = dn = null),
-    !document.body)
+    !document.body
   ) {
     console.warn("Document body not available for spotlight search");
     return;
@@ -34997,7 +35004,7 @@ function Ju() {
           )
             ? r.altKey && !r.metaKey && !r.ctrlKey && !r.shiftKey
             : r.metaKey && !r.altKey && !r.ctrlKey && !r.shiftKey;
-          if (r.code === "Space" && u)
+          if ((r.code === "Space" && u) || (r.ctrlKey && r.code === "Space"))
             return (r.preventDefault(), r.stopPropagation(), $n(), !1);
           r.key === "Escape" && t && (r.preventDefault(), y());
         };
