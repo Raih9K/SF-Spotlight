@@ -26170,26 +26170,141 @@ function Po(o) {
                         M.toLowerCase().includes(be)
                       : !0;
                 });
-              if (
-                ((L.textContent = `${ue.length} of ${X.length} fields`),
-                (D.innerHTML = ""),
-                ue.length === 0)
-              ) {
-                Be("No fields match your filter.");
+              ((L.textContent = `${ue.length} of ${X.length} fields`),
+                (D.innerHTML = ""));
+
+              const filteredRelationships = (Z.childRelationships || []).filter((rel) => {
+                if (!be) return true;
+                const relName = rel.relationshipName || "";
+                const childObj = rel.childSObject || "";
+                const fieldName = rel.field || "";
+                return relName.toLowerCase().includes(be) ||
+                       childObj.toLowerCase().includes(be) ||
+                       fieldName.toLowerCase().includes(be);
+              }).sort((a, b) => (a.relationshipName || "").localeCompare(b.relationshipName || ""));
+
+              if (ue.length === 0 && filteredRelationships.length === 0) {
+                Be("No fields or relationships match your filter.");
                 return;
               }
-              const Me = document.createElement("table");
-              Object.assign(Me.style, {
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: "13px",
-              });
-              const ye = document.createElement("thead"),
-                te = document.createElement("tr");
-              (["Field", "Type", "Value"].forEach((z, M) => {
-                const K = document.createElement("th");
-                ((K.textContent = z),
+
+              if (ue.length > 0) {
+                const Me = document.createElement("table");
+                Object.assign(Me.style, {
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "13px",
+                });
+                const ye = document.createElement("thead"),
+                  te = document.createElement("tr");
+                (["Field", "Type", "Value"].forEach((z, M) => {
+                  const K = document.createElement("th");
+                  ((K.textContent = z),
+                    Object.assign(K.style, {
+                      position: "sticky",
+                      top: "0",
+                      textAlign: "left",
+                      padding: "10px 16px",
+                      background: mt === "dark" ? "#1e293b" : "#ffffff",
+                      color: n.textFaint,
+                      fontSize: "10px",
+                      fontWeight: "800",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      borderBottom: `1px solid ${n.divider}`,
+                      width: M === 1 ? "140px" : "auto",
+                    }),
+                    te.appendChild(K));
+                }),
+                  ye.appendChild(te),
+                  Me.appendChild(ye));
+                const Le = document.createElement("tbody");
+                (ue.forEach((z) => {
+                  const M = document.createElement("tr");
+                  ((M.style.borderBottom = `1px solid ${n.divider}`),
+                    z.accessible || (M.style.opacity = "0.6"),
+                    M.addEventListener("mouseover", () => {
+                      M.style.background = n.rowHover;
+                    }),
+                    M.addEventListener("mouseout", () => {
+                      M.style.background = "transparent";
+                    }));
+                  const K = document.createElement("td");
                   Object.assign(K.style, {
+                    padding: "10px 16px",
+                    verticalAlign: "top",
+                  });
+                  const j = document.createElement("div");
+                  ((j.textContent = z.label || z.apiName),
+                    Object.assign(j.style, {
+                      fontWeight: "600",
+                      color: z.accessible ? n.textPrimary : n.textMuted,
+                    }));
+                  const q = document.createElement("div");
+                  ((q.textContent = z.apiName),
+                    Object.assign(q.style, {
+                      fontSize: "11px",
+                      color: n.textFaint,
+                      fontFamily: "Fira Code, monospace",
+                      marginTop: "2px",
+                    }),
+                    K.appendChild(j),
+                    K.appendChild(q));
+                  const P = document.createElement("td");
+                  Object.assign(P.style, {
+                    padding: "10px 16px",
+                    verticalAlign: "top",
+                  });
+                  const ee = document.createElement("span");
+                  ((ee.textContent = z.type || "string"),
+                    Object.assign(ee.style, {
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      color: n.textMuted,
+                      background: n.surface,
+                      padding: "2px 8px",
+                      borderRadius: "6px",
+                      whiteSpace: "nowrap",
+                    }),
+                    P.appendChild(ee));
+                  const G = se(z);
+                  (M.appendChild(K),
+                    M.appendChild(P),
+                    M.appendChild(G),
+                    Le.appendChild(M));
+                }),
+                  Me.appendChild(Le),
+                  D.appendChild(Me));
+              }
+
+              if (filteredRelationships.length > 0) {
+                const relHeader = document.createElement("div");
+                relHeader.textContent = `Child Relationships (${filteredRelationships.length})`;
+                Object.assign(relHeader.style, {
+                  fontSize: "14px",
+                  fontWeight: "800",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  color: n.textPrimary,
+                  marginTop: "24px",
+                  marginBottom: "12px",
+                  padding: "0 16px",
+                });
+                D.appendChild(relHeader);
+
+                const relTable = document.createElement("table");
+                Object.assign(relTable.style, {
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "13px",
+                  marginBottom: "24px",
+                });
+                const relThead = document.createElement("thead"),
+                  relTr = document.createElement("tr");
+                ["Relationship Name", "Child Object", "Field", "Label"].forEach((hText) => {
+                  const th = document.createElement("th");
+                  th.textContent = hText;
+                  Object.assign(th.style, {
                     position: "sticky",
                     top: "0",
                     textAlign: "left",
@@ -26201,69 +26316,64 @@ function Po(o) {
                     textTransform: "uppercase",
                     letterSpacing: "0.08em",
                     borderBottom: `1px solid ${n.divider}`,
-                    width: M === 1 ? "140px" : "auto",
-                  }),
-                  te.appendChild(K));
-              }),
-                ye.appendChild(te),
-                Me.appendChild(ye));
-              const Le = document.createElement("tbody");
-              (ue.forEach((z) => {
-                const M = document.createElement("tr");
-                ((M.style.borderBottom = `1px solid ${n.divider}`),
-                  z.accessible || (M.style.opacity = "0.6"),
-                  M.addEventListener("mouseover", () => {
-                    M.style.background = n.rowHover;
-                  }),
-                  M.addEventListener("mouseout", () => {
-                    M.style.background = "transparent";
-                  }));
-                const K = document.createElement("td");
-                Object.assign(K.style, {
-                  padding: "10px 16px",
-                  verticalAlign: "top",
+                  });
+                  relTr.appendChild(th);
                 });
-                const j = document.createElement("div");
-                ((j.textContent = z.label || z.apiName),
-                  Object.assign(j.style, {
-                    fontWeight: "600",
-                    color: z.accessible ? n.textPrimary : n.textMuted,
-                  }));
-                const q = document.createElement("div");
-                ((q.textContent = z.apiName),
-                  Object.assign(q.style, {
-                    fontSize: "11px",
-                    color: n.textFaint,
-                    fontFamily: "Fira Code, monospace",
-                    marginTop: "2px",
-                  }),
-                  K.appendChild(j),
-                  K.appendChild(q));
-                const P = document.createElement("td");
-                Object.assign(P.style, {
-                  padding: "10px 16px",
-                  verticalAlign: "top",
+                relThead.appendChild(relTr);
+                relTable.appendChild(relThead);
+
+                const relTbody = document.createElement("tbody");
+                filteredRelationships.forEach((rel) => {
+                  const tr = document.createElement("tr");
+                  Object.assign(tr.style, {
+                    borderBottom: `1px solid ${n.divider}`,
+                  });
+                  tr.addEventListener("mouseover", () => {
+                    tr.style.background = n.rowHover;
+                  });
+                  tr.addEventListener("mouseout", () => {
+                    tr.style.background = "transparent";
+                  });
+
+                  const tdRelName = document.createElement("td");
+                  Object.assign(tdRelName.style, { padding: "10px 16px", verticalAlign: "top" });
+                  const relSpan = document.createElement("span");
+                  relSpan.textContent = rel.relationshipName || "(Blank)";
+                  if (!rel.relationshipName) {
+                    relSpan.style.color = n.textFaint;
+                    relSpan.style.fontStyle = "italic";
+                  } else {
+                    relSpan.style.fontWeight = "600";
+                    relSpan.style.color = n.textPrimary;
+                  }
+                  tdRelName.appendChild(relSpan);
+
+                  const tdChildObj = document.createElement("td");
+                  Object.assign(tdChildObj.style, { padding: "10px 16px", verticalAlign: "top", fontWeight: "600", color: n.textPrimary });
+                  tdChildObj.textContent = rel.childSObject || "";
+
+                  const tdField = document.createElement("td");
+                  Object.assign(tdField.style, { padding: "10px 16px", verticalAlign: "top", fontFamily: "Fira Code, monospace", color: n.textMuted });
+                  tdField.textContent = rel.field || "";
+
+                  const tdLabel = document.createElement("td");
+                  Object.assign(tdLabel.style, { padding: "10px 16px", verticalAlign: "top", color: n.textFaint });
+                  const getRelLabel = (rName) => {
+                    if (rName === "OpenActivities") return "Open Activities";
+                    if (rName === "ActivityHistories") return "Activity History";
+                    return "(Unknown)";
+                  };
+                  tdLabel.textContent = getRelLabel(rel.relationshipName);
+
+                  tr.appendChild(tdRelName);
+                  tr.appendChild(tdChildObj);
+                  tr.appendChild(tdField);
+                  tr.appendChild(tdLabel);
+                  relTbody.appendChild(tr);
                 });
-                const ee = document.createElement("span");
-                ((ee.textContent = z.type || "string"),
-                  Object.assign(ee.style, {
-                    fontSize: "11px",
-                    fontWeight: "600",
-                    color: n.textMuted,
-                    background: n.surface,
-                    padding: "2px 8px",
-                    borderRadius: "6px",
-                    whiteSpace: "nowrap",
-                  }),
-                  P.appendChild(ee));
-                const G = se(z);
-                (M.appendChild(K),
-                  M.appendChild(P),
-                  M.appendChild(G),
-                  Le.appendChild(M));
-              }),
-                Me.appendChild(Le),
-                D.appendChild(Me));
+                relTable.appendChild(relTbody);
+                D.appendChild(relTable);
+              }
             },
             Be = (be) => {
               const ge = document.createElement("div");
@@ -29056,15 +29166,40 @@ function Xu(o, t, e, n) {
         Ne && ke.some((Ge) => Ge.value === je) && (de.value = je));
     };
   let r = "",
-    E = [];
+    E = [],
+    baseFieldsCache = [];
   const u = new Set(),
     b = [];
   let N = "fields";
   const F = [],
-    k = () => [
-      { value: "", label: "— field —" },
-      ...E.map((de) => ({ value: de.name, label: `${de.name}` })),
-    ],
+    relLabel = document.createElement("label"),
+    relCheckbox = document.createElement("input");
+  Object.assign(relLabel.style, {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    fontSize: "12px",
+    color: i.textMuted,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    fontWeight: "600",
+  });
+  ((relCheckbox.type = "checkbox"),
+    (relCheckbox.checked = false),
+    (relCheckbox.style.cursor = "pointer"),
+    relLabel.appendChild(relCheckbox),
+    relLabel.appendChild(document.createTextNode("Show relational fields")),
+    relCheckbox.addEventListener("change", () => {
+      se();
+      p();
+    }));
+  const k = () => {
+      const filtered = relCheckbox.checked ? E : E.filter(de => !de.name.includes('.'));
+      return [
+        { value: "", label: "— field —" },
+        ...filtered.map((de) => ({ value: de.name, label: `${de.name}` })),
+      ];
+    },
     c = d("Object"),
     O = document.createElement("input");
   (O.setAttribute("list", "sf-qb-objs"),
@@ -29132,6 +29267,7 @@ function Xu(o, t, e, n) {
         (re.style.opacity = N === "fields" ? "1" : "0.4"));
     };
   (D.appendChild(U),
+    D.appendChild(relLabel),
     D.appendChild(V),
     D.appendChild(C),
     D.appendChild(Z),
@@ -29163,9 +29299,10 @@ function Xu(o, t, e, n) {
     }
     E.filter(
       (ke) =>
-        !de ||
-        ke.name.toLowerCase().includes(de) ||
-        (ke.label || "").toLowerCase().includes(de),
+        (!de ||
+          ke.name.toLowerCase().includes(de) ||
+          (ke.label || "").toLowerCase().includes(de)) &&
+        (relCheckbox.checked || !ke.name.includes(".")),
     ).forEach((ke) => {
       const Ne = document.createElement("label");
       Object.assign(Ne.style, {
@@ -29396,28 +29533,44 @@ function Xu(o, t, e, n) {
     ee.appendChild(w),
     P.appendChild(ee));
   const p = () => {
+      const filtered = relCheckbox.checked ? E : E.filter(de => !de.name.includes('.'));
       (F.forEach((de) => g(de.field, k())),
         g(G, k()),
         g(ge, [
           { value: "", label: "— field —" },
-          ...E.map((de) => ({ value: de.name, label: de.name })),
+          ...filtered.map((de) => ({ value: de.name, label: de.name })),
         ]));
     },
     A = () => {
       if (!r) {
-        ((E = []), se(), p(), Re());
+        ((E = []), (baseFieldsCache = []), se(), p(), Re());
         return;
       }
-      ((E = []),
-        se(),
-        Ti(r, (de) => {
-          loadAllFieldsIncludingRelationships(r, de, (allFields) => {
+      if (baseFieldsCache.length > 0) {
+        if (relCheckbox.checked) {
+          loadAllFieldsIncludingRelationships(r, baseFieldsCache, (allFields) => {
             ((E = allFields), se(), p(), Re());
           });
-        }));
+        } else {
+          ((E = baseFieldsCache), se(), p(), Re());
+        }
+      } else {
+        ((E = []),
+          se(),
+          Ti(r, (de) => {
+            baseFieldsCache = de;
+            if (relCheckbox.checked) {
+              loadAllFieldsIncludingRelationships(r, de, (allFields) => {
+                ((E = allFields), se(), p(), Re());
+              });
+            } else {
+              ((E = de), se(), p(), Re());
+            }
+          }));
+      }
     };
   O.addEventListener("change", () => {
-    ((r = O.value.trim()), u.clear(), (b.length = 0), ye(), A());
+    ((r = O.value.trim()), u.clear(), (b.length = 0), (baseFieldsCache = []), ye(), A());
   });
   const Q = (de, ke) => {
       const Ne = ke.trim();
