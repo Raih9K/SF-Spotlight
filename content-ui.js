@@ -27669,7 +27669,7 @@ function uo(o) {
 }
 
 
-function loadAllFieldsIncludingRelationships(objectName, baseFields, callback) {
+function loadAllFieldsIncludingRelationships(objectName, baseFields, callback, progressCallback) {
   const refFields = baseFields.filter(f => f.relationshipName && f.referenceTo && f.referenceTo.length > 0);
   if (refFields.length === 0) {
     callback(baseFields);
@@ -27684,14 +27684,20 @@ function loadAllFieldsIncludingRelationships(objectName, baseFields, callback) {
     const relName = f.relationshipName;
     
     Ti(parentObj, (parentFields) => {
+      const added = [];
       parentFields.forEach(pf => {
-        combinedFields.push({
+        const nf = {
           name: `${relName}.${pf.name}`,
           label: `${relName} ${pf.label || pf.name}`,
           type: pf.type,
           calculated: pf.calculated
-        });
+        };
+        combinedFields.push(nf);
+        added.push(nf);
       });
+      if (progressCallback) {
+        progressCallback(added);
+      }
       pending--;
       if (pending === 0) {
         combinedFields.sort((a, b) => a.name.localeCompare(b.name));
@@ -29166,8 +29172,7 @@ function Xu(o, t, e, n) {
         Ne && ke.some((Ge) => Ge.value === je) && (de.value = je));
     };
   let r = "",
-    E = [],
-    baseFieldsCache = [];
+    E = [];
   const u = new Set(),
     b = [];
   let N = "fields";
@@ -29190,8 +29195,19 @@ function Xu(o, t, e, n) {
     relLabel.appendChild(relCheckbox),
     relLabel.appendChild(document.createTextNode("Show relational fields")),
     relCheckbox.addEventListener("change", () => {
-      se();
-      p();
+      if (relCheckbox.checked) {
+        const hasRelFields = E.some(f => f.name.includes('.'));
+        if (!hasRelFields && E.length > 0) {
+          const baseFields = E.filter(f => !f.name.includes('.'));
+          loadRelationalFields(baseFields);
+        } else {
+          se();
+          p();
+        }
+      } else {
+        se();
+        p();
+      }
     }));
   const k = () => {
       const filtered = relCheckbox.checked ? E : E.filter(de => !de.name.includes('.'));
@@ -29541,36 +29557,41 @@ function Xu(o, t, e, n) {
           ...filtered.map((de) => ({ value: de.name, label: de.name })),
         ]));
     },
+    loadRelationalFields = (baseFields) => {
+      loadAllFieldsIncludingRelationships(r, baseFields, (allFields) => {
+        E = allFields;
+        se();
+        p();
+        Re();
+      }, (addedFields) => {
+        if (relCheckbox.checked) {
+          addedFields.forEach(af => {
+            if (!E.some(f => f.name === af.name)) {
+              E.push(af);
+            }
+          });
+          E.sort((a, b) => a.name.localeCompare(b.name));
+          se();
+          p();
+        }
+      });
+    },
     A = () => {
       if (!r) {
-        ((E = []), (baseFieldsCache = []), se(), p(), Re());
+        ((E = []), se(), p(), Re());
         return;
       }
-      if (baseFieldsCache.length > 0) {
-        if (relCheckbox.checked) {
-          loadAllFieldsIncludingRelationships(r, baseFieldsCache, (allFields) => {
-            ((E = allFields), se(), p(), Re());
-          });
-        } else {
-          ((E = baseFieldsCache), se(), p(), Re());
-        }
-      } else {
-        ((E = []),
-          se(),
-          Ti(r, (de) => {
-            baseFieldsCache = de;
-            if (relCheckbox.checked) {
-              loadAllFieldsIncludingRelationships(r, de, (allFields) => {
-                ((E = allFields), se(), p(), Re());
-              });
-            } else {
-              ((E = de), se(), p(), Re());
-            }
-          }));
-      }
+      ((E = []),
+        se(),
+        Ti(r, (de) => {
+          ((E = de), se(), p(), Re());
+          if (relCheckbox.checked) {
+            loadRelationalFields(de);
+          }
+        }));
     };
   O.addEventListener("change", () => {
-    ((r = O.value.trim()), u.clear(), (b.length = 0), (baseFieldsCache = []), ye(), A());
+    ((r = O.value.trim()), u.clear(), (b.length = 0), ye(), A());
   });
   const Q = (de, ke) => {
       const Ne = ke.trim();
@@ -35121,6 +35142,19 @@ function Ju() {
                 if (r.target === "action:recorddetail") {
                   const E = Bs();
                   E ? Po(E) : ot("No record detected on this page");
+                  return;
+                }
+                if (r.target === "action:copysession") {
+                  it().then((creds) => {
+                    if (creds && creds.instanceUrl && creds.sessionId) {
+                      const loginUrl = `${creds.instanceUrl}/secur/frontdoor.jsp?sid=${creds.sessionId}`;
+                      navigator.clipboard.writeText(loginUrl)
+                        .then(() => ot("Session login URL copied!"))
+                        .catch(() => ot("Failed to copy URL", "error"));
+                    } else {
+                      ot("Session not detected. Refresh the page.", "error");
+                    }
+                  });
                   return;
                 }
                 ((Pn = r.target || null), $n());
