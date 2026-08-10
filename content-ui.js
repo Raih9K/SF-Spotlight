@@ -10288,6 +10288,887 @@ function ua(o, t, e) {
       return;
   }
 }
+function QcBulk(o, t) {
+  const e = t.isDark,
+    n = kt(e);
+  o.innerHTML = "";
+  const i = Xe("div", {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minHeight: "0",
+    background: n.bg,
+    color: n.text,
+  });
+  o.appendChild(i);
+  const s = Xe("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "12px",
+      padding: "14px 24px",
+      flexShrink: "0",
+      borderBottom: `1px solid ${n.divider}`,
+    }),
+    a = Xe(
+      "button",
+      {
+        background: "transparent",
+        border: `1px solid ${n.border}`,
+        color: n.text,
+        borderRadius: "8px",
+        padding: "6px 12px",
+        cursor: "pointer",
+        fontSize: "12.5px",
+        fontWeight: "600",
+        fontFamily: "inherit",
+      },
+      "← Tools",
+    );
+  (a.addEventListener("click", t.onBack), s.appendChild(a));
+  const l = Xe("div", { display: "flex", flexDirection: "column" });
+  (l.appendChild(
+    Xe(
+      "div",
+      { fontSize: "16px", fontWeight: "800" },
+      "🧪 Bulk Sample Data Generator",
+    ),
+  ),
+    l.appendChild(
+      Xe(
+        "div",
+        { fontSize: "12px", color: n.muted },
+        "Analyze multiple objects and create realistic test records in bulk",
+      ),
+    ),
+    s.appendChild(l),
+    i.appendChild(s));
+  const d = Xe("div", {
+    flex: "1",
+    minHeight: "0",
+    overflow: "auto",
+    padding: "16px 24px",
+  });
+  i.appendChild(d);
+  const y = Xe("div", {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "10px 14px",
+    marginBottom: "14px",
+    borderRadius: "10px",
+    border: `1px solid ${n.warn}`,
+    background: e ? "rgba(245,158,11,0.12)" : "rgba(245,158,11,0.10)",
+    color: e ? "#fcd34d" : "#92400e",
+    fontSize: "12.5px",
+    fontWeight: "600",
+  });
+  ((y.innerHTML =
+    "⚠️&nbsp; For use in <b>sandbox &amp; scratch orgs only</b> — never generate data in a production org."),
+    d.appendChild(y));
+  let g = "unknown";
+  const r = Xe(
+    "div",
+    {
+      fontSize: "12.5px",
+      fontWeight: "700",
+      marginBottom: "14px",
+      color: n.muted,
+    },
+    "Checking org type…",
+  );
+  d.appendChild(r);
+  const E = Xe("div", {
+      display: "grid",
+      gridTemplateColumns: "2fr 1fr",
+      gap: "12px",
+      marginBottom: "12px",
+    }),
+    u = Xe("div", {});
+  u.appendChild(
+    Xe(
+      "label",
+      {
+        fontSize: "12px",
+        color: n.muted,
+        display: "block",
+        marginBottom: "6px",
+        fontWeight: "600",
+      },
+      "Search & Add Objects",
+    ),
+  );
+  const b = Xe("input", {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "9px 12px",
+    fontSize: "13px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+    background: n.panel,
+    color: n.text,
+    fontFamily: "inherit",
+    outline: "none",
+  });
+  ((b.placeholder = "Search object e.g., Account"), b.setAttribute("list", "sample-obj-list"));
+  const N = Xe("datalist");
+  ((N.id = "sample-obj-list"),
+    u.appendChild(b),
+    u.appendChild(N),
+    E.appendChild(u));
+  const F = Xe("div", {});
+  F.appendChild(
+    Xe(
+      "label",
+      {
+        fontSize: "12px",
+        color: n.muted,
+        display: "block",
+        marginBottom: "6px",
+        fontWeight: "600",
+      },
+      "Records per object (1–200)",
+    ),
+  );
+  const k = Xe("input", {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "9px 12px",
+    fontSize: "13px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+    background: n.panel,
+    color: n.text,
+    fontFamily: "inherit",
+    outline: "none",
+  });
+  ((k.type = "number"),
+    (k.min = "1"),
+    (k.max = "200"),
+    (k.value = "25"),
+    F.appendChild(k),
+    E.appendChild(F),
+    d.appendChild(E));
+
+  const chipsContainer = Xe("div", {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    marginBottom: "14px",
+  });
+  d.appendChild(chipsContainer);
+
+  const c = Xe("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "16px",
+      marginBottom: "14px",
+      flexWrap: "wrap",
+    }),
+    O = Xe("label", {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "7px",
+      fontSize: "12.5px",
+      color: n.text,
+      cursor: "pointer",
+    }),
+    x = Xe("input");
+  ((x.type = "checkbox"), (x.checked = true),
+    O.appendChild(x),
+    O.appendChild(
+      document.createTextNode(
+        "Also fill optional fields (more validation risk)",
+      ),
+    ),
+    c.appendChild(O));
+  const L = Xe(
+    "button",
+    {
+      marginLeft: "auto",
+      background: n.accent,
+      border: "none",
+      color: "#fff",
+      borderRadius: "8px",
+      padding: "9px 18px",
+      cursor: "pointer",
+      fontSize: "13px",
+      fontWeight: "700",
+      fontFamily: "inherit",
+    },
+    "⚡ Generate previews",
+  );
+  (c.appendChild(L), d.appendChild(c));
+  const D = Xe("div", {});
+  d.appendChild(D);
+  const U = Xe("div", { marginTop: "14px" });
+  d.appendChild(U);
+
+  let selectedObjects = [];
+  let objectDataMap = {};
+  let allAvailableObjects = new Map();
+  let se = null;
+
+  const renderChips = () => {
+    chipsContainer.innerHTML = "";
+    selectedObjects.forEach((obj) => {
+      const label = allAvailableObjects.get(obj) || obj;
+      const chip = Xe("div", {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        background: n.chipBg,
+        border: `1px solid ${n.border}`,
+        borderRadius: "16px",
+        padding: "4px 10px",
+        fontSize: "12.5px",
+        color: n.text,
+      });
+      chip.appendChild(document.createTextNode(`${label} (${obj})`));
+      const removeBtn = Xe("span", {
+        cursor: "pointer",
+        fontWeight: "bold",
+        marginLeft: "6px",
+        color: n.danger,
+      }, "×");
+      removeBtn.addEventListener("click", () => {
+        selectedObjects = selectedObjects.filter((o) => o !== obj);
+        delete objectDataMap[obj];
+        renderChips();
+        De();
+      });
+      chip.appendChild(removeBtn);
+      chipsContainer.appendChild(chip);
+    });
+    De();
+  };
+
+  const De = () => {
+    if (!se) return;
+    const hasRecords = Object.values(objectDataMap).some((data) => data.records && data.records.length > 0);
+    ((se.style.opacity = hasRecords ? "1" : "0.5"),
+      (se.style.pointerEvents = hasRecords ? "auto" : "none"));
+  };
+
+  t.orgInfo().then((M) => {
+    g = zc(M);
+    const K = M?.name ? ` · ${M.name}` : "";
+    (g === "sandbox"
+      ? ((r.textContent = `✅ Sandbox org${K} — safe to generate data.`),
+        (r.style.color = n.ok))
+      : g === "scratch"
+        ? ((r.textContent = `✅ Scratch / trial org${K} — safe to generate data.`),
+          (r.style.color = n.ok))
+        : g === "production"
+          ? ((r.innerHTML = `⛔ <b>Production org detected${K}</b> — you'll be asked to confirm before any records are inserted.`),
+            (r.style.color = n.danger))
+          : ((r.textContent =
+              "⚠️ Could not verify org type — you'll be asked to confirm before inserting."),
+            (r.style.color = n.warn)),
+      De());
+  });
+
+  t.listObjects().then((M) => {
+    M.slice(0, 2e3).forEach((K) => {
+      allAvailableObjects.set(K.name, K.label || K.name);
+      const j = document.createElement("option");
+      ((j.value = K.name), (j.label = K.label), N.appendChild(j));
+    });
+  });
+
+  b.addEventListener("input", () => {
+    const val = b.value.trim();
+    const matchedKey = Array.from(allAvailableObjects.keys()).find(k => k.toLowerCase() === val.toLowerCase());
+    if (matchedKey && !selectedObjects.includes(matchedKey)) {
+      selectedObjects.push(matchedKey);
+      b.value = "";
+      renderChips();
+    }
+  });
+
+  const re = () => !(g === "sandbox" || g === "scratch");
+
+  function Be(M) {
+    const K = Xe("div", {
+        position: "absolute",
+        inset: "0",
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: "10",
+        padding: "20px",
+      }),
+      j = Xe("div", {
+        maxWidth: "420px",
+        width: "100%",
+        background: n.panel,
+        border: `1px solid ${n.danger}`,
+        borderRadius: "14px",
+        padding: "20px",
+        boxShadow: "0 10px 40px rgba(0,0,0,0.35)",
+      });
+    
+    let totalRecords = 0;
+    Object.values(objectDataMap).forEach(d => {
+      totalRecords += (d.records || []).length;
+    });
+
+    (j.appendChild(
+      Xe(
+        "div",
+        {
+          fontSize: "15px",
+          fontWeight: "800",
+          color: n.danger,
+          marginBottom: "8px",
+        },
+        "⚠️ This is not a sandbox or scratch org",
+      ),
+    ),
+      j.appendChild(
+        Xe(
+          "div",
+          {
+            fontSize: "13px",
+            color: n.text,
+            lineHeight: "1.5",
+            marginBottom: "16px",
+          },
+          `You're about to insert ${totalRecords} records across ${selectedObjects.length} objects. This tool is meant for sandbox & scratch orgs — inserting test data into a production org can be hard to undo. Continue only if you're sure.`,
+        ),
+      ));
+    const q = Xe("div", {
+        display: "flex",
+        gap: "10px",
+        justifyContent: "flex-end",
+      }),
+      P = Xe(
+        "button",
+        {
+          background: "transparent",
+          border: `1px solid ${n.border}`,
+          color: n.text,
+          borderRadius: "8px",
+          padding: "8px 16px",
+          cursor: "pointer",
+          fontSize: "13px",
+          fontWeight: "600",
+          fontFamily: "inherit",
+        },
+        "Cancel",
+      ),
+      ee = Xe(
+        "button",
+        {
+          background: n.danger,
+          border: "none",
+          color: "#fff",
+          borderRadius: "8px",
+          padding: "8px 16px",
+          cursor: "pointer",
+          fontSize: "13px",
+          fontWeight: "700",
+          fontFamily: "inherit",
+        },
+        "Insert anyway",
+      );
+    (P.addEventListener("click", () => K.remove()),
+      ee.addEventListener("click", () => {
+        (K.remove(), M());
+      }),
+      q.appendChild(P),
+      q.appendChild(ee),
+      j.appendChild(q),
+      K.appendChild(j),
+      i.appendChild(K));
+  }
+
+  async function be(M) {
+    const K = { lookups: {}, seq: Date.now() % 1e5 },
+      j = [],
+      q = Array.from(new Set(M.map((P) => P.referenceTo[0]).filter(Boolean)));
+    for (const P of q) {
+      const ee = await t.queryRecords(`SELECT Id FROM ${P} LIMIT 50`);
+      K.lookups[P] = (ee.records || []).map((G) => G.Id).filter(Boolean);
+    }
+    return (
+      M.forEach((P) => {
+        ei(P) &&
+          !(K.lookups[P.referenceTo[0]] || []).length &&
+          j.push(`${P.label} → needs an existing ${P.referenceTo[0]}`);
+      }),
+      { ctx: K, missing: j }
+    );
+  }
+
+  const X = (M, K, j = n.muted) => {
+    ((M.innerHTML = ""),
+      M.appendChild(
+        Xe(
+          "div",
+          {
+            padding: "18px 4px",
+            color: j,
+            fontSize: "13px",
+            fontWeight: "600",
+          },
+          K,
+        ),
+      ));
+  };
+
+  async function ge() {
+    if (!selectedObjects.length) {
+      t.flashToast("Pick at least one object first");
+      return;
+    }
+    let K = parseInt(k.value, 10) || 0;
+    ((K = Math.max(1, Math.min(200, K))),
+      (k.value = String(K)),
+      (D.innerHTML = ""),
+      (U.innerHTML = ""),
+      (objectDataMap = {}),
+      X(D, "Analyzing object schemas…"));
+
+    for (const obj of selectedObjects) {
+      objectDataMap[obj] = {
+        fields: [],
+        records: [],
+        insertedIds: [],
+        collapsed: true,
+        error: null,
+        missingLookups: []
+      };
+
+      const j = await t.describeObject(obj);
+      if (j.error || !j.fields) {
+        objectDataMap[obj].error = j.error || "Could not describe this object.";
+        continue;
+      }
+      if (j.createable === !1) {
+        objectDataMap[obj].error = "Object not createable.";
+        continue;
+      }
+      
+      const fields = j.fields;
+      objectDataMap[obj].fields = fields;
+      
+      const q = x.checked,
+        P = fields.filter(
+          (w) => pa(w) && !w.defaultedOnCreate && (ei(w) || (q && w.nillable)),
+        ),
+        ee = P.filter((w) => w.type === "reference");
+      
+      const { ctx: G, missing: T } = await be(ee);
+      if (T.length) {
+        objectDataMap[obj].missingLookups = T;
+        continue;
+      }
+
+      const records = [];
+      for (let w = 0; w < K; w++) {
+        const H = { attributes: { type: obj } };
+        (P.forEach((p) => {
+          const A = ua(p, w, G);
+          A != null && A !== "" && (H[p.name] = A);
+        }),
+          records.push(H));
+      }
+      objectDataMap[obj].records = records;
+      objectDataMap[obj].fillableFields = P;
+    }
+
+    ue();
+  }
+
+  function ue() {
+    D.innerHTML = "";
+    
+    selectedObjects.forEach((obj) => {
+      const data = objectDataMap[obj];
+      if (!data) return;
+
+      const objContainer = Xe("div", {
+        border: `1px solid ${n.border}`,
+        borderRadius: "12px",
+        overflow: "hidden",
+        marginBottom: "12px",
+        background: n.panel,
+      });
+
+      const header = Xe("div", {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "12px",
+        padding: "10px 14px",
+        background: n.headerBg,
+        borderBottom: data.collapsed ? "none" : `1px solid ${n.border}`,
+        cursor: "pointer",
+      });
+
+      const label = allAvailableObjects.get(obj) || obj;
+      let statusText = "";
+      let statusColor = n.muted;
+
+      if (data.error) {
+        statusText = `⛔ Error: ${data.error}`;
+        statusColor = n.danger;
+      } else if (data.missingLookups && data.missingLookups.length > 0) {
+        statusText = `⚠️ Missing Lookups`;
+        statusColor = n.warn;
+      } else {
+        statusText = `✅ Ready (${data.records.length} records)`;
+        statusColor = n.ok;
+      }
+
+      const titleContainer = Xe("div", { display: "flex", alignItems: "center", gap: "10px" });
+      titleContainer.appendChild(Xe("span", { fontWeight: "700", fontSize: "13px" }, label));
+      titleContainer.appendChild(Xe("span", { fontSize: "11.5px", color: statusColor }, statusText));
+      header.appendChild(titleContainer);
+
+      const actionContainer = Xe("div", { display: "flex", alignItems: "center", gap: "8px" });
+      if (!data.error && (!data.missingLookups || data.missingLookups.length === 0)) {
+        const toggleBtn = Xe("button", {
+          background: "transparent",
+          border: `1px solid ${n.border}`,
+          color: n.text,
+          borderRadius: "6px",
+          padding: "3px 8px",
+          fontSize: "11.5px",
+          cursor: "pointer",
+        }, data.collapsed ? "👁️ View Fields" : "🙈 Hide Fields");
+        
+        toggleBtn.addEventListener("click", (evt) => {
+          evt.stopPropagation();
+          data.collapsed = !data.collapsed;
+          ue();
+        });
+        actionContainer.appendChild(toggleBtn);
+      }
+      header.appendChild(actionContainer);
+
+      header.addEventListener("click", () => {
+        if (!data.error && (!data.missingLookups || data.missingLookups.length === 0)) {
+          data.collapsed = !data.collapsed;
+          ue();
+        }
+      });
+
+      objContainer.appendChild(header);
+
+      if (!data.collapsed && data.records && data.records.length > 0) {
+        const tableContainer = Xe("div", { padding: "10px" });
+        
+        if (data.missingLookups && data.missingLookups.length > 0) {
+          const w = Xe("div", {
+            padding: "14px",
+            borderRadius: "10px",
+            border: `1px solid ${n.danger}`,
+            background: e ? "rgba(239,68,68,0.10)" : "rgba(239,68,68,0.06)",
+            color: e ? "#fca5a5" : "#b91c1c",
+            fontSize: "13px",
+            marginBottom: "10px"
+          });
+          w.appendChild(Xe("div", { fontWeight: "700", marginBottom: "6px" }, "Missing required related records:"));
+          data.missingLookups.forEach((H) => w.appendChild(Xe("div", { fontSize: "12.5px" }, `• ${H}`)));
+          tableContainer.appendChild(w);
+        } else {
+          const controls = Xe("div", {
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "8px",
+          });
+          controls.appendChild(Xe("span", { fontSize: "11.5px", color: n.muted }, `Preview - Row 1 of ${data.records.length}`));
+          
+          const applyAllLabel = Xe("label", {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            fontSize: "11.5px",
+            color: n.muted,
+            cursor: "pointer"
+          });
+          const applyAllCheckbox = Xe("input");
+          applyAllCheckbox.type = "checkbox";
+          applyAllLabel.appendChild(applyAllCheckbox);
+          applyAllLabel.appendChild(document.createTextNode("Apply edits to all rows"));
+          controls.appendChild(applyAllLabel);
+          tableContainer.appendChild(controls);
+
+          const T = Xe("table", {
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: "12.5px",
+            tableLayout: "fixed",
+          });
+          const w = data.records[0] || {};
+          
+          data.fillableFields.forEach((Q, S) => {
+            const Y = Xe("tr", { borderTop: S === 0 ? "none" : `1px solid ${n.divider}` });
+            Y.appendChild(Xe("td", { padding: "8px 14px", width: "34%", wordBreak: "break-word" }, `${Q.label}${ei(Q) ? " *" : ""}`));
+            Y.appendChild(Xe("td", { padding: "8px 14px", width: "22%", color: n.muted }, Me(Q)));
+            
+            const Se = w[Q.name];
+            const oe = Xe("td", { padding: "5px 10px" });
+            const we = Xe("input", {
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "6px 8px",
+              fontSize: "12.5px",
+              fontFamily: "monospace",
+              border: `1px solid ${n.border}`,
+              borderRadius: "6px",
+              background: n.panel,
+              color: n.text,
+              outline: "none",
+            });
+            we.value = Se === void 0 ? "" : String(Se);
+            we.placeholder = "—";
+            we.addEventListener("change", () => {
+              const Te = Gc(Q, we.value);
+              (applyAllCheckbox.checked ? data.records : data.records[0] ? [data.records[0]] : []).forEach((fe) => {
+                Te === void 0 ? delete fe[Q.name] : (fe[Q.name] = Te);
+              });
+              if (Te !== void 0) we.value = String(Te);
+            });
+            
+            oe.appendChild(we);
+            Y.appendChild(oe);
+            T.appendChild(Y);
+          });
+
+          data.fields.filter((Q) => Q.calculated || Q.autoNumber).slice(0, 2).forEach((Q) => {
+            const S = Xe("tr", { borderTop: `1px solid ${n.divider}` });
+            S.appendChild(Xe("td", { padding: "8px 14px", color: n.faint }, Q.label));
+            S.appendChild(Xe("td", { padding: "8px 14px", color: n.faint }, Q.autoNumber ? "Auto-number" : "Formula"));
+            S.appendChild(Xe("td", { padding: "8px 14px", color: n.faint, fontStyle: "italic" }, "skipped — not writeable"));
+            T.appendChild(S);
+          });
+
+          tableContainer.appendChild(T);
+        }
+
+        objContainer.appendChild(tableContainer);
+      }
+
+      D.appendChild(objContainer);
+    });
+
+    const p = Xe("div", {
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        marginTop: "12px",
+      });
+    
+    let totalGeneratedRecords = 0;
+    Object.values(objectDataMap).forEach((d) => {
+      totalGeneratedRecords += (d.records || []).length;
+    });
+
+    const A = Xe(
+      "span",
+      { fontSize: "12px", color: n.muted },
+      `Generated records ready for ${selectedObjects.length} objects (${totalGeneratedRecords} records total)`,
+    );
+    (p.appendChild(A),
+      (se = Xe(
+        "button",
+        {
+          marginLeft: "auto",
+          background: n.ok,
+          border: "none",
+          color: "#fff",
+          borderRadius: "8px",
+          padding: "9px 18px",
+          cursor: "pointer",
+          fontSize: "13px",
+          fontWeight: "700",
+          fontFamily: "inherit",
+        },
+        `⬆ Insert All Records`,
+      )),
+      se.addEventListener("click", ye),
+      p.appendChild(se),
+      D.appendChild(p),
+      De());
+  }
+
+  const Me = (M) =>
+    M.type === "string" || M.type === "textarea"
+      ? `Text(${M.length || "?"})`
+      : M.type === "reference"
+        ? `Lookup(${M.referenceTo[0] || "?"})`
+        : M.type.charAt(0).toUpperCase() + M.type.slice(1);
+
+  function ye() {
+    const hasRecords = Object.values(objectDataMap).some((data) => data.records && data.records.length > 0);
+    if (hasRecords) {
+      if (re()) {
+        Be(te);
+        return;
+      }
+      te();
+    }
+  }
+
+  async function te() {
+    if (se) {
+      se.textContent = "Inserting All…";
+      se.style.pointerEvents = "none";
+    }
+
+    let overallSuccessCount = 0;
+    let overallTotalCount = 0;
+    const failures = [];
+    const allInsertedIds = [];
+
+    for (const obj of selectedObjects) {
+      const data = objectDataMap[obj];
+      if (!data || !data.records || data.records.length === 0) continue;
+
+      const res = await t.insertRecords(obj, data.records);
+      if (res.error) {
+        failures.push(`${obj}: ${res.error}`);
+        continue;
+      }
+
+      const results = res.results || [];
+      const successes = results.filter((q) => q.success && q.id).map((q) => q.id);
+      data.insertedIds = successes;
+      allInsertedIds.push(...successes);
+
+      overallSuccessCount += successes.length;
+      overallTotalCount += results.length;
+
+      const objFailures = results.filter((q) => !q.success).map((q) => {
+        const P = (q.errors && q.errors[0]) || {};
+        return `${obj} - ${P.statusCode || "ERROR"}: ${P.message || "insert failed"}`;
+      });
+      failures.push(...objFailures);
+    }
+
+    z(overallSuccessCount, overallTotalCount, Le(failures), allInsertedIds);
+  }
+
+  const Le = (M) => Array.from(new Set(M)).slice(0, 8);
+
+  function z(successCount, totalCount, failuresList, insertedIds) {
+    U.innerHTML = "";
+    const q = Xe("div", {
+      border: `1px solid ${successCount > 0 ? n.ok : n.danger}`,
+      borderRadius: "12px",
+      padding: "14px",
+      background: e ? "rgba(255,255,255,0.02)" : "#fff",
+    });
+
+    q.appendChild(
+      Xe(
+        "div",
+        {
+          fontSize: "14px",
+          fontWeight: "800",
+          color: successCount > 0 ? n.ok : n.danger,
+        },
+        `Inserted ${successCount} of ${totalCount} records`,
+      ),
+    );
+
+    if (failuresList.length) {
+      q.appendChild(
+        Xe(
+          "div",
+          { fontSize: "12px", color: n.muted, margin: "8px 0 4px" },
+          `${totalCount - successCount} failed — top reasons:`,
+        ),
+      );
+      const P = Xe("pre", {
+        margin: "0",
+        padding: "10px 12px",
+        borderRadius: "8px",
+        background: e ? "rgba(239,68,68,0.10)" : "rgba(239,68,68,0.06)",
+        color: e ? "#fca5a5" : "#b91c1c",
+        fontSize: "12px",
+        whiteSpace: "pre-wrap",
+        fontFamily: "monospace",
+      });
+      ((P.textContent = failuresList.join(`\n`)),
+        q.appendChild(P));
+    }
+
+    if (insertedIds.length) {
+      const P = Xe("div", {
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          marginTop: "12px",
+          flexWrap: "wrap",
+        }),
+        ee = Xe(
+          "button",
+          {
+            background: "transparent",
+            border: `1px solid ${n.border}`,
+            color: n.text,
+            borderRadius: "8px",
+            padding: "7px 12px",
+            cursor: "pointer",
+            fontSize: "12.5px",
+            fontWeight: "600",
+            fontFamily: "inherit",
+          },
+          "↗ Open first record",
+        );
+      ee.addEventListener("click", () =>
+        window.open(t.recordUrl(insertedIds[0]), "_blank"),
+      );
+
+      const G = Xe(
+        "button",
+        {
+          background: "transparent",
+          border: `1px solid ${n.danger}`,
+          color: n.danger,
+          borderRadius: "8px",
+          padding: "7px 12px",
+          cursor: "pointer",
+          fontSize: "12.5px",
+          fontWeight: "700",
+          fontFamily: "inherit",
+        },
+        `🗑 Delete these ${insertedIds.length} records`,
+      );
+      G.addEventListener("click", async () => {
+        ((G.textContent = "Deleting…"), (G.style.pointerEvents = "none"));
+        const T = await t.deleteRecords(insertedIds);
+        if (T.error) {
+          (t.flashToast(T.error),
+            (G.textContent = "Delete failed — retry"),
+            (G.style.pointerEvents = "auto"));
+          return;
+        }
+        (t.flashToast(`Deleted ${insertedIds.length} records`),
+          insertedIds.length = 0,
+          (U.innerHTML = ""));
+      });
+
+      P.appendChild(ee);
+      P.appendChild(G);
+      q.appendChild(P);
+    }
+
+    U.appendChild(q);
+    if (se) {
+      se.textContent = `⬆ Insert All Records`;
+      De();
+    }
+  }
+
+  L.addEventListener("click", ge);
+}
 function Qc(o, t) {
   const e = t.isDark,
     n = kt(e);
@@ -10410,9 +11291,9 @@ function Qc(o, t) {
     fontFamily: "inherit",
     outline: "none",
   });
-  ((b.placeholder = "Account"), b.setAttribute("list", "sample-obj-list"));
+  ((b.placeholder = "Account"), b.setAttribute("list", "sample-obj-list-single"));
   const N = Xe("datalist");
-  ((N.id = "sample-obj-list"),
+  ((N.id = "sample-obj-list-single"),
     u.appendChild(b),
     u.appendChild(N),
     E.appendChild(u));
@@ -10465,7 +11346,7 @@ function Qc(o, t) {
       cursor: "pointer",
     }),
     x = Xe("input");
-  ((x.type = "checkbox"),
+  ((x.type = "checkbox"), (x.checked = true),
     O.appendChild(x),
     O.appendChild(
       document.createTextNode(
@@ -10960,8 +11841,7 @@ function Qc(o, t) {
         whiteSpace: "pre-wrap",
         fontFamily: "monospace",
       });
-      ((P.textContent = j.join(`
-`)),
+      ((P.textContent = j.join(`\n`)),
         q.appendChild(P));
     }
     if (Z.length) {
@@ -33038,6 +33918,7 @@ ${at.error}`),
             x === "accessmap" ||
             x === "dataimport" ||
             x === "sampledata" ||
+            x === "sampledatabulk" ||
             x === "magicfill" ||
             x === "whereused" ||
             x === "restexplorer" ||
@@ -33205,6 +34086,70 @@ ${at.error}`),
                 });
               });
             Qc(C, {
+              isDark: he,
+              onBack: Pe,
+              flashToast: ot,
+              recordUrl: (ce) => `${bt()}/${ce}`,
+              listObjects: () => new Promise((ce) => uo((pe) => ce(pe))),
+              describeObject: (ce) =>
+                Ce({ type: "DESCRIBE_FOR_SAMPLE", objectApiName: ce }).then(
+                  (pe) => (pe.success ? pe.data : { error: pe.error }),
+                ),
+              orgInfo: () =>
+                Ce({ type: "GET_ORG_INFO" }).then((ce) =>
+                  ce.success && ce.data
+                    ? {
+                        isSandbox: ce.data.IsSandbox === !0,
+                        orgType: ce.data.OrganizationType || "",
+                        trialExpiration: ce.data.TrialExpirationDate || null,
+                        name: ce.data.Name,
+                      }
+                    : null,
+                ),
+              queryRecords: Ue,
+              insertRecords: (ce, pe) =>
+                Ce({
+                  type: "DATA_IMPORT",
+                  operation: "insert",
+                  allOrNone: !1,
+                  records: pe,
+                }).then((Ee) =>
+                  Ee.success ? { results: Ee.results } : { error: Ee.error },
+                ),
+              deleteRecords: (ce) =>
+                Ce({
+                  type: "DATA_IMPORT",
+                  operation: "delete",
+                  ids: ce,
+                  allOrNone: !1,
+                }).then((pe) =>
+                  pe.success ? { results: pe.results } : { error: pe.error },
+                ),
+            });
+            return;
+          }
+          if (x === "sampledatabulk") {
+            const Ce = (ce) =>
+              new Promise((pe) => {
+                it().then((Ee) => {
+                  if (!Ee?.instanceUrl || !Ee?.sessionId) {
+                    pe({
+                      success: !1,
+                      error: "Salesforce session not detected",
+                    });
+                    return;
+                  }
+                  globalThis.chrome.runtime.sendMessage(
+                    {
+                      instanceUrl: Ee.instanceUrl,
+                      sessionId: Ee.sessionId,
+                      ...ce,
+                    },
+                    (Ye) => pe(Ye || { success: !1, error: "No response" }),
+                  );
+                });
+              });
+            QcBulk(C, {
               isDark: he,
               onBack: Pe,
               flashToast: ot,
@@ -33970,6 +34915,15 @@ ${at.error}`),
               desc: "Generate test records (sandbox & scratch only)",
               run: () => {
                 ((u.value = ""), (x = "sampledata"), oe());
+              },
+            },
+            {
+              id: "sampledatabulk",
+              icon: "🧪",
+              label: "Sample Data (Bulk)",
+              desc: "Generate test records for multiple objects at once",
+              run: () => {
+                ((u.value = ""), (x = "sampledatabulk"), oe());
               },
             },
             {
