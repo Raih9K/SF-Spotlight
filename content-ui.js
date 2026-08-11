@@ -35503,6 +35503,448 @@ function Ju() {
         document.addEventListener("keydown", g, !0);
       }));
 }
+// Flow Tools Helpers and Logic
+function jsonToXml(json, rootName = 'Flow') {
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+  xml += `<${rootName} xmlns="http://soap.sforce.com/2006/04/metadata">\n`;
+  
+  function convert(obj, indent = '    ') {
+    let s = '';
+    const keys = Object.keys(obj).sort();
+    for (const key of keys) {
+      if (obj[key] === null || obj[key] === undefined) continue;
+      const val = obj[key];
+      if (Array.isArray(val)) {
+        val.forEach(item => {
+          s += `${indent}<${key}>\n`;
+          if (typeof item === 'object') {
+            s += convert(item, indent + '    ');
+          } else {
+            s += `${indent}    ${escapeXml(item)}\n`;
+          }
+          s += `${indent}</${key}>\n`;
+        });
+      } else if (typeof val === 'object') {
+        s += `${indent}<${key}>\n`;
+        s += convert(val, indent + '    ');
+        s += `${indent}</${key}>\n`;
+      } else {
+        s += `${indent}<${key}>${escapeXml(val)}</${key}>\n`;
+      }
+    }
+    return s;
+  }
+  
+  function escapeXml(unsafe) {
+    return String(unsafe)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+  
+  xml += convert(json);
+  xml += `</${rootName}>`;
+  return xml;
+}
+
+function xmlToJson(xmlStr) {
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(xmlStr, "text/xml");
+  const root = xmlDoc.documentElement;
+  
+  const arrayKeys = new Set([
+    'actionCalls', 'apexClassInputParameters', 'assignments', 'choices', 'collectionProcessors',
+    'constants', 'decisions', 'formulas', 'inputParameters', 'loops', 'outputParameters',
+    'processMetadataValues', 'recordCreates', 'recordDeletes', 'recordLookups', 'recordUpdates',
+    'rules', 'screens', 'stages', 'startElementReference', 'steps', 'textTemplates', 'variables',
+    'fields', 'sortFields', 'stageSteps', 'conditions', 'inputAssignments', 'outputAssignments',
+    'items', 'filters', 'queriedFields'
+  ]);
+
+  function parseNode(node) {
+    const childNodes = Array.from(node.childNodes);
+    const isTextOnly = childNodes.every(c => c.nodeType === 3 || c.nodeType === 8);
+    if (isTextOnly) {
+      const txt = node.textContent.trim();
+      if (txt === 'true') return true;
+      if (txt === 'false') return false;
+      if (!isNaN(txt) && txt !== '') return Number(txt);
+      return txt;
+    }
+    
+    const obj = {};
+    childNodes.forEach(child => {
+      if (child.nodeType !== 1) return;
+      const key = child.nodeName;
+      const val = parseNode(child);
+      
+      if (arrayKeys.has(key)) {
+        if (!obj[key]) {
+          obj[key] = [];
+        }
+        obj[key].push(val);
+      } else {
+        if (obj.hasOwnProperty(key)) {
+          if (!Array.isArray(obj[key])) {
+            obj[key] = [obj[key]];
+          }
+          obj[key].push(val);
+        } else {
+          obj[key] = val;
+        }
+      }
+    });
+    return obj;
+  }
+  
+  return parseNode(root);
+}
+
+function callFlowApi(endpoint, method = "GET", body = null) {
+  return new Promise((resolve, reject) => {
+    it().then(creds => {
+      if (!creds?.instanceUrl || !creds?.sessionId) {
+        reject(new Error("Salesforce session not detected."));
+        return;
+      }
+      globalThis.chrome.runtime.sendMessage({
+        type: "REST_EXPLORE",
+        instanceUrl: creds.instanceUrl,
+        sessionId: creds.sessionId,
+        endpoint: endpoint,
+        method: method,
+        body: body ? JSON.stringify(body) : null
+      }, response => {
+        if (!response || !response.success) {
+          reject(new Error(response?.error || "Background script communication failed."));
+        } else {
+          const res = response.data;
+          if (!res.ok) {
+            reject(new Error(res.body || `HTTP ${res.status}: ${res.statusText}`));
+          } else {
+            let data = null;
+            if (res.body) {
+              try {
+                data = JSON.parse(res.body);
+              } catch {
+                data = res.body;
+              }
+            }
+            resolve(data);
+          }
+        }
+      });
+    });
+  });
+}
+
+function handleFlowCopyXml() {
+  const match = window.location.href.match(/[?&]flowId=([^&]+)/);
+  if (!match) {
+    ot("Could not detect Flow ID from URL", "error");
+    return;
+  }
+  const flowId = match[1];
+  ot("Fetching flow metadata...", "info");
+  callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "GET")
+    .then(data => {
+      if (!data?.Metadata) {
+        ot("No metadata found in flow record", "error");
+        return;
+      }
+      const xml = jsonToXml(data.Metadata);
+      navigator.clipboard.writeText(xml)
+        .then(() => {
+          ot("Flow XML copied to clipboard!", "success");
+        })
+        .catch(err => {
+          ot("Failed to copy to clipboard: " + err.message, "error");
+        });
+    })
+    .catch(err => {
+      ot("Error fetching flow: " + err.message, "error");
+    });
+}
+
+function handleFlowDownloadXml() {
+  const match = window.location.href.match(/[?&]flowId=([^&]+)/);
+  if (!match) {
+    ot("Could not detect Flow ID from URL", "error");
+    return;
+  }
+  const flowId = match[1];
+  ot("Fetching flow metadata for download...", "info");
+  callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "GET")
+    .then(data => {
+      if (!data?.Metadata) {
+        ot("No metadata found in flow record", "error");
+        return;
+      }
+      const xml = jsonToXml(data.Metadata);
+      const filename = `${data.FullName || 'flow'}.flow-meta.xml`;
+      const blob = new Blob([xml], { type: "text/xml;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      ot("Flow XML downloaded successfully!", "success");
+    })
+    .catch(err => {
+      ot("Error downloading flow: " + err.message, "error");
+    });
+}
+
+function handleFlowUploadXml() {
+  const match = window.location.href.match(/[?&]flowId=([^&]+)/);
+  if (!match) {
+    ot("Could not detect Flow ID from URL", "error");
+    return;
+  }
+  const flowId = match[1];
+  
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.xml';
+  input.style.display = 'none';
+  
+  input.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const xmlStr = evt.target.result;
+      try {
+        const metadata = xmlToJson(xmlStr);
+        ot("Checking flow version status...", "info");
+        
+        callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "GET")
+          .then(currentFlow => {
+            const isActive = currentFlow.Status === 'Active';
+            const fullName = currentFlow.FullName;
+            
+            if (isActive) {
+              if (confirm("The version of the flow you're updating is active and can't be overwritten. Would you like to save it as a new version?")) {
+                ot("Saving as new version...", "info");
+                callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow`, "POST", {
+                  FullName: fullName,
+                  Metadata: metadata
+                })
+                .then(res => {
+                  if (res && res.id) {
+                    ot("Saved as new version successfully! Redirecting...", "success");
+                    setTimeout(() => {
+                      window.location.href = window.location.href.replace(/flowId=[^&]+/, "flowId=" + res.id);
+                    }, 1500);
+                  } else {
+                    ot("Failed to save as new version", "error");
+                  }
+                })
+                .catch(err => {
+                  ot("Save failed: " + err.message, "error");
+                });
+              }
+            } else {
+              ot("Uploading flow XML...", "info");
+              callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "PATCH", { Metadata: metadata })
+                .then(() => {
+                  ot("Flow XML uploaded successfully! Reloading...", "success");
+                  setTimeout(() => {
+                    window.location.reload();
+                  }, 1500);
+                })
+                .catch(err => {
+                  ot("Upload failed: " + err.message, "error");
+                });
+            }
+          })
+          .catch(err => {
+            ot("Error checking flow status: " + err.message, "error");
+          });
+      } catch (err) {
+        ot("Invalid XML file structure: " + err.message, "error");
+      }
+    };
+    reader.readAsText(file);
+  });
+  
+  document.body.appendChild(input);
+  input.click();
+  document.body.removeChild(input);
+}
+
+function handleFlowDeleteVersion() {
+  const match = window.location.href.match(/[?&]flowId=([^&]+)/);
+  if (!match) {
+    ot("Could not detect Flow ID from URL", "error");
+    return;
+  }
+  const flowId = match[1];
+  
+  if (confirm("Are you sure you want to delete this flow version? This cannot be undone.")) {
+    ot("Deleting flow version...", "info");
+    callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "DELETE")
+      .then(() => {
+        ot("Flow version deleted successfully! Redirecting...", "success");
+        setTimeout(() => {
+          window.location.href = window.location.href.split('/builder_platform_interaction/')[0] + "/lightning/setup/Flows/home";
+        }, 1500);
+      })
+      .catch(err => {
+        ot("Delete failed: " + err.message, "error");
+      });
+  }
+}
+
+function injectFlowToolsMenu() {
+  if (document.getElementById("sf-flow-tools-menu-container")) return;
+  
+  // Find Flow Builder toolbar lists
+  let buttonGroups = document.querySelectorAll('.builder-header .slds-button-group-list');
+  if (!buttonGroups || buttonGroups.length === 0) {
+    buttonGroups = document.querySelectorAll('.slds-button-group-list');
+  }
+                       
+  let targetSibling = null;
+  let parentNode = null;
+  
+  if (buttonGroups && buttonGroups.length > 0) {
+    // Insert before the first button group list (so it's positioned stably before Run/Debug)
+    targetSibling = buttonGroups[0];
+    parentNode = targetSibling.parentNode;
+  } else {
+    // Fallback search
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const targetBtn = buttons.find(b => {
+      const txt = b.textContent.trim();
+      return txt === 'Run' || txt === 'Debug' || txt === 'Save' || txt === 'Save As New Version' || txt === 'Deactivate';
+    });
+    if (targetBtn) {
+      const group = targetBtn.closest('.slds-button-group-list') || targetBtn.closest('.slds-button-group');
+      if (group) {
+        targetSibling = group;
+        parentNode = group.parentNode;
+      } else {
+        targetSibling = targetBtn;
+        parentNode = targetBtn.parentNode;
+      }
+    }
+  }
+  
+  if (!parentNode || !targetSibling) return;
+  
+  const container = document.createElement('div');
+  container.id = "sf-flow-tools-menu-container";
+  Object.assign(container.style, {
+    position: "relative",
+    display: "inline-block",
+    marginRight: "0.5rem",
+    verticalAlign: "middle"
+  });
+  
+  const button = document.createElement('button');
+  button.className = "slds-button slds-button_neutral";
+  button.innerHTML = 'Flow Tools <span style="font-size: 8px; margin-left: 5px; vertical-align: middle;">▼</span>';
+  Object.assign(button.style, {
+    height: "32px",
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "0 12px"
+  });
+  
+  const dropdown = document.createElement('div');
+  dropdown.id = "sf-flow-tools-dropdown";
+  Object.assign(dropdown.style, {
+    position: "absolute",
+    top: "100%",
+    left: "0",
+    marginTop: "4px",
+    background: "#ffffff",
+    border: "1px solid #c9c9c9",
+    borderRadius: "4px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+    zIndex: "999999",
+    minWidth: "160px",
+    display: "none",
+    fontFamily: "sans-serif"
+  });
+  
+  const menuList = document.createElement('ul');
+  Object.assign(menuList.style, {
+    listStyle: "none",
+    margin: "0",
+    padding: "4px 0",
+    textAlign: "left"
+  });
+  
+  const menuItems = [
+    { label: "Copy XML", action: handleFlowCopyXml },
+    { label: "Download XML", action: handleFlowDownloadXml },
+    { label: "Upload XML", action: handleFlowUploadXml },
+    { label: "Delete Version", action: handleFlowDeleteVersion, style: { color: "#ea001e" } }
+  ];
+  
+  menuItems.forEach(item => {
+    const li = document.createElement('li');
+    li.textContent = item.label;
+    Object.assign(li.style, {
+      padding: "8px 16px",
+      cursor: "pointer",
+      fontSize: "13px",
+      color: "#080707",
+      backgroundColor: "transparent",
+      transition: "background-color 0.1s ease",
+      ...item.style
+    });
+    
+    li.addEventListener('mouseenter', () => {
+      li.style.backgroundColor = "#f3f2f2";
+    });
+    li.addEventListener('mouseleave', () => {
+      li.style.backgroundColor = "transparent";
+    });
+    
+    li.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dropdown.style.display = "none";
+      item.action();
+    });
+    
+    menuList.appendChild(li);
+  });
+  
+  dropdown.appendChild(menuList);
+  container.appendChild(button);
+  container.appendChild(dropdown);
+  
+  button.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isVisible = dropdown.style.display === "block";
+    document.querySelectorAll('#sf-flow-tools-dropdown').forEach(d => d.style.display = "none");
+    dropdown.style.display = isVisible ? "none" : "block";
+  });
+  
+  document.addEventListener('click', () => {
+    dropdown.style.display = "none";
+  });
+  
+  parentNode.insertBefore(container, targetSibling);
+}
+
+function initFlowBuilderTools() {
+  const t = () => {
+    if (window.location.href.includes('flowBuilder.app') || window.location.href.includes('flowRedirect.app')) {
+      injectFlowToolsMenu();
+    }
+  };
+  t();
+  setInterval(t, 1500);
+}
+
 function Zu() {
   ((document.documentElement.style.height = "100%"),
     (document.body.style.margin = "0"),
@@ -35537,7 +35979,8 @@ function zs() {
             return "";
           }
         },
-      }));
+      }),
+      initFlowBuilderTools());
 }
 document.readyState === "loading"
   ? document.addEventListener("DOMContentLoaded", zs)
