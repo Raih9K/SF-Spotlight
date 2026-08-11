@@ -11859,7 +11859,7 @@ function hp(o, t) {
       rt(
         "div",
         { fontSize: "15px", fontWeight: "800", color: n.text },
-        "🔐 Name Access Comparison",
+        "🔐 Profile & PermissionSet Comparison",
       ),
     ),
     i.appendChild(s));
@@ -11930,14 +11930,24 @@ function hp(o, t) {
   });
   i.appendChild(E);
   let u = "objects";
+  const tabs = [
+    { id: "system", label: "🛡️ System" },
+    { id: "objects", label: "📦 Objects" },
+    { id: "fields", label: "🔑 FLS" },
+    { id: "apex", label: "☕ Apex" },
+    { id: "vf", label: "📄 VF Pages" },
+    { id: "custom", label: "🔑 Custom" },
+    { id: "dependency", label: "📊 Dependency" }
+  ];
   const b = rt("div", {
       display: "inline-flex",
       border: `1px solid ${n.border}`,
       borderRadius: "8px",
       overflow: "hidden",
+      flexWrap: "wrap",
     }),
     N = {};
-  ["objects", "fields"].forEach((P) => {
+  tabs.forEach(({ id: P, label: lbl }) => {
     const ee = rt(
       "button",
       {
@@ -11949,7 +11959,7 @@ function hp(o, t) {
         fontFamily: "inherit",
         color: n.muted,
       },
-      P === "objects" ? "Objects" : "Fields",
+      lbl,
     );
     (ee.addEventListener("click", () => {
       ((u = P), F(), te());
@@ -12050,10 +12060,14 @@ function hp(o, t) {
       ["E", "Edit"],
     ],
     re = () => {
-      const P = (u === "objects" ? Z : X)
-        .map(([ee, G]) => C(ee, G))
-        .join(" &nbsp;·&nbsp; ");
-      V.innerHTML = `Access: ${P}<br><span style="color:${n.grant}">■</span> granted &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
+      if (u === "objects" || u === "fields") {
+        const P = (u === "objects" ? Z : X)
+          .map(([ee, G]) => C(ee, G))
+          .join(" &nbsp;·&nbsp; ");
+        V.innerHTML = `Access: ${P}<br><span style="color:${n.grant}">■</span> granted &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
+      } else {
+        V.innerHTML = `Access / Assignment:<br><span style="color:${n.grant}">■</span> granted / assigned &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted / assigned &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
+      }
     },
     se = rt("div", { flex: "1", minHeight: "0", overflow: "auto" });
   i.appendChild(se);
@@ -12069,7 +12083,7 @@ function hp(o, t) {
   (ge("Loading permission sets & profiles…"),
     t
       .runQuery(
-        "SELECT Id, Label, Name, IsOwnedByProfile, Profile.Name FROM PermissionSet ORDER BY IsOwnedByProfile DESC, Label LIMIT 2000",
+        "SELECT Id, Label, Name, IsOwnedByProfile, Profile.Name, Type FROM PermissionSet ORDER BY IsOwnedByProfile DESC, Label LIMIT 2000",
       )
       .then(({ records: P, error: ee }) => {
         if (ee) {
@@ -12079,9 +12093,12 @@ function hp(o, t) {
         ((De = P.map((G) => ({
           id: G.Id,
           isProfile: !!G.IsOwnedByProfile,
+          isGroup: G.Type === "Group",
           label: G.IsOwnedByProfile
             ? `Profile: ${G.Profile?.Name || G.Label}`
-            : G.Label || G.Name,
+            : G.Type === "Group"
+              ? `Group: ${G.Label || G.Name}`
+              : G.Label || G.Name,
         })).sort((G, T) => G.label.localeCompare(T.label))),
           ue(y),
           ue(g),
@@ -12095,20 +12112,23 @@ function hp(o, t) {
     const ee = rt("option");
     ((ee.value = ""), (ee.textContent = "— select —"), P.appendChild(ee));
     const G = De.filter((H) => H.isProfile),
-      T = De.filter((H) => !H.isProfile),
-      w = (H, p) => {
+      T = De.filter((H) => !H.isProfile && !H.isGroup),
+      psgs = De.filter((H) => H.isGroup),
+      w = (H, p, prefix) => {
         if (!p.length) return;
         const A = document.createElement("optgroup");
         ((A.label = H),
           p.forEach((Q) => {
             const S = rt("option");
             ((S.value = Q.id),
-              (S.textContent = Q.label.replace(/^Profile:\s*/, "")),
+              (S.textContent = Q.label.replace(prefix, "")),
               A.appendChild(S));
           }),
           P.appendChild(A));
       };
-    (w("Profiles", G), w("Permission Sets", T));
+    (w("Profiles", G, /^Profile:\s*/),
+     w("Permission Sets", T, ""),
+     w("Permission Set Groups", psgs, /^Group:\s*/));
   }
   (y.addEventListener("change", () => {
     ((Be = null), te());
@@ -12143,6 +12163,319 @@ function hp(o, t) {
         G
       );
     };
+
+  const renderStatus = (granted) => {
+    const span = rt("span", null, granted ? "■" : "A");
+    Object.assign(span.style, {
+      color: granted ? n.grant : n.faint,
+      textDecoration: granted ? "none" : "line-through",
+      opacity: granted ? "1" : "0.6",
+      fontWeight: "800",
+    });
+    return span;
+  };
+
+  let cachedSystemFields = null;
+  async function compareSystemPerms(P, ee) {
+    if (!cachedSystemFields) {
+      ge("Describing System Permissions...");
+      const creds = await it();
+      if (!creds || !creds.instanceUrl || !creds.sessionId) {
+        ge("Salesforce session not detected.");
+        return;
+      }
+      const fieldsRes = await new Promise((resolve) => {
+        globalThis.chrome.runtime.sendMessage(
+          {
+            type: "GET_OBJECT_FIELDS",
+            objectApiName: "PermissionSet",
+            instanceUrl: creds.instanceUrl,
+            sessionId: creds.sessionId,
+          },
+          (res) => resolve(res)
+        );
+      });
+      if (!fieldsRes || !fieldsRes.success || !fieldsRes.data) {
+        ge("Could not describe PermissionSet: " + (fieldsRes?.error || "Unknown error"));
+        return;
+      }
+      cachedSystemFields = fieldsRes.data
+        .map(f => f.name)
+        .filter(name => name.startsWith("Permissions"))
+        .sort();
+    }
+
+    ge("Loading System Permissions...");
+    const fieldsToQuery = cachedSystemFields.join(", ");
+    const { records: permSets, error: queryErr } = await t.runQuery(
+      `SELECT Id, ${fieldsToQuery} FROM PermissionSet WHERE Id IN ('${P}', '${ee}')`
+    );
+    if (queryErr) {
+      ge("Could not load system permissions data: " + queryErr);
+      return;
+    }
+
+    const mapA = permSets.find(r => r.Id === P) || {};
+    const mapB = permSets.find(r => r.Id === ee) || {};
+
+    let filtered = cachedSystemFields.filter(f => !x || f.toLowerCase().includes(x));
+    if (U) {
+      filtered = filtered.filter(f => !mapA[f] !== !mapB[f]);
+    }
+
+    $.textContent = `${filtered.length} permission${filtered.length === 1 ? "" : "s"}`;
+
+    const table = M(["System Permission", be(P), be(ee)]);
+    const tbody = table.querySelector("tbody");
+
+    filtered.forEach((f, idx) => {
+      const valA = !!mapA[f];
+      const valB = !!mapB[f];
+      const differs = valA !== valB;
+      const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+
+      const cleanName = f.replace(/^Permissions/, "");
+      tr.appendChild(rt("td", K(), cleanName));
+
+      const tdA = rt("td", j());
+      tdA.appendChild(renderStatus(valA));
+      tr.appendChild(tdA);
+
+      const tdB = rt("td", j());
+      tdB.appendChild(renderStatus(valB));
+      tr.appendChild(tdB);
+
+      tbody.appendChild(tr);
+    });
+
+    q(table, filtered.length, "No system permissions match.");
+  }
+
+  async function compareSetupEntity(P, ee, type, sobjectName, labelSingular) {
+    ge(`Loading ${labelSingular} access...`);
+    const { records: accessRecs, error: err } = await t.runQuery(
+      `SELECT ParentId, SetupEntityId FROM SetupEntityAccess WHERE ParentId IN ('${P}', '${ee}') AND SetupEntityType = '${type}' LIMIT 5000`
+    );
+    if (err) {
+      ge(`Could not load ${labelSingular} access: ` + err);
+      return;
+    }
+
+    const setA = new Set();
+    const setB = new Set();
+    accessRecs.forEach(r => {
+      if (r.ParentId === P) setA.add(r.SetupEntityId);
+      if (r.ParentId === ee) setB.add(r.SetupEntityId);
+    });
+
+    const allIds = Array.from(new Set([...setA, ...setB]));
+    let itemsMap = new Map();
+
+    if (allIds.length > 0) {
+      const idChunks = [];
+      for (let idx = 0; idx < allIds.length; idx += 500) {
+        idChunks.push(allIds.slice(idx, idx + 500));
+      }
+
+      for (const chunk of idChunks) {
+        const idList = chunk.map(id => `'${id}'`).join(", ");
+        const fields = sobjectName === "CustomPermission" ? "Id, DeveloperName, NamespacePrefix" : "Id, Name";
+        const { records: items, error: itemErr } = await t.runQuery(
+          `SELECT ${fields} FROM ${sobjectName} WHERE Id IN (${idList})`
+        );
+        if (itemErr) {
+          ge(`Could not load ${labelSingular} names: ` + itemErr);
+          return;
+        }
+        items.forEach(item => {
+          let name = item.Name;
+          if (sobjectName === "CustomPermission") {
+            name = item.NamespacePrefix ? `${item.NamespacePrefix}.${item.DeveloperName}` : item.DeveloperName;
+          }
+          itemsMap.set(item.Id, name);
+        });
+      }
+    }
+
+    let sortedIds = Array.from(itemsMap.keys()).sort((id1, id2) =>
+      (itemsMap.get(id1) || "").localeCompare(itemsMap.get(id2) || "")
+    );
+
+    let filteredIds = sortedIds.filter(id => {
+      const name = itemsMap.get(id) || "";
+      return !x || name.toLowerCase().includes(x);
+    });
+
+    if (U) {
+      filteredIds = filteredIds.filter(id => setA.has(id) !== setB.has(id));
+    }
+
+    $.textContent = `${filteredIds.length} ${labelSingular}${filteredIds.length === 1 ? "" : "s"}`;
+
+    const table = M([sobjectName === "CustomPermission" ? "Custom Permission" : sobjectName === "ApexClass" ? "Apex Class" : "Visualforce Page", be(P), be(ee)]);
+    const tbody = table.querySelector("tbody");
+
+    filteredIds.forEach((id, idx) => {
+      const valA = setA.has(id);
+      const valB = setB.has(id);
+      const differs = valA !== valB;
+      const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+
+      tr.appendChild(rt("td", K(), itemsMap.get(id) || id));
+
+      const tdA = rt("td", j());
+      tdA.appendChild(renderStatus(valA));
+      tr.appendChild(tdA);
+
+      const tdB = rt("td", j());
+      tdB.appendChild(renderStatus(valB));
+      tr.appendChild(tdB);
+
+      tbody.appendChild(tr);
+    });
+
+    q(table, filteredIds.length, `No ${labelSingular}s match.`);
+  }
+
+  async function compareDependencies(P, ee) {
+    ge("Loading dependencies...");
+
+    const [{ records: psgs, error: psgErr }, { records: assignments, error: assignErr }] = await Promise.all([
+      t.runQuery(`SELECT PermissionSetGroupId, PermissionSetGroup.DeveloperName, PermissionSetGroup.MasterLabel, PermissionSetId FROM PermissionSetGroupComponent WHERE PermissionSetId IN ('${P}', '${ee}') LIMIT 5000`),
+      t.runQuery(`SELECT AssigneeId, Assignee.Name, Assignee.Username, PermissionSetId FROM PermissionSetAssignment WHERE PermissionSetId IN ('${P}', '${ee}') AND Assignee.IsActive = true LIMIT 1000`)
+    ]);
+
+    if (psgErr || assignErr) {
+      ge("Could not load dependencies: " + (psgErr || assignErr));
+      return;
+    }
+
+    const psgMap = new Map();
+    const psgSetA = new Set();
+    const psgSetB = new Set();
+    psgs.forEach(r => {
+      if (r.PermissionSetGroup) {
+        psgMap.set(r.PermissionSetGroupId, {
+          name: r.PermissionSetGroup.DeveloperName,
+          label: r.PermissionSetGroup.MasterLabel
+        });
+        if (r.PermissionSetId === P) psgSetA.add(r.PermissionSetGroupId);
+        if (r.PermissionSetId === ee) psgSetB.add(r.PermissionSetGroupId);
+      }
+    });
+
+    const userMap = new Map();
+    const userSetA = new Set();
+    const userSetB = new Set();
+    assignments.forEach(r => {
+      if (r.Assignee) {
+        userMap.set(r.AssigneeId, {
+          name: r.Assignee.Name,
+          username: r.Assignee.Username
+        });
+        if (r.PermissionSetId === P) userSetA.add(r.AssigneeId);
+        if (r.PermissionSetId === ee) userSetB.add(r.AssigneeId);
+      }
+    });
+
+    const container = rt("div", { padding: "16px", display: "flex", flexDirection: "column", gap: "24px" });
+
+    const psgTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginBottom: "8px", color: n.text }, "Permission Set Groups");
+    container.appendChild(psgTitle);
+
+    let sortedPsgIds = Array.from(psgMap.keys()).sort((id1, id2) =>
+      (psgMap.get(id1).label || "").localeCompare(psgMap.get(id2).label || "")
+    );
+
+    let filteredPsgIds = sortedPsgIds.filter(id => {
+      const g = psgMap.get(id);
+      const searchStr = `${g.label} ${g.name}`.toLowerCase();
+      return !x || searchStr.includes(x);
+    });
+
+    if (U) {
+      filteredPsgIds = filteredPsgIds.filter(id => psgSetA.has(id) !== psgSetB.has(id));
+    }
+
+    const psgTable = M(["Group Name (API Name)", be(P), be(ee)]);
+    const psgTbody = psgTable.querySelector("tbody");
+    filteredPsgIds.forEach((id, idx) => {
+      const g = psgMap.get(id);
+      const valA = psgSetA.has(id);
+      const valB = psgSetB.has(id);
+      const differs = valA !== valB;
+      const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+
+      tr.appendChild(rt("td", K(), `${g.label} (${g.name})`));
+
+      const tdA = rt("td", j());
+      tdA.appendChild(renderStatus(valA));
+      tr.appendChild(tdA);
+
+      const tdB = rt("td", j());
+      tdB.appendChild(renderStatus(valB));
+      tr.appendChild(tdB);
+
+      psgTbody.appendChild(tr);
+    });
+
+    if (filteredPsgIds.length === 0) {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "No Permission Set Groups match."));
+    } else {
+      container.appendChild(psgTable);
+    }
+
+    const userTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginTop: "12px", marginBottom: "8px", color: n.text }, "Active User Assignments (Max 1000)");
+    container.appendChild(userTitle);
+
+    let sortedUserIds = Array.from(userMap.keys()).sort((id1, id2) =>
+      (userMap.get(id1).name || "").localeCompare(userMap.get(id2).name || "")
+    );
+
+    let filteredUserIds = sortedUserIds.filter(id => {
+      const uInfo = userMap.get(id);
+      const searchStr = `${uInfo.name} ${uInfo.username}`.toLowerCase();
+      return !x || searchStr.includes(x);
+    });
+
+    if (U) {
+      filteredUserIds = filteredUserIds.filter(id => userSetA.has(id) !== userSetB.has(id));
+    }
+
+    const userTable = M(["User Name (Username)", be(P), be(ee)]);
+    const userTbody = userTable.querySelector("tbody");
+    filteredUserIds.forEach((id, idx) => {
+      const uInfo = userMap.get(id);
+      const valA = userSetA.has(id);
+      const valB = userSetB.has(id);
+      const differs = valA !== valB;
+      const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+
+      tr.appendChild(rt("td", K(), `${uInfo.name} (${uInfo.username})`));
+
+      const tdA = rt("td", j());
+      tdA.appendChild(renderStatus(valA));
+      tr.appendChild(tdA);
+
+      const tdB = rt("td", j());
+      tdB.appendChild(renderStatus(valB));
+      tr.appendChild(tdB);
+
+      userTbody.appendChild(tr);
+    });
+
+    if (filteredUserIds.length === 0) {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "No User Assignments match."));
+    } else {
+      container.appendChild(userTable);
+    }
+
+    $.textContent = `${filteredPsgIds.length} group${filteredPsgIds.length === 1 ? "" : "s"}, ${filteredUserIds.length} user${filteredUserIds.length === 1 ? "" : "s"}`;
+
+    se.innerHTML = "";
+    se.appendChild(container);
+  }
+
   async function te() {
     re();
     const P = y.value,
@@ -12158,7 +12491,13 @@ function hp(o, t) {
       (ge("Pick two different entries to compare."), ($.textContent = ""));
       return;
     }
-    return u === "objects" ? Le(P, ee) : z(P, ee);
+    if (u === "objects") return Le(P, ee);
+    if (u === "fields") return z(P, ee);
+    if (u === "system") return compareSystemPerms(P, ee);
+    if (u === "apex") return compareSetupEntity(P, ee, "ApexClass", "ApexClass", "class");
+    if (u === "vf") return compareSetupEntity(P, ee, "ApexPage", "ApexPage", "page");
+    if (u === "custom") return compareSetupEntity(P, ee, "CustomPermission", "CustomPermission", "permission");
+    if (u === "dependency") return compareDependencies(P, ee);
   }
   async function Le(P, ee) {
     const G = `${P}|${ee}`;
@@ -26845,7 +27184,7 @@ function Us(o, t, e, n) {
 function renderBulkFieldCreator(container, isDark, onBack) {
   const e = kt(isDark);
   container.innerHTML = "";
-  
+
   const mainDiv = $e("div", {
     height: "100%",
     minHeight: "0",
@@ -26855,13 +27194,13 @@ function renderBulkFieldCreator(container, isDark, onBack) {
     color: e.text
   });
   container.appendChild(mainDiv);
-  
+
   const { head: header, right: headerRight } = Wo(e, "✨ Bulk Field Creator", onBack, "Object Manager");
   mainDiv.appendChild(header);
-  
+
   const subLabel = $e("div", { fontSize: "12px", color: e.faint, fontWeight: "600" });
   headerRight.appendChild(subLabel);
-  
+
   const body = $e("div", {
     flex: "1",
     minHeight: "0",
@@ -26869,27 +27208,27 @@ function renderBulkFieldCreator(container, isDark, onBack) {
     padding: "6px 28px 28px"
   });
   mainDiv.appendChild(body);
-  
+
   let selectedObject = null;
-  
+
   const updateHeaderLabel = () => {
-    subLabel.textContent = selectedObject 
+    subLabel.textContent = selectedObject
       ? `${selectedObject.Label || selectedObject.QualifiedApiName} (${selectedObject.QualifiedApiName})`
       : "";
   };
-  
+
   function renderChooseObjectStep() {
     updateHeaderLabel();
     body.innerHTML = "";
     body.appendChild(un(e, "Step 1 · Choose the object"));
-    
+
     const searchInput = jt(e, "Search objects…");
     searchInput.style.maxWidth = "340px";
     body.appendChild(searchInput);
-    
+
     const resultsContainer = $e("div", { marginTop: "12px" });
     body.appendChild(resultsContainer);
-    
+
     const showMessage = (msg) => {
       resultsContainer.innerHTML = "";
       resultsContainer.appendChild($e("div", {
@@ -26900,24 +27239,24 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         fontWeight: "600"
       }, msg));
     };
-    
+
     showMessage("Loading objects…");
     let allObjects = [];
-    
+
     const filterAndRender = () => {
       const term = searchInput.value.trim().toLowerCase();
-      const filtered = allObjects.filter(obj => 
-        !term || 
-        (obj.Label || obj.QualifiedApiName).toLowerCase().includes(term) || 
+      const filtered = allObjects.filter(obj =>
+        !term ||
+        (obj.Label || obj.QualifiedApiName).toLowerCase().includes(term) ||
         obj.QualifiedApiName.toLowerCase().includes(term)
       ).slice(0, 200);
-      
+
       resultsContainer.innerHTML = "";
       if (filtered.length === 0) {
         showMessage("No objects match.");
         return;
       }
-      
+
       filtered.forEach((obj, idx) => {
         const rowBtn = $e("button", {
           display: "flex",
@@ -26933,25 +27272,25 @@ function renderBulkFieldCreator(container, isDark, onBack) {
           fontFamily: "inherit",
           color: e.text
         });
-        
+
         rowBtn.appendChild($e("span", { fontSize: "16px" }, obj.IsCustomizable ? "🧱" : "📦"));
         rowBtn.appendChild($e("span", { fontSize: "13px", fontWeight: "700" }, obj.Label || obj.QualifiedApiName));
         rowBtn.appendChild($e("span", { fontSize: "12px", color: e.faint }, obj.QualifiedApiName));
-        
+
         rowBtn.addEventListener("mouseover", () => { rowBtn.style.background = e.accentSoft; });
         rowBtn.addEventListener("mouseout", () => { rowBtn.style.background = idx % 2 === 0 ? "transparent" : e.zebra; });
-        
+
         rowBtn.addEventListener("click", () => {
           selectedObject = obj;
           renderCreatorForm();
         });
-        
+
         resultsContainer.appendChild(rowBtn);
       });
     };
-    
+
     searchInput.addEventListener("input", filterAndRender);
-    
+
     it().then(session => {
       if (!session?.instanceUrl || !session?.sessionId) {
         showMessage("Salesforce session not detected.");
@@ -26972,11 +27311,11 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       });
     });
   }
-  
+
   function renderCreatorForm() {
     updateHeaderLabel();
     body.innerHTML = "";
-    
+
     const controlsRow = $e("div", { display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" });
     const changeObjBtn = Ht(e, "← Change object");
     changeObjBtn.addEventListener("click", () => {
@@ -26985,12 +27324,12 @@ function renderBulkFieldCreator(container, isDark, onBack) {
     });
     controlsRow.appendChild(changeObjBtn);
     body.appendChild(controlsRow);
-    
+
     const banner = To(e);
     body.appendChild(banner.node);
-    
+
     body.appendChild(un(e, "Step 2 · Paste CSV/TSV Field List"));
-    
+
     const csvArea = $e("textarea", {
       width: "100%",
       height: "150px",
@@ -27007,14 +27346,14 @@ function renderBulkFieldCreator(container, isDark, onBack) {
     });
     csvArea.placeholder = "Label,API Name,Type,Length,Picklist Values,Required\nNew TextField,New_Text__c,Text,255,,false\nNew Status,Status__c,Picklist,,Active,Inactive,true";
     body.appendChild(csvArea);
-    
+
     body.appendChild(un(e, "Step 3 · Field-Level Security"));
     body.appendChild($e("div", { fontSize: "12px", color: e.muted, marginBottom: "8px" }, "Select profiles/permission sets to grant FLS to newly created fields:"));
-    
+
     const flsSearch = jt(e, "Filter profiles & permission sets…");
     flsSearch.style.maxWidth = "340px";
     body.appendChild(flsSearch);
-    
+
     const flsListDiv = $e("div", {
       maxHeight: "180px",
       overflowY: "auto",
@@ -27028,20 +27367,20 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       gap: "4px"
     });
     body.appendChild(flsListDiv);
-    
+
     let flsTargets = [];
     const selectedFls = new Set();
-    
+
     const renderFlsList = () => {
       flsListDiv.innerHTML = "";
       const term = flsSearch.value.toLowerCase().trim();
       const filtered = flsTargets.filter(t => !term || t.label.toLowerCase().includes(term));
-      
+
       if (filtered.length === 0) {
         flsListDiv.appendChild($e("div", { padding: "8px", fontSize: "12px", color: e.faint }, "No profiles or permission sets found."));
         return;
       }
-      
+
       filtered.forEach(target => {
         const row = $e("label", {
           display: "flex",
@@ -27061,16 +27400,16 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         });
         row.appendChild(cb);
         row.appendChild(document.createTextNode(`${target.isProfile ? "👤" : "🔑"} ${target.label}`));
-        
+
         row.addEventListener("mouseover", () => { row.style.background = e.accentSoft; });
         row.addEventListener("mouseout", () => { row.style.background = "transparent"; });
-        
+
         flsListDiv.appendChild(row);
       });
     };
-    
+
     flsSearch.addEventListener("input", renderFlsList);
-    
+
     it().then(session => {
       if (!session?.instanceUrl || !session?.sessionId) return;
       globalThis.chrome.runtime.sendMessage({
@@ -27084,11 +27423,11 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         }
       });
     });
-    
+
     const deployBtn = Ht(e, "Deploy Fields", "primary");
     deployBtn.style.marginTop = "16px";
     body.appendChild(deployBtn);
-    
+
     const progressArea = $e("div", {
       marginTop: "20px",
       display: "flex",
@@ -27096,14 +27435,14 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       gap: "10px"
     });
     body.appendChild(progressArea);
-    
+
     function parseCSV(text) {
       const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
       if (lines.length < 2) return [];
-      
+
       const headers = lines[0].split(",").map(h => h.trim().replace(/^["']|["']$/g, "").toLowerCase());
       const fields = [];
-      
+
       for (let i = 1; i < lines.length; i++) {
         const parts = lines[i].split(",").map(p => p.trim().replace(/^["']|["']$/g, ""));
         const field = {};
@@ -27112,7 +27451,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             field[h] = parts[idx];
           }
         });
-        
+
         if (field.label) {
           if (!field["api name"]) {
             field["api name"] = field.label.trim().replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") + "__c";
@@ -27127,25 +27466,25 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       }
       return fields;
     }
-    
+
     deployBtn.addEventListener("click", async () => {
       const csvVal = csvArea.value.trim();
       if (!csvVal) {
         banner.show("Please paste some field data.", "error");
         return;
       }
-      
+
       const fields = parseCSV(csvVal);
       if (fields.length === 0) {
         banner.show("Could not parse any fields from CSV.", "error");
         return;
       }
-      
+
       banner.show(`Starting deployment of ${fields.length} fields...`, "info");
       progressArea.innerHTML = "";
       deployBtn.disabled = true;
       deployBtn.style.opacity = "0.5";
-      
+
       const session = await it();
       if (!session?.instanceUrl || !session?.sessionId) {
         banner.show("Session lost.", "error");
@@ -27153,10 +27492,10 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         deployBtn.style.opacity = "1";
         return;
       }
-      
+
       const createdFields = [];
       const objName = selectedObject.QualifiedApiName;
-      
+
       for (let i = 0; i < fields.length; i++) {
         const f = fields[i];
         const row = $e("div", {
@@ -27172,7 +27511,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         const statusSpan = $e("span", { fontSize: "12px", fontWeight: "700", color: e.muted }, "Creating...");
         row.appendChild(statusSpan);
         progressArea.appendChild(row);
-        
+
         const payload = {
           FullName: `${objName}.${f["api name"]}`,
           Metadata: {
@@ -27189,7 +27528,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             }
           };
         }
-        
+
         const res = await new Promise(resolve => {
           globalThis.chrome.runtime.sendMessage({
             type: "CREATE_CUSTOM_FIELD",
@@ -27199,7 +27538,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             metadata: payload.Metadata
           }, resolve);
         });
-        
+
         if (res?.success) {
           statusSpan.textContent = "✅ Created";
           statusSpan.style.color = e.success;
@@ -27209,7 +27548,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
           statusSpan.style.color = e.danger;
         }
       }
-      
+
       if (createdFields.length > 0 && selectedFls.size > 0) {
         banner.show(`Granting FLS to ${createdFields.length} fields for ${selectedFls.size} targets...`, "info");
         const grants = [];
@@ -27224,7 +27563,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             });
           });
         });
-        
+
         const flsRes = await new Promise(resolve => {
           globalThis.chrome.runtime.sendMessage({
             type: "GRANT_FIELD_PERMISSIONS",
@@ -27233,7 +27572,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             grants
           }, resolve);
         });
-        
+
         if (flsRes?.success) {
           banner.show(`✅ Successfully created ${createdFields.length} field(s) and granted FLS.`, "success");
         } else {
@@ -27244,12 +27583,12 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       } else {
         banner.show("❌ Failed to create any fields.", "error");
       }
-      
+
       deployBtn.disabled = false;
       deployBtn.style.opacity = "1";
     });
   }
-  
+
   renderChooseObjectStep();
 }
 
@@ -27257,7 +27596,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
 function renderObjectDetails(container, isDark, onBack) {
   container.innerHTML = "";
   const e = kt(isDark);
-  
+
   const mainDiv = $e("div", {
     height: "100%",
     minHeight: "0",
@@ -27267,10 +27606,10 @@ function renderObjectDetails(container, isDark, onBack) {
     color: e.text
   });
   container.appendChild(mainDiv);
-  
+
   const { head: header } = Wo(e, "📦 Object Details", onBack, "Tools");
   mainDiv.appendChild(header);
-  
+
   const body = $e("div", {
     flex: "1",
     minHeight: "0",
@@ -27278,10 +27617,10 @@ function renderObjectDetails(container, isDark, onBack) {
     padding: "24px 28px"
   });
   mainDiv.appendChild(body);
-  
+
   const banner = To(e);
   body.appendChild(banner.node);
-  
+
   const selectSection = $e("div", {
     display: "flex",
     gap: "12px",
@@ -27289,14 +27628,14 @@ function renderObjectDetails(container, isDark, onBack) {
     marginBottom: "20px"
   });
   body.appendChild(selectSection);
-  
+
   const selectLabel = $e("label", {
     fontSize: "13px",
     fontWeight: "700",
     color: e.muted
   }, "Select Object:");
   selectSection.appendChild(selectLabel);
-  
+
   const objectSelect = $e("select", {
     padding: "8px 12px",
     fontSize: "13px",
@@ -27309,26 +27648,26 @@ function renderObjectDetails(container, isDark, onBack) {
     minWidth: "200px"
   });
   selectSection.appendChild(objectSelect);
-  
+
   const emptyOption = $e("option", {}, "-- None --");
   objectSelect.appendChild(emptyOption);
-  
+
   const detailsContainer = $e("div", {
     display: "none",
     flexDirection: "column",
     gap: "20px"
   });
   body.appendChild(detailsContainer);
-  
+
   banner.show("Loading objects...", "info");
-  
+
   let objectsList = [];
   it().then((session) => {
     if (!session?.instanceUrl || !session?.sessionId) {
       banner.show("Salesforce session not detected.", "error");
       return;
     }
-    
+
     globalThis.chrome.runtime.sendMessage({
       type: "GET_ALL_OBJECTS",
       instanceUrl: session.instanceUrl,
@@ -27347,7 +27686,7 @@ function renderObjectDetails(container, isDark, onBack) {
       });
     });
   });
-  
+
   objectSelect.addEventListener("change", () => {
     const objName = objectSelect.value;
     if (!objName || objName === "-- None --") {
@@ -27356,11 +27695,11 @@ function renderObjectDetails(container, isDark, onBack) {
     }
     loadObjectDetails(objName);
   });
-  
+
   function loadObjectDetails(objName) {
     banner.show(`Describing ${objName}...`, "info");
     detailsContainer.style.display = "none";
-    
+
     it().then((session) => {
       globalThis.chrome.runtime.sendMessage({
         type: "DESCRIBE_FOR_SAMPLE",
@@ -27377,20 +27716,20 @@ function renderObjectDetails(container, isDark, onBack) {
       });
     });
   }
-  
+
   function renderLoadedDetails(data, objName) {
     detailsContainer.innerHTML = "";
     detailsContainer.style.display = "flex";
-    
+
     const objInfo = objectsList.find(o => o.QualifiedApiName === objName) || {};
-    
+
     const summaryRow = $e("div", {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
       gap: "16px"
     });
     detailsContainer.appendChild(summaryRow);
-    
+
     const createCard = (title, val) => {
       const card = $e("div", {
         background: e.panel,
@@ -27405,12 +27744,12 @@ function renderObjectDetails(container, isDark, onBack) {
       card.appendChild($e("div", { fontSize: "15px", fontWeight: "800", color: e.text }, val));
       return card;
     };
-    
+
     summaryRow.appendChild(createCard("Label", data.label || objName));
     summaryRow.appendChild(createCard("API Name", objName));
     summaryRow.appendChild(createCard("Key Prefix", objInfo.KeyPrefix || "N/A"));
     summaryRow.appendChild(createCard("Type", objInfo.IsCustomizable ? "Custom Object" : "Standard Object"));
-    
+
     const capabilities = $e("div", {
       display: "flex",
       gap: "8px",
@@ -27418,7 +27757,7 @@ function renderObjectDetails(container, isDark, onBack) {
       marginTop: "4px"
     });
     detailsContainer.appendChild(capabilities);
-    
+
     const addBadge = (lbl, active) => {
       const b = $e("span", {
         fontSize: "11px",
@@ -27432,11 +27771,11 @@ function renderObjectDetails(container, isDark, onBack) {
       capabilities.appendChild(b);
     };
     addBadge("Createable", data.createable);
-    
+
     const fields = data.fields || [];
     const customFieldsCount = fields.filter(f => f.name.endsWith("__c")).length;
     const standardFieldsCount = fields.length - customFieldsCount;
-    
+
     const statsRow = $e("div", {
       display: "grid",
       gridTemplateColumns: "repeat(3, 1fr)",
@@ -27447,7 +27786,7 @@ function renderObjectDetails(container, isDark, onBack) {
     statsRow.appendChild(createCard("Total Fields", String(fields.length)));
     statsRow.appendChild(createCard("Standard Fields", String(standardFieldsCount)));
     statsRow.appendChild(createCard("Custom Fields", String(customFieldsCount)));
-    
+
     const actionRow = $e("div", {
       display: "flex",
       gap: "12px",
@@ -27455,7 +27794,7 @@ function renderObjectDetails(container, isDark, onBack) {
       marginTop: "12px"
     });
     detailsContainer.appendChild(actionRow);
-    
+
     const searchInput = $e("input", {
       flex: "1",
       padding: "8px 12px",
@@ -27468,7 +27807,7 @@ function renderObjectDetails(container, isDark, onBack) {
       placeholder: "Filter fields by label, API name or type..."
     });
     actionRow.appendChild(searchInput);
-    
+
     const exportBtn = $e("button", {
       padding: "8px 14px",
       fontSize: "13px",
@@ -27480,7 +27819,7 @@ function renderObjectDetails(container, isDark, onBack) {
       cursor: "pointer"
     }, "Download CSV");
     actionRow.appendChild(exportBtn);
-    
+
     exportBtn.addEventListener("click", () => {
       let csv = "Label,API Name,Type,Length,Required,Unique,External ID\n";
       fields.forEach(f => {
@@ -27495,7 +27834,7 @@ function renderObjectDetails(container, isDark, onBack) {
       link.click();
       document.body.removeChild(link);
     });
-    
+
     const tableDiv = $e("div", {
       marginTop: "10px",
       border: `1px solid ${e.border}`,
@@ -27503,14 +27842,14 @@ function renderObjectDetails(container, isDark, onBack) {
       overflow: "hidden"
     });
     detailsContainer.appendChild(tableDiv);
-    
+
     const table = $e("table", {
       width: "100%",
       borderCollapse: "collapse",
       fontSize: "13px"
     });
     tableDiv.appendChild(table);
-    
+
     const thead = $e("thead");
     const tr = $e("tr");
     ["Label", "API Name", "Type", "Length", "Properties"].forEach(col => {
@@ -27528,20 +27867,20 @@ function renderObjectDetails(container, isDark, onBack) {
     });
     thead.appendChild(tr);
     table.appendChild(thead);
-    
+
     const tbody = $e("tbody");
     table.appendChild(tbody);
-    
+
     function filterTable() {
       tbody.innerHTML = "";
       const term = searchInput.value.toLowerCase().trim();
       const filtered = fields.filter(f => {
-        return !term || 
-               f.label.toLowerCase().includes(term) || 
-               f.name.toLowerCase().includes(term) || 
+        return !term ||
+               f.label.toLowerCase().includes(term) ||
+               f.name.toLowerCase().includes(term) ||
                f.type.toLowerCase().includes(term);
       });
-      
+
       filtered.forEach((f, idx) => {
         const row = $e("tr", {
           borderBottom: `1px solid ${e.divider}`,
@@ -27549,18 +27888,18 @@ function renderObjectDetails(container, isDark, onBack) {
         });
         row.addEventListener("mouseover", () => { row.style.background = e.rowHover; });
         row.addEventListener("mouseout", () => { row.style.background = idx % 2 === 0 ? "transparent" : e.zebra; });
-        
+
         row.appendChild($e("td", { padding: "10px 14px", fontWeight: "700" }, f.label));
         row.appendChild($e("td", { padding: "10px 14px", fontFamily: "monospace", fontSize: "12px" }, f.name));
         row.appendChild($e("td", { padding: "10px 14px" }, f.type));
         row.appendChild($e("td", { padding: "10px 14px" }, String(f.length || "")));
-        
+
         const props = [];
         if (!f.nillable && !f.defaultedOnCreate) props.push("Required");
         if (f.unique) props.push("Unique");
         if (f.externalId) props.push("ExtID");
         if (f.calculated) props.push("Formula");
-        
+
         const tdProps = $e("td", { padding: "10px 14px" });
         props.forEach(p => {
           const badge = $e("span", {
@@ -27578,7 +27917,7 @@ function renderObjectDetails(container, isDark, onBack) {
         tbody.appendChild(row);
       });
     }
-    
+
     searchInput.addEventListener("input", filterTable);
     filterTable();
   }
@@ -27675,14 +28014,14 @@ function loadAllFieldsIncludingRelationships(objectName, baseFields, callback) {
     callback(baseFields);
     return;
   }
-  
+
   let pending = refFields.length;
   const combinedFields = [...baseFields];
-  
+
   refFields.forEach(f => {
     const parentObj = f.referenceTo[0];
     const relName = f.relationshipName;
-    
+
     Ti(parentObj, (parentFields) => {
       parentFields.forEach(pf => {
         combinedFields.push({
