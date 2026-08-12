@@ -9910,17 +9910,29 @@ function wn() {
 }
 function it(o = 4) {
   const t = globalThis.chrome?.runtime;
-  if (!t) return Promise.resolve(null);
+  if (!t || !t.id) return Promise.resolve(null);
   const e = (n) =>
     new Promise((i) => {
-      t.sendMessage({ type: "GET_SF_CREDENTIALS", hostname: wn() }, (s) => {
-        const a = s?.data || null;
-        if (a?.sessionId || n >= o) {
-          i(a);
+      try {
+        if (!t.id) {
+          i(null);
           return;
         }
-        setTimeout(() => e(n + 1).then(i), n * 400);
-      });
+        t.sendMessage({ type: "GET_SF_CREDENTIALS", hostname: wn() }, (s) => {
+          if (globalThis.chrome?.runtime?.lastError) {
+            i(null);
+            return;
+          }
+          const a = s?.data || null;
+          if (a?.sessionId || n >= o) {
+            i(a);
+            return;
+          }
+          setTimeout(() => e(n + 1).then(i), n * 400);
+        });
+      } catch (err) {
+        i(null);
+      }
     });
   return e(1);
 }
@@ -10223,18 +10235,18 @@ function ua(o, t, e) {
                               "Lead",
                             ]))
                           : (s = `${Wt(mo)} ${Wt(mo)}`),
-        Jo(s + n, o.length)
+        Jo("Test " + s + n, o.length)
       );
     }
     case "email":
       return Jo(
-        `${Wt(mo)}.${Wt(Xo).toLowerCase()}${t}${n}@example.com`,
+        `test.${Wt(mo)}.${Wt(Xo).toLowerCase()}${t}${n}@example.com`,
         o.length || 80,
       );
     case "phone":
       return `(4${Zt(10, 99)}) 555-0${Zt(100, 199)}`;
     case "url":
-      return Jo(`https://example.com/${Wt(mo)}${t}${n}`, o.length || 255);
+      return Jo(`https://test-example.com/${Wt(mo)}${t}${n}`, o.length || 255);
     case "picklist": {
       const i = o.picklistValues.filter((s) => s.active);
       return i.length ? (i.find((s) => s.defaultValue) || Wt(i)).value : void 0;
@@ -11212,14 +11224,14 @@ function Qc(o, t) {
     Xe(
       "div",
       { fontSize: "16px", fontWeight: "800" },
-      "🧪 Sample Data Generator",
+      "🧪 Multiple Data Generator",
     ),
   ),
     l.appendChild(
       Xe(
         "div",
         { fontSize: "12px", color: n.muted },
-        "Analyze an object and create realistic test records",
+        "Analyze multiple objects and create realistic test records at once",
       ),
     ),
     s.appendChild(l),
@@ -11259,6 +11271,7 @@ function Qc(o, t) {
     "Checking org type…",
   );
   d.appendChild(r);
+
   const E = Xe("div", {
       display: "grid",
       gridTemplateColumns: "2fr 1fr",
@@ -11276,9 +11289,10 @@ function Qc(o, t) {
         marginBottom: "6px",
         fontWeight: "600",
       },
-      "Object",
+      "Objects",
     ),
   );
+  
   const b = Xe("input", {
     width: "100%",
     boxSizing: "border-box",
@@ -11353,7 +11367,8 @@ function Qc(o, t) {
         "Also fill optional fields (more validation risk)",
       ),
     ),
-    c.appendChild(O));
+    optionalsDiv.appendChild(O));
+    
   const L = Xe(
     "button",
     {
@@ -11368,32 +11383,44 @@ function Qc(o, t) {
       fontWeight: "700",
       fontFamily: "inherit",
     },
-    "⚡ Generate preview",
+    "⚡ Generate previews",
   );
-  (c.appendChild(L), d.appendChild(c));
+  (optionalsDiv.appendChild(L), d.appendChild(optionalsDiv));
+  
   const D = Xe("div", {});
   d.appendChild(D);
   const U = Xe("div", { marginTop: "14px" });
   d.appendChild(U);
-  let $ = [],
-    V = "",
-    C = [],
-    Z = [];
-  const X = (M, K, j = n.muted) => {
-    ((M.innerHTML = ""),
-      M.appendChild(
-        Xe(
-          "div",
-          {
-            padding: "18px 4px",
-            color: j,
-            fontSize: "13px",
-            fontWeight: "600",
-          },
-          K,
-        ),
-      ));
+
+  let generatedData = {};
+  let objectFields = {};
+  let insertedIds = {};
+  let se = null;
+
+  const addObjToList = (val) => {
+    const cleanVal = val.trim();
+    if (cleanVal && availableObjects.has(cleanVal)) {
+      selectedObjects.add(cleanVal);
+      b.value = "";
+      renderPills();
+      De();
+    }
   };
+
+  b.addEventListener("input", () => {
+    const val = b.value.trim();
+    if (availableObjects.has(val)) {
+      addObjToList(val);
+    }
+  });
+
+  b.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addObjToList(b.value);
+    }
+  });
+
   (t.orgInfo().then((M) => {
     g = zc(M);
     const K = M?.name ? ` · ${M.name}` : "";
@@ -11413,18 +11440,20 @@ function Qc(o, t) {
   }),
     t.listObjects().then((M) => {
       M.slice(0, 2e3).forEach((K) => {
+        availableObjects.add(K.name);
         const j = document.createElement("option");
         ((j.value = K.name), (j.label = K.label), N.appendChild(j));
       });
     }));
+
   const re = () => !(g === "sandbox" || g === "scratch");
-  let se = null;
   const De = () => {
     if (!se) return;
-    const M = C.length > 0;
+    const M = Object.keys(generatedData).length > 0;
     ((se.style.opacity = M ? "1" : "0.5"),
       (se.style.pointerEvents = M ? "auto" : "none"));
   };
+
   function Be(M) {
     const K = Xe("div", {
         position: "absolute",
@@ -11445,6 +11474,10 @@ function Qc(o, t) {
         padding: "20px",
         boxShadow: "0 10px 40px rgba(0,0,0,0.35)",
       });
+    
+    let totalCount = 0;
+    Object.keys(generatedData).forEach(k => totalCount += generatedData[k].length);
+    
     (j.appendChild(
       Xe(
         "div",
@@ -11466,7 +11499,7 @@ function Qc(o, t) {
             lineHeight: "1.5",
             marginBottom: "16px",
           },
-          `You're about to insert ${C.length} record${C.length === 1 ? "" : "s"} into ${V}. This tool is meant for sandbox & scratch orgs — inserting test data into a production org can be hard to undo. Continue only if you're sure.`,
+          `You're about to insert ${totalCount} record${totalCount === 1 ? "" : "s"} across ${Object.keys(generatedData).length} objects. This tool is meant for sandbox & scratch orgs — inserting test data into a production org can be hard to undo. Continue only if you're sure.`,
         ),
       ));
     const q = Xe("div", {
@@ -11514,6 +11547,7 @@ function Qc(o, t) {
       K.appendChild(j),
       i.appendChild(K));
   }
+
   async function be(M) {
     const K = { lookups: {}, seq: Date.now() % 1e5 },
       j = [],
@@ -11531,10 +11565,10 @@ function Qc(o, t) {
       { ctx: K, missing: j }
     );
   }
+
   async function ge() {
-    const M = b.value.trim();
-    if (!M) {
-      t.flashToast("Pick an object first");
+    if (selectedObjects.size === 0) {
+      t.flashToast("Select at least one object first");
       return;
     }
     let K = parseInt(k.value, 10) || 0;
@@ -11542,75 +11576,82 @@ function Qc(o, t) {
       (k.value = String(K)),
       (D.innerHTML = ""),
       (U.innerHTML = ""),
-      (C = []),
-      (Z = []),
-      X(D, "Analyzing object schema…"));
-    const j = await t.describeObject(M);
-    if (j.error || !j.fields) {
-      X(D, j.error || "Could not describe this object.", n.danger);
-      return;
-    }
-    if (j.createable === !1) {
-      X(D, `You can't create ${M} records (object not createable).`, n.danger);
-      return;
-    }
-    ((V = M), ($ = j.fields));
-    const q = x.checked,
-      P = $.filter(
-        (w) => pa(w) && !w.defaultedOnCreate && (ei(w) || (q && w.nillable)),
-      ),
-      ee = P.filter((w) => w.type === "reference");
-    X(D, "Resolving lookups…");
-    const { ctx: G, missing: T } = await be(ee);
-    if (T.length) {
-      D.innerHTML = "";
-      const w = Xe("div", {
-        padding: "14px",
-        borderRadius: "10px",
-        border: `1px solid ${n.danger}`,
-        background: e ? "rgba(239,68,68,0.10)" : "rgba(239,68,68,0.06)",
-        color: e ? "#fca5a5" : "#b91c1c",
-        fontSize: "13px",
-      });
-      (w.appendChild(
-        Xe(
-          "div",
-          { fontWeight: "700", marginBottom: "6px" },
-          "Missing required related records:",
+      (generatedData = {}),
+      (objectFields = {}),
+      (insertedIds = {}));
+      
+    const previewsContainer = Xe("div", { display: "flex", flexDirection: "column", gap: "16px" });
+    D.appendChild(previewsContainer);
+    
+    for (const objName of selectedObjects) {
+      const objTitle = Xe("div", { fontWeight: "700", fontSize: "14px", marginTop: "10px" }, `Analyzing ${objName}...`);
+      previewsContainer.appendChild(objTitle);
+      
+      const j = await t.describeObject(objName);
+      if (j.error || !j.fields) {
+        objTitle.textContent = `❌ ${objName}: ${j.error || "Could not describe this object."}`;
+        objTitle.style.color = n.danger;
+        continue;
+      }
+      if (j.createable === !1) {
+        objTitle.textContent = `❌ ${objName}: Object not createable.`;
+        objTitle.style.color = n.danger;
+        continue;
+      }
+      
+      objectFields[objName] = j.fields;
+      const q = x.checked,
+        P = j.fields.filter(
+          (w) => pa(w) && !w.defaultedOnCreate && (ei(w) || (q && w.nillable)),
         ),
-      ),
-        T.forEach((H) =>
-          w.appendChild(Xe("div", { fontSize: "12.5px" }, `• ${H}`)),
-        ),
+        ee = P.filter((w) => w.type === "reference");
+        
+      objTitle.textContent = `Resolving lookups for ${objName}...`;
+      const { ctx: G, missing: T } = await be(ee);
+      if (T.length) {
+        objTitle.innerHTML = "";
+        const w = Xe("div", {
+          padding: "14px",
+          borderRadius: "10px",
+          border: `1px solid ${n.danger}`,
+          background: e ? "rgba(239,68,68,0.10)" : "rgba(239,68,68,0.06)",
+          color: e ? "#fca5a5" : "#b91c1c",
+          fontSize: "13px",
+        });
         w.appendChild(
           Xe(
             "div",
-            { marginTop: "8px", fontSize: "12px", color: n.muted },
-            "Create at least one parent record, then try again.",
-          ),
-        ),
-        D.appendChild(w));
-      return;
-    }
-    C = [];
-    for (let w = 0; w < K; w++) {
-      const H = { attributes: { type: V } };
-      (P.forEach((p) => {
-        const A = ua(p, w, G);
-        A != null && A !== "" && (H[p.name] = A);
-      }),
-        C.push(H));
-    }
-    (ue(P), De());
-  }
-  function ue(M) {
-    D.innerHTML = "";
-    const K = Xe("div", {
+            { fontWeight: "700", marginBottom: "6px" },
+            `❌ ${objName} - Missing required related records:`,
+          )
+        );
+        T.forEach((H) =>
+          w.appendChild(Xe("div", { fontSize: "12.5px" }, `• ${H}`)),
+        );
+        objTitle.appendChild(w);
+        continue;
+      }
+      
+      const records = [];
+      for (let w = 0; w < K; w++) {
+        const H = { attributes: { type: objName } };
+        P.forEach((p) => {
+          const A = ua(p, w, G);
+          A != null && A !== "" && (H[p.name] = A);
+        });
+        records.push(H);
+      }
+      
+      generatedData[objName] = records;
+      
+      objTitle.innerHTML = "";
+      const objSection = Xe("div", {
         border: `1px solid ${n.border}`,
         borderRadius: "12px",
         overflow: "hidden",
-      }),
-      j = Xe("div", {
+      });
+      
+      const objHeader = Xe("div", {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -11619,30 +11660,12 @@ function Qc(o, t) {
         background: n.headerBg,
         borderBottom: `1px solid ${n.border}`,
       });
-    j.appendChild(
-      Xe(
-        "span",
-        { fontSize: "13px", fontWeight: "700" },
-        `Preview — row 1 of ${C.length} · ${V}`,
-      ),
-    );
-    const q = Xe("div", { display: "flex", alignItems: "center", gap: "12px" }),
-      P = Xe("label", {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "6px",
-        fontSize: "11.5px",
-        color: n.muted,
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-      }),
-      ee = Xe("input");
-    ((ee.type = "checkbox"),
-      P.appendChild(ee),
-      P.appendChild(document.createTextNode("Apply edits to all rows")));
-    const G = Xe(
-      "button",
-      {
+      
+      objHeader.appendChild(
+        Xe("span", { fontSize: "13px", fontWeight: "700" }, `🧪 ${objName} (${records.length} records ready)`)
+      );
+      
+      const toggleBtn = Xe("button", {
         background: "transparent",
         border: `1px solid ${n.border}`,
         color: n.text,
@@ -11652,42 +11675,42 @@ function Qc(o, t) {
         fontSize: "12px",
         fontWeight: "600",
         fontFamily: "inherit",
-      },
-      "↻ Regenerate",
-    );
-    (G.addEventListener("click", ge),
-      q.appendChild(P),
-      q.appendChild(G),
-      j.appendChild(q),
-      K.appendChild(j));
-    const T = Xe("table", {
+      }, "Show Preview");
+      
+      objHeader.appendChild(toggleBtn);
+      objSection.appendChild(objHeader);
+      
+      const previewTableContainer = Xe("div", { display: "none" });
+      const T_table = Xe("table", {
         width: "100%",
         borderCollapse: "collapse",
         fontSize: "12.5px",
         tableLayout: "fixed",
-      }),
-      w = C[0] || {};
-    (M.forEach((Q, S) => {
-      const Y = Xe("tr", {
-        borderTop: S === 0 ? "none" : `1px solid ${n.divider}`,
       });
-      (Y.appendChild(
-        Xe(
-          "td",
-          { padding: "8px 14px", width: "34%", wordBreak: "break-word" },
-          `${Q.label}${ei(Q) ? " *" : ""}`,
-        ),
-      ),
+      
+      const firstRecord = records[0] || {};
+      P.forEach((Q, S) => {
+        const Y = Xe("tr", {
+          borderTop: S === 0 ? "none" : `1px solid ${n.divider}`,
+        });
+        Y.appendChild(
+          Xe(
+            "td",
+            { padding: "8px 14px", width: "34%", wordBreak: "break-word" },
+            `${Q.label}${ei(Q) ? " *" : ""}`,
+          )
+        );
         Y.appendChild(
           Xe(
             "td",
             { padding: "8px 14px", width: "22%", color: n.muted },
             Me(Q),
-          ),
-        ));
-      const Se = w[Q.name],
-        oe = Xe("td", { padding: "5px 10px" }),
-        we = Xe("input", {
+          )
+        );
+        
+        const Se = firstRecord[Q.name];
+        const oe = Xe("td", { padding: "5px 10px" });
+        const we = Xe("input", {
           width: "100%",
           boxSizing: "border-box",
           padding: "6px 8px",
@@ -11699,57 +11722,50 @@ function Qc(o, t) {
           color: n.text,
           outline: "none",
         });
-      ((we.value = Se === void 0 ? "" : String(Se)),
-        (we.placeholder = "—"),
+        we.value = Se === void 0 ? "" : String(Se);
+        we.placeholder = "—";
         we.addEventListener("change", () => {
           const Te = Gc(Q, we.value);
-          ((ee.checked ? C : C[0] ? [C[0]] : []).forEach((fe) => {
+          records.forEach((fe) => {
             Te === void 0 ? delete fe[Q.name] : (fe[Q.name] = Te);
-          }),
-            Te !== void 0 && (we.value = String(Te)));
-        }),
-        oe.appendChild(we),
-        Y.appendChild(oe),
-        T.appendChild(Y));
-    }),
-      $.filter((Q) => Q.calculated || Q.autoNumber)
-        .slice(0, 2)
-        .forEach((Q) => {
-          const S = Xe("tr", { borderTop: `1px solid ${n.divider}` });
-          (S.appendChild(
-            Xe("td", { padding: "8px 14px", color: n.faint }, Q.label),
-          ),
-            S.appendChild(
-              Xe(
-                "td",
-                { padding: "8px 14px", color: n.faint },
-                Q.autoNumber ? "Auto-number" : "Formula",
-              ),
-            ),
-            S.appendChild(
-              Xe(
-                "td",
-                { padding: "8px 14px", color: n.faint, fontStyle: "italic" },
-                "skipped — not writeable",
-              ),
-            ),
-            T.appendChild(S));
-        }),
-      K.appendChild(T),
-      D.appendChild(K));
-    const p = Xe("div", {
+          });
+          Te !== void 0 && (we.value = String(Te));
+        });
+        
+        oe.appendChild(we);
+        Y.appendChild(oe);
+        T_table.appendChild(Y);
+      });
+      
+      previewTableContainer.appendChild(T_table);
+      objSection.appendChild(previewTableContainer);
+      previewsContainer.appendChild(objSection);
+      
+      toggleBtn.addEventListener("click", () => {
+        const isCollapsed = previewTableContainer.style.display === "none";
+        previewTableContainer.style.display = isCollapsed ? "block" : "none";
+        toggleBtn.textContent = isCollapsed ? "Hide Preview" : "Show Preview";
+      });
+    }
+    
+    let totalCount = 0;
+    Object.keys(generatedData).forEach(k => totalCount += generatedData[k].length);
+    
+    if (totalCount > 0) {
+      const p = Xe("div", {
         display: "flex",
         alignItems: "center",
         gap: "10px",
         marginTop: "12px",
-      }),
-      A = Xe(
+      });
+      const A = Xe(
         "span",
         { fontSize: "12px", color: n.muted },
-        `${M.length} field${M.length === 1 ? "" : "s"} filled · ${C.length} record${C.length === 1 ? "" : "s"} ready`,
+        `${totalCount} record${totalCount === 1 ? "" : "s"} ready across ${Object.keys(generatedData).length} objects`
       );
-    (p.appendChild(A),
-      (se = Xe(
+      p.appendChild(A);
+      
+      se = Xe(
         "button",
         {
           marginLeft: "auto",
@@ -11763,21 +11779,24 @@ function Qc(o, t) {
           fontWeight: "700",
           fontFamily: "inherit",
         },
-        `⬆ Insert ${C.length} records`,
-      )),
-      se.addEventListener("click", ye),
-      p.appendChild(se),
-      D.appendChild(p),
-      De());
+        `⬆ Insert ${totalCount} records`,
+      );
+      se.addEventListener("click", ye);
+      p.appendChild(se);
+      D.appendChild(p);
+      De();
+    }
   }
+
   const Me = (M) =>
     M.type === "string" || M.type === "textarea"
       ? `Text(${M.length || "?"})`
       : M.type === "reference"
         ? `Lookup(${M.referenceTo[0] || "?"})`
         : M.type.charAt(0).toUpperCase() + M.type.slice(1);
+
   function ye() {
-    if (C.length) {
+    if (Object.keys(generatedData).length) {
       if (re()) {
         Be(te);
         return;
@@ -11785,23 +11804,43 @@ function Qc(o, t) {
       te();
     }
   }
+
   async function te() {
-    if (!C.length) return;
-    se && ((se.textContent = "Inserting…"), (se.style.pointerEvents = "none"));
-    const M = await t.insertRecords(V, C);
-    if (M.error) {
-      z(0, C.length, [M.error]);
-      return;
+    if (!Object.keys(generatedData).length) return;
+    let totalCount = 0;
+    Object.keys(generatedData).forEach(k => totalCount += generatedData[k].length);
+    
+    if (se) {
+      se.textContent = "Inserting...";
+      se.style.pointerEvents = "none";
     }
-    const K = M.results || [];
-    Z = K.filter((q) => q.success && q.id).map((q) => q.id);
-    const j = K.filter((q) => !q.success).map((q) => {
-      const P = (q.errors && q.errors[0]) || {};
-      return `${P.statusCode || "ERROR"}: ${P.message || "insert failed"}`;
-    });
-    z(Z.length, K.length, Le(j));
+    
+    let totalInserted = 0;
+    let failuresList = [];
+    
+    for (const objName of Object.keys(generatedData)) {
+      const records = generatedData[objName];
+      const M = await t.insertRecords(objName, records);
+      if (M.error) {
+        failuresList.push(`${objName}: ${M.error}`);
+        continue;
+      }
+      const K = M.results || [];
+      const successes = K.filter((q) => q.success && q.id).map((q) => q.id);
+      insertedIds[objName] = successes;
+      totalInserted += successes.length;
+      
+      K.filter((q) => !q.success).forEach((q) => {
+        const P = (q.errors && q.errors[0]) || {};
+        failuresList.push(`${objName} - ${P.statusCode || "ERROR"}: ${P.message || "insert failed"}`);
+      });
+    }
+    
+    z(totalInserted, totalCount, Le(failuresList));
   }
+
   const Le = (M) => Array.from(new Set(M)).slice(0, 8);
+
   function z(M, K, j) {
     U.innerHTML = "";
     const q = Xe("div", {
@@ -11810,26 +11849,26 @@ function Qc(o, t) {
       padding: "14px",
       background: e ? "rgba(255,255,255,0.02)" : "#fff",
     });
-    if (
-      (q.appendChild(
-        Xe(
-          "div",
-          {
-            fontSize: "14px",
-            fontWeight: "800",
-            color: M > 0 ? n.ok : n.danger,
-          },
-          `Inserted ${M} of ${K} record${K === 1 ? "" : "s"}`,
-        ),
-      ),
-      j.length)
-    ) {
+    
+    q.appendChild(
+      Xe(
+        "div",
+        {
+          fontSize: "14px",
+          fontWeight: "800",
+          color: M > 0 ? n.ok : n.danger,
+        },
+        `Inserted ${M} of ${K} record${K === 1 ? "" : "s"}`,
+      )
+    );
+    
+    if (j.length) {
       q.appendChild(
         Xe(
           "div",
           { fontSize: "12px", color: n.muted, margin: "8px 0 4px" },
           `${K - M} failed — top reasons (often validation rules or triggers):`,
-        ),
+        )
       );
       const P = Xe("pre", {
         margin: "0",
@@ -11844,32 +11883,21 @@ function Qc(o, t) {
       ((P.textContent = j.join(`\n`)),
         q.appendChild(P));
     }
-    if (Z.length) {
+    
+    const allInsertedIds = [];
+    Object.keys(insertedIds).forEach(oName => {
+      allInsertedIds.push(...insertedIds[oName]);
+    });
+    
+    if (allInsertedIds.length) {
       const P = Xe("div", {
           display: "flex",
           alignItems: "center",
           gap: "10px",
           marginTop: "12px",
           flexWrap: "wrap",
-        }),
-        ee = Xe(
-          "button",
-          {
-            background: "transparent",
-            border: `1px solid ${n.border}`,
-            color: n.text,
-            borderRadius: "8px",
-            padding: "7px 12px",
-            cursor: "pointer",
-            fontSize: "12.5px",
-            fontWeight: "600",
-            fontFamily: "inherit",
-          },
-          "↗ Open first record",
-        );
-      ee.addEventListener("click", () =>
-        window.open(t.recordUrl(Z[0]), "_blank"),
-      );
+        });
+      
       const G = Xe(
         "button",
         {
@@ -11883,28 +11911,52 @@ function Qc(o, t) {
           fontWeight: "700",
           fontFamily: "inherit",
         },
-        `🗑 Delete these ${Z.length} records`,
+        `🗑 Delete these ${allInsertedIds.length} records`,
       );
-      (G.addEventListener("click", async () => {
-        ((G.textContent = "Deleting…"), (G.style.pointerEvents = "none"));
-        const T = await t.deleteRecords(Z);
-        if (T.error) {
-          (t.flashToast(T.error),
-            (G.textContent = "Delete failed — retry"),
-            (G.style.pointerEvents = "auto"));
+      
+      G.addEventListener("click", async () => {
+        G.textContent = "Deleting...";
+        G.style.pointerEvents = "none";
+        
+        let deleteFailed = false;
+        let deleteError = "";
+        
+        for (const objName of Object.keys(insertedIds)) {
+          const ids = insertedIds[objName];
+          if (ids.length === 0) continue;
+          const T = await t.deleteRecords(ids);
+          if (T.error) {
+            deleteFailed = true;
+            deleteError = T.error;
+          } else {
+            insertedIds[objName] = [];
+          }
+        }
+        
+        if (deleteFailed) {
+          t.flashToast(deleteError);
+          G.textContent = "Delete failed — retry";
+          G.style.pointerEvents = "auto";
           return;
         }
-        (t.flashToast(`Deleted ${Z.length} records`),
-          (Z = []),
-          (U.innerHTML = ""));
-      }),
-        P.appendChild(ee),
-        P.appendChild(G),
-        q.appendChild(P));
+        
+        t.flashToast(`Deleted generated records`);
+        U.innerHTML = "";
+      });
+      
+      P.appendChild(G);
+      q.appendChild(P);
     }
-    (U.appendChild(q),
-      se && ((se.textContent = `⬆ Insert ${C.length} records`), De()));
+    
+    U.appendChild(q);
+    if (se) {
+      let totalCount = 0;
+      Object.keys(generatedData).forEach(k => totalCount += generatedData[k].length);
+      se.textContent = `⬆ Insert ${totalCount} records`;
+      De();
+    }
   }
+
   L.addEventListener("click", ge);
 }
 const $o = "data-sfsl-magic",
@@ -12739,7 +12791,7 @@ function hp(o, t) {
       rt(
         "div",
         { fontSize: "15px", fontWeight: "800", color: n.text },
-        "🔐 Name Access Comparison",
+        "🔐 Profile & PermissionSet Comparison",
       ),
     ),
     i.appendChild(s));
@@ -12810,14 +12862,24 @@ function hp(o, t) {
   });
   i.appendChild(E);
   let u = "objects";
+  const tabs = [
+    { id: "system", label: "🛡️ System" },
+    { id: "objects", label: "📦 Objects" },
+    { id: "fields", label: "🔑 FLS" },
+    { id: "apex", label: "☕ Apex" },
+    { id: "vf", label: "📄 VF Pages" },
+    { id: "custom", label: "🔑 Custom" },
+    { id: "dependency", label: "📊 Dependency" }
+  ];
   const b = rt("div", {
       display: "inline-flex",
       border: `1px solid ${n.border}`,
       borderRadius: "8px",
       overflow: "hidden",
+      flexWrap: "wrap",
     }),
     N = {};
-  ["objects", "fields"].forEach((P) => {
+  tabs.forEach(({ id: P, label: lbl }) => {
     const ee = rt(
       "button",
       {
@@ -12829,7 +12891,7 @@ function hp(o, t) {
         fontFamily: "inherit",
         color: n.muted,
       },
-      P === "objects" ? "Objects" : "Fields",
+      lbl,
     );
     (ee.addEventListener("click", () => {
       ((u = P), F(), te());
@@ -12930,10 +12992,14 @@ function hp(o, t) {
       ["E", "Edit"],
     ],
     re = () => {
-      const P = (u === "objects" ? Z : X)
-        .map(([ee, G]) => C(ee, G))
-        .join(" &nbsp;·&nbsp; ");
-      V.innerHTML = `Access: ${P}<br><span style="color:${n.grant}">■</span> granted &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
+      if (u === "objects" || u === "fields") {
+        const P = (u === "objects" ? Z : X)
+          .map(([ee, G]) => C(ee, G))
+          .join(" &nbsp;·&nbsp; ");
+        V.innerHTML = `Access: ${P}<br><span style="color:${n.grant}">■</span> granted &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
+      } else {
+        V.innerHTML = `Access / Assignment:<br><span style="color:${n.grant}">■</span> granted / assigned &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted / assigned &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
+      }
     },
     se = rt("div", { flex: "1", minHeight: "0", overflow: "auto" });
   i.appendChild(se);
@@ -12949,7 +13015,7 @@ function hp(o, t) {
   (ge("Loading permission sets & profiles…"),
     t
       .runQuery(
-        "SELECT Id, Label, Name, IsOwnedByProfile, Profile.Name FROM PermissionSet ORDER BY IsOwnedByProfile DESC, Label LIMIT 2000",
+        "SELECT Id, Label, Name, IsOwnedByProfile, Profile.Name, Type FROM PermissionSet ORDER BY IsOwnedByProfile DESC, Label LIMIT 2000",
       )
       .then(({ records: P, error: ee }) => {
         if (ee) {
@@ -12959,9 +13025,12 @@ function hp(o, t) {
         ((De = P.map((G) => ({
           id: G.Id,
           isProfile: !!G.IsOwnedByProfile,
+          isGroup: G.Type === "Group",
           label: G.IsOwnedByProfile
             ? `Profile: ${G.Profile?.Name || G.Label}`
-            : G.Label || G.Name,
+            : G.Type === "Group"
+              ? `Group: ${G.Label || G.Name}`
+              : G.Label || G.Name,
         })).sort((G, T) => G.label.localeCompare(T.label))),
           ue(y),
           ue(g),
@@ -12975,20 +13044,23 @@ function hp(o, t) {
     const ee = rt("option");
     ((ee.value = ""), (ee.textContent = "— select —"), P.appendChild(ee));
     const G = De.filter((H) => H.isProfile),
-      T = De.filter((H) => !H.isProfile),
-      w = (H, p) => {
+      T = De.filter((H) => !H.isProfile && !H.isGroup),
+      psgs = De.filter((H) => H.isGroup),
+      w = (H, p, prefix) => {
         if (!p.length) return;
         const A = document.createElement("optgroup");
         ((A.label = H),
           p.forEach((Q) => {
             const S = rt("option");
             ((S.value = Q.id),
-              (S.textContent = Q.label.replace(/^Profile:\s*/, "")),
+              (S.textContent = Q.label.replace(prefix, "")),
               A.appendChild(S));
           }),
           P.appendChild(A));
       };
-    (w("Profiles", G), w("Permission Sets", T));
+    (w("Profiles", G, /^Profile:\s*/),
+     w("Permission Sets", T, ""),
+     w("Permission Set Groups", psgs, /^Group:\s*/));
   }
   (y.addEventListener("change", () => {
     ((Be = null), te());
@@ -13023,6 +13095,319 @@ function hp(o, t) {
         G
       );
     };
+
+  const renderStatus = (granted) => {
+    const span = rt("span", null, granted ? "■" : "A");
+    Object.assign(span.style, {
+      color: granted ? n.grant : n.faint,
+      textDecoration: granted ? "none" : "line-through",
+      opacity: granted ? "1" : "0.6",
+      fontWeight: "800",
+    });
+    return span;
+  };
+
+  let cachedSystemFields = null;
+  async function compareSystemPerms(P, ee) {
+    if (!cachedSystemFields) {
+      ge("Describing System Permissions...");
+      const creds = await it();
+      if (!creds || !creds.instanceUrl || !creds.sessionId) {
+        ge("Salesforce session not detected.");
+        return;
+      }
+      const fieldsRes = await new Promise((resolve) => {
+        globalThis.chrome.runtime.sendMessage(
+          {
+            type: "GET_OBJECT_FIELDS",
+            objectApiName: "PermissionSet",
+            instanceUrl: creds.instanceUrl,
+            sessionId: creds.sessionId,
+          },
+          (res) => resolve(res)
+        );
+      });
+      if (!fieldsRes || !fieldsRes.success || !fieldsRes.data) {
+        ge("Could not describe PermissionSet: " + (fieldsRes?.error || "Unknown error"));
+        return;
+      }
+      cachedSystemFields = fieldsRes.data
+        .map(f => f.name)
+        .filter(name => name.startsWith("Permissions"))
+        .sort();
+    }
+
+    ge("Loading System Permissions...");
+    const fieldsToQuery = cachedSystemFields.join(", ");
+    const { records: permSets, error: queryErr } = await t.runQuery(
+      `SELECT Id, ${fieldsToQuery} FROM PermissionSet WHERE Id IN ('${P}', '${ee}')`
+    );
+    if (queryErr) {
+      ge("Could not load system permissions data: " + queryErr);
+      return;
+    }
+
+    const mapA = permSets.find(r => r.Id === P) || {};
+    const mapB = permSets.find(r => r.Id === ee) || {};
+
+    let filtered = cachedSystemFields.filter(f => !x || f.toLowerCase().includes(x));
+    if (U) {
+      filtered = filtered.filter(f => !mapA[f] !== !mapB[f]);
+    }
+
+    $.textContent = `${filtered.length} permission${filtered.length === 1 ? "" : "s"}`;
+
+    const table = M(["System Permission", be(P), be(ee)]);
+    const tbody = table.querySelector("tbody");
+
+    filtered.forEach((f, idx) => {
+      const valA = !!mapA[f];
+      const valB = !!mapB[f];
+      const differs = valA !== valB;
+      const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+
+      const cleanName = f.replace(/^Permissions/, "");
+      tr.appendChild(rt("td", K(), cleanName));
+
+      const tdA = rt("td", j());
+      tdA.appendChild(renderStatus(valA));
+      tr.appendChild(tdA);
+
+      const tdB = rt("td", j());
+      tdB.appendChild(renderStatus(valB));
+      tr.appendChild(tdB);
+
+      tbody.appendChild(tr);
+    });
+
+    q(table, filtered.length, "No system permissions match.");
+  }
+
+  async function compareSetupEntity(P, ee, type, sobjectName, labelSingular) {
+    ge(`Loading ${labelSingular} access...`);
+    const { records: accessRecs, error: err } = await t.runQuery(
+      `SELECT ParentId, SetupEntityId FROM SetupEntityAccess WHERE ParentId IN ('${P}', '${ee}') AND SetupEntityType = '${type}' LIMIT 5000`
+    );
+    if (err) {
+      ge(`Could not load ${labelSingular} access: ` + err);
+      return;
+    }
+
+    const setA = new Set();
+    const setB = new Set();
+    accessRecs.forEach(r => {
+      if (r.ParentId === P) setA.add(r.SetupEntityId);
+      if (r.ParentId === ee) setB.add(r.SetupEntityId);
+    });
+
+    const allIds = Array.from(new Set([...setA, ...setB]));
+    let itemsMap = new Map();
+
+    if (allIds.length > 0) {
+      const idChunks = [];
+      for (let idx = 0; idx < allIds.length; idx += 500) {
+        idChunks.push(allIds.slice(idx, idx + 500));
+      }
+
+      for (const chunk of idChunks) {
+        const idList = chunk.map(id => `'${id}'`).join(", ");
+        const fields = sobjectName === "CustomPermission" ? "Id, DeveloperName, NamespacePrefix" : "Id, Name";
+        const { records: items, error: itemErr } = await t.runQuery(
+          `SELECT ${fields} FROM ${sobjectName} WHERE Id IN (${idList})`
+        );
+        if (itemErr) {
+          ge(`Could not load ${labelSingular} names: ` + itemErr);
+          return;
+        }
+        items.forEach(item => {
+          let name = item.Name;
+          if (sobjectName === "CustomPermission") {
+            name = item.NamespacePrefix ? `${item.NamespacePrefix}.${item.DeveloperName}` : item.DeveloperName;
+          }
+          itemsMap.set(item.Id, name);
+        });
+      }
+    }
+
+    let sortedIds = Array.from(itemsMap.keys()).sort((id1, id2) =>
+      (itemsMap.get(id1) || "").localeCompare(itemsMap.get(id2) || "")
+    );
+
+    let filteredIds = sortedIds.filter(id => {
+      const name = itemsMap.get(id) || "";
+      return !x || name.toLowerCase().includes(x);
+    });
+
+    if (U) {
+      filteredIds = filteredIds.filter(id => setA.has(id) !== setB.has(id));
+    }
+
+    $.textContent = `${filteredIds.length} ${labelSingular}${filteredIds.length === 1 ? "" : "s"}`;
+
+    const table = M([sobjectName === "CustomPermission" ? "Custom Permission" : sobjectName === "ApexClass" ? "Apex Class" : "Visualforce Page", be(P), be(ee)]);
+    const tbody = table.querySelector("tbody");
+
+    filteredIds.forEach((id, idx) => {
+      const valA = setA.has(id);
+      const valB = setB.has(id);
+      const differs = valA !== valB;
+      const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+
+      tr.appendChild(rt("td", K(), itemsMap.get(id) || id));
+
+      const tdA = rt("td", j());
+      tdA.appendChild(renderStatus(valA));
+      tr.appendChild(tdA);
+
+      const tdB = rt("td", j());
+      tdB.appendChild(renderStatus(valB));
+      tr.appendChild(tdB);
+
+      tbody.appendChild(tr);
+    });
+
+    q(table, filteredIds.length, `No ${labelSingular}s match.`);
+  }
+
+  async function compareDependencies(P, ee) {
+    ge("Loading dependencies...");
+
+    const [{ records: psgs, error: psgErr }, { records: assignments, error: assignErr }] = await Promise.all([
+      t.runQuery(`SELECT PermissionSetGroupId, PermissionSetGroup.DeveloperName, PermissionSetGroup.MasterLabel, PermissionSetId FROM PermissionSetGroupComponent WHERE PermissionSetId IN ('${P}', '${ee}') LIMIT 5000`),
+      t.runQuery(`SELECT AssigneeId, Assignee.Name, Assignee.Username, PermissionSetId FROM PermissionSetAssignment WHERE PermissionSetId IN ('${P}', '${ee}') AND Assignee.IsActive = true LIMIT 1000`)
+    ]);
+
+    if (psgErr || assignErr) {
+      ge("Could not load dependencies: " + (psgErr || assignErr));
+      return;
+    }
+
+    const psgMap = new Map();
+    const psgSetA = new Set();
+    const psgSetB = new Set();
+    psgs.forEach(r => {
+      if (r.PermissionSetGroup) {
+        psgMap.set(r.PermissionSetGroupId, {
+          name: r.PermissionSetGroup.DeveloperName,
+          label: r.PermissionSetGroup.MasterLabel
+        });
+        if (r.PermissionSetId === P) psgSetA.add(r.PermissionSetGroupId);
+        if (r.PermissionSetId === ee) psgSetB.add(r.PermissionSetGroupId);
+      }
+    });
+
+    const userMap = new Map();
+    const userSetA = new Set();
+    const userSetB = new Set();
+    assignments.forEach(r => {
+      if (r.Assignee) {
+        userMap.set(r.AssigneeId, {
+          name: r.Assignee.Name,
+          username: r.Assignee.Username
+        });
+        if (r.PermissionSetId === P) userSetA.add(r.AssigneeId);
+        if (r.PermissionSetId === ee) userSetB.add(r.AssigneeId);
+      }
+    });
+
+    const container = rt("div", { padding: "16px", display: "flex", flexDirection: "column", gap: "24px" });
+
+    const psgTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginBottom: "8px", color: n.text }, "Permission Set Groups");
+    container.appendChild(psgTitle);
+
+    let sortedPsgIds = Array.from(psgMap.keys()).sort((id1, id2) =>
+      (psgMap.get(id1).label || "").localeCompare(psgMap.get(id2).label || "")
+    );
+
+    let filteredPsgIds = sortedPsgIds.filter(id => {
+      const g = psgMap.get(id);
+      const searchStr = `${g.label} ${g.name}`.toLowerCase();
+      return !x || searchStr.includes(x);
+    });
+
+    if (U) {
+      filteredPsgIds = filteredPsgIds.filter(id => psgSetA.has(id) !== psgSetB.has(id));
+    }
+
+    const psgTable = M(["Group Name (API Name)", be(P), be(ee)]);
+    const psgTbody = psgTable.querySelector("tbody");
+    filteredPsgIds.forEach((id, idx) => {
+      const g = psgMap.get(id);
+      const valA = psgSetA.has(id);
+      const valB = psgSetB.has(id);
+      const differs = valA !== valB;
+      const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+
+      tr.appendChild(rt("td", K(), `${g.label} (${g.name})`));
+
+      const tdA = rt("td", j());
+      tdA.appendChild(renderStatus(valA));
+      tr.appendChild(tdA);
+
+      const tdB = rt("td", j());
+      tdB.appendChild(renderStatus(valB));
+      tr.appendChild(tdB);
+
+      psgTbody.appendChild(tr);
+    });
+
+    if (filteredPsgIds.length === 0) {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "No Permission Set Groups match."));
+    } else {
+      container.appendChild(psgTable);
+    }
+
+    const userTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginTop: "12px", marginBottom: "8px", color: n.text }, "Active User Assignments (Max 1000)");
+    container.appendChild(userTitle);
+
+    let sortedUserIds = Array.from(userMap.keys()).sort((id1, id2) =>
+      (userMap.get(id1).name || "").localeCompare(userMap.get(id2).name || "")
+    );
+
+    let filteredUserIds = sortedUserIds.filter(id => {
+      const uInfo = userMap.get(id);
+      const searchStr = `${uInfo.name} ${uInfo.username}`.toLowerCase();
+      return !x || searchStr.includes(x);
+    });
+
+    if (U) {
+      filteredUserIds = filteredUserIds.filter(id => userSetA.has(id) !== userSetB.has(id));
+    }
+
+    const userTable = M(["User Name (Username)", be(P), be(ee)]);
+    const userTbody = userTable.querySelector("tbody");
+    filteredUserIds.forEach((id, idx) => {
+      const uInfo = userMap.get(id);
+      const valA = userSetA.has(id);
+      const valB = userSetB.has(id);
+      const differs = valA !== valB;
+      const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+
+      tr.appendChild(rt("td", K(), `${uInfo.name} (${uInfo.username})`));
+
+      const tdA = rt("td", j());
+      tdA.appendChild(renderStatus(valA));
+      tr.appendChild(tdA);
+
+      const tdB = rt("td", j());
+      tdB.appendChild(renderStatus(valB));
+      tr.appendChild(tdB);
+
+      userTbody.appendChild(tr);
+    });
+
+    if (filteredUserIds.length === 0) {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "No User Assignments match."));
+    } else {
+      container.appendChild(userTable);
+    }
+
+    $.textContent = `${filteredPsgIds.length} group${filteredPsgIds.length === 1 ? "" : "s"}, ${filteredUserIds.length} user${filteredUserIds.length === 1 ? "" : "s"}`;
+
+    se.innerHTML = "";
+    se.appendChild(container);
+  }
+
   async function te() {
     re();
     const P = y.value,
@@ -13038,7 +13423,13 @@ function hp(o, t) {
       (ge("Pick two different entries to compare."), ($.textContent = ""));
       return;
     }
-    return u === "objects" ? Le(P, ee) : z(P, ee);
+    if (u === "objects") return Le(P, ee);
+    if (u === "fields") return z(P, ee);
+    if (u === "system") return compareSystemPerms(P, ee);
+    if (u === "apex") return compareSetupEntity(P, ee, "ApexClass", "ApexClass", "class");
+    if (u === "vf") return compareSetupEntity(P, ee, "ApexPage", "ApexPage", "page");
+    if (u === "custom") return compareSetupEntity(P, ee, "CustomPermission", "CustomPermission", "permission");
+    if (u === "dependency") return compareDependencies(P, ee);
   }
   async function Le(P, ee) {
     const G = `${P}|${ee}`;
@@ -19588,7 +19979,7 @@ function zp(o, t) {
       x.appendChild(Z));
   };
   (L("🐞", "Fetch logs", () => t.goToTab("debug")),
-    L("🧪", "Sample data", () => t.openTool("sampledata")),
+    L("🧪", "Multiple Data", () => t.openTool("sampledata")),
     L("⚡", "Run Apex", () => t.openTool("executeanonymous")),
     L("📈", "Org limits", () => t.openTool("orglimits")),
     L("🧭", "Automation map", () => t.openTool("automationmap")),
@@ -27725,7 +28116,7 @@ function Us(o, t, e, n) {
 function renderBulkFieldCreator(container, isDark, onBack) {
   const e = kt(isDark);
   container.innerHTML = "";
-  
+
   const mainDiv = $e("div", {
     height: "100%",
     minHeight: "0",
@@ -27735,13 +28126,13 @@ function renderBulkFieldCreator(container, isDark, onBack) {
     color: e.text
   });
   container.appendChild(mainDiv);
-  
+
   const { head: header, right: headerRight } = Wo(e, "✨ Bulk Field Creator", onBack, "Object Manager");
   mainDiv.appendChild(header);
-  
+
   const subLabel = $e("div", { fontSize: "12px", color: e.faint, fontWeight: "600" });
   headerRight.appendChild(subLabel);
-  
+
   const body = $e("div", {
     flex: "1",
     minHeight: "0",
@@ -27749,27 +28140,27 @@ function renderBulkFieldCreator(container, isDark, onBack) {
     padding: "6px 28px 28px"
   });
   mainDiv.appendChild(body);
-  
+
   let selectedObject = null;
-  
+
   const updateHeaderLabel = () => {
-    subLabel.textContent = selectedObject 
+    subLabel.textContent = selectedObject
       ? `${selectedObject.Label || selectedObject.QualifiedApiName} (${selectedObject.QualifiedApiName})`
       : "";
   };
-  
+
   function renderChooseObjectStep() {
     updateHeaderLabel();
     body.innerHTML = "";
     body.appendChild(un(e, "Step 1 · Choose the object"));
-    
+
     const searchInput = jt(e, "Search objects…");
     searchInput.style.maxWidth = "340px";
     body.appendChild(searchInput);
-    
+
     const resultsContainer = $e("div", { marginTop: "12px" });
     body.appendChild(resultsContainer);
-    
+
     const showMessage = (msg) => {
       resultsContainer.innerHTML = "";
       resultsContainer.appendChild($e("div", {
@@ -27780,24 +28171,24 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         fontWeight: "600"
       }, msg));
     };
-    
+
     showMessage("Loading objects…");
     let allObjects = [];
-    
+
     const filterAndRender = () => {
       const term = searchInput.value.trim().toLowerCase();
-      const filtered = allObjects.filter(obj => 
-        !term || 
-        (obj.Label || obj.QualifiedApiName).toLowerCase().includes(term) || 
+      const filtered = allObjects.filter(obj =>
+        !term ||
+        (obj.Label || obj.QualifiedApiName).toLowerCase().includes(term) ||
         obj.QualifiedApiName.toLowerCase().includes(term)
       ).slice(0, 200);
-      
+
       resultsContainer.innerHTML = "";
       if (filtered.length === 0) {
         showMessage("No objects match.");
         return;
       }
-      
+
       filtered.forEach((obj, idx) => {
         const rowBtn = $e("button", {
           display: "flex",
@@ -27813,25 +28204,25 @@ function renderBulkFieldCreator(container, isDark, onBack) {
           fontFamily: "inherit",
           color: e.text
         });
-        
+
         rowBtn.appendChild($e("span", { fontSize: "16px" }, obj.IsCustomizable ? "🧱" : "📦"));
         rowBtn.appendChild($e("span", { fontSize: "13px", fontWeight: "700" }, obj.Label || obj.QualifiedApiName));
         rowBtn.appendChild($e("span", { fontSize: "12px", color: e.faint }, obj.QualifiedApiName));
-        
+
         rowBtn.addEventListener("mouseover", () => { rowBtn.style.background = e.accentSoft; });
         rowBtn.addEventListener("mouseout", () => { rowBtn.style.background = idx % 2 === 0 ? "transparent" : e.zebra; });
-        
+
         rowBtn.addEventListener("click", () => {
           selectedObject = obj;
           renderCreatorForm();
         });
-        
+
         resultsContainer.appendChild(rowBtn);
       });
     };
-    
+
     searchInput.addEventListener("input", filterAndRender);
-    
+
     it().then(session => {
       if (!session?.instanceUrl || !session?.sessionId) {
         showMessage("Salesforce session not detected.");
@@ -27852,11 +28243,11 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       });
     });
   }
-  
+
   function renderCreatorForm() {
     updateHeaderLabel();
     body.innerHTML = "";
-    
+
     const controlsRow = $e("div", { display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" });
     const changeObjBtn = Ht(e, "← Change object");
     changeObjBtn.addEventListener("click", () => {
@@ -27865,12 +28256,12 @@ function renderBulkFieldCreator(container, isDark, onBack) {
     });
     controlsRow.appendChild(changeObjBtn);
     body.appendChild(controlsRow);
-    
+
     const banner = To(e);
     body.appendChild(banner.node);
-    
+
     body.appendChild(un(e, "Step 2 · Paste CSV/TSV Field List"));
-    
+
     const csvArea = $e("textarea", {
       width: "100%",
       height: "150px",
@@ -27887,14 +28278,14 @@ function renderBulkFieldCreator(container, isDark, onBack) {
     });
     csvArea.placeholder = "Label,API Name,Type,Length,Picklist Values,Required\nNew TextField,New_Text__c,Text,255,,false\nNew Status,Status__c,Picklist,,Active,Inactive,true";
     body.appendChild(csvArea);
-    
+
     body.appendChild(un(e, "Step 3 · Field-Level Security"));
     body.appendChild($e("div", { fontSize: "12px", color: e.muted, marginBottom: "8px" }, "Select profiles/permission sets to grant FLS to newly created fields:"));
-    
+
     const flsSearch = jt(e, "Filter profiles & permission sets…");
     flsSearch.style.maxWidth = "340px";
     body.appendChild(flsSearch);
-    
+
     const flsListDiv = $e("div", {
       maxHeight: "180px",
       overflowY: "auto",
@@ -27908,20 +28299,20 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       gap: "4px"
     });
     body.appendChild(flsListDiv);
-    
+
     let flsTargets = [];
     const selectedFls = new Set();
-    
+
     const renderFlsList = () => {
       flsListDiv.innerHTML = "";
       const term = flsSearch.value.toLowerCase().trim();
       const filtered = flsTargets.filter(t => !term || t.label.toLowerCase().includes(term));
-      
+
       if (filtered.length === 0) {
         flsListDiv.appendChild($e("div", { padding: "8px", fontSize: "12px", color: e.faint }, "No profiles or permission sets found."));
         return;
       }
-      
+
       filtered.forEach(target => {
         const row = $e("label", {
           display: "flex",
@@ -27941,16 +28332,16 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         });
         row.appendChild(cb);
         row.appendChild(document.createTextNode(`${target.isProfile ? "👤" : "🔑"} ${target.label}`));
-        
+
         row.addEventListener("mouseover", () => { row.style.background = e.accentSoft; });
         row.addEventListener("mouseout", () => { row.style.background = "transparent"; });
-        
+
         flsListDiv.appendChild(row);
       });
     };
-    
+
     flsSearch.addEventListener("input", renderFlsList);
-    
+
     it().then(session => {
       if (!session?.instanceUrl || !session?.sessionId) return;
       globalThis.chrome.runtime.sendMessage({
@@ -27964,11 +28355,11 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         }
       });
     });
-    
+
     const deployBtn = Ht(e, "Deploy Fields", "primary");
     deployBtn.style.marginTop = "16px";
     body.appendChild(deployBtn);
-    
+
     const progressArea = $e("div", {
       marginTop: "20px",
       display: "flex",
@@ -27976,14 +28367,14 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       gap: "10px"
     });
     body.appendChild(progressArea);
-    
+
     function parseCSV(text) {
       const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
       if (lines.length < 2) return [];
-      
+
       const headers = lines[0].split(",").map(h => h.trim().replace(/^["']|["']$/g, "").toLowerCase());
       const fields = [];
-      
+
       for (let i = 1; i < lines.length; i++) {
         const parts = lines[i].split(",").map(p => p.trim().replace(/^["']|["']$/g, ""));
         const field = {};
@@ -27992,7 +28383,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             field[h] = parts[idx];
           }
         });
-        
+
         if (field.label) {
           if (!field["api name"]) {
             field["api name"] = field.label.trim().replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") + "__c";
@@ -28007,25 +28398,25 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       }
       return fields;
     }
-    
+
     deployBtn.addEventListener("click", async () => {
       const csvVal = csvArea.value.trim();
       if (!csvVal) {
         banner.show("Please paste some field data.", "error");
         return;
       }
-      
+
       const fields = parseCSV(csvVal);
       if (fields.length === 0) {
         banner.show("Could not parse any fields from CSV.", "error");
         return;
       }
-      
+
       banner.show(`Starting deployment of ${fields.length} fields...`, "info");
       progressArea.innerHTML = "";
       deployBtn.disabled = true;
       deployBtn.style.opacity = "0.5";
-      
+
       const session = await it();
       if (!session?.instanceUrl || !session?.sessionId) {
         banner.show("Session lost.", "error");
@@ -28033,10 +28424,10 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         deployBtn.style.opacity = "1";
         return;
       }
-      
+
       const createdFields = [];
       const objName = selectedObject.QualifiedApiName;
-      
+
       for (let i = 0; i < fields.length; i++) {
         const f = fields[i];
         const row = $e("div", {
@@ -28052,7 +28443,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
         const statusSpan = $e("span", { fontSize: "12px", fontWeight: "700", color: e.muted }, "Creating...");
         row.appendChild(statusSpan);
         progressArea.appendChild(row);
-        
+
         const payload = {
           FullName: `${objName}.${f["api name"]}`,
           Metadata: {
@@ -28069,7 +28460,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             }
           };
         }
-        
+
         const res = await new Promise(resolve => {
           globalThis.chrome.runtime.sendMessage({
             type: "CREATE_CUSTOM_FIELD",
@@ -28079,7 +28470,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             metadata: payload.Metadata
           }, resolve);
         });
-        
+
         if (res?.success) {
           statusSpan.textContent = "✅ Created";
           statusSpan.style.color = e.success;
@@ -28089,7 +28480,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
           statusSpan.style.color = e.danger;
         }
       }
-      
+
       if (createdFields.length > 0 && selectedFls.size > 0) {
         banner.show(`Granting FLS to ${createdFields.length} fields for ${selectedFls.size} targets...`, "info");
         const grants = [];
@@ -28104,7 +28495,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             });
           });
         });
-        
+
         const flsRes = await new Promise(resolve => {
           globalThis.chrome.runtime.sendMessage({
             type: "GRANT_FIELD_PERMISSIONS",
@@ -28113,7 +28504,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
             grants
           }, resolve);
         });
-        
+
         if (flsRes?.success) {
           banner.show(`✅ Successfully created ${createdFields.length} field(s) and granted FLS.`, "success");
         } else {
@@ -28124,12 +28515,12 @@ function renderBulkFieldCreator(container, isDark, onBack) {
       } else {
         banner.show("❌ Failed to create any fields.", "error");
       }
-      
+
       deployBtn.disabled = false;
       deployBtn.style.opacity = "1";
     });
   }
-  
+
   renderChooseObjectStep();
 }
 
@@ -28137,7 +28528,7 @@ function renderBulkFieldCreator(container, isDark, onBack) {
 function renderObjectDetails(container, isDark, onBack) {
   container.innerHTML = "";
   const e = kt(isDark);
-  
+
   const mainDiv = $e("div", {
     height: "100%",
     minHeight: "0",
@@ -28147,10 +28538,10 @@ function renderObjectDetails(container, isDark, onBack) {
     color: e.text
   });
   container.appendChild(mainDiv);
-  
+
   const { head: header } = Wo(e, "📦 Object Details", onBack, "Tools");
   mainDiv.appendChild(header);
-  
+
   const body = $e("div", {
     flex: "1",
     minHeight: "0",
@@ -28158,10 +28549,10 @@ function renderObjectDetails(container, isDark, onBack) {
     padding: "24px 28px"
   });
   mainDiv.appendChild(body);
-  
+
   const banner = To(e);
   body.appendChild(banner.node);
-  
+
   const selectSection = $e("div", {
     display: "flex",
     gap: "12px",
@@ -28169,14 +28560,14 @@ function renderObjectDetails(container, isDark, onBack) {
     marginBottom: "20px"
   });
   body.appendChild(selectSection);
-  
+
   const selectLabel = $e("label", {
     fontSize: "13px",
     fontWeight: "700",
     color: e.muted
   }, "Select Object:");
   selectSection.appendChild(selectLabel);
-  
+
   const objectSelect = $e("select", {
     padding: "8px 12px",
     fontSize: "13px",
@@ -28189,26 +28580,26 @@ function renderObjectDetails(container, isDark, onBack) {
     minWidth: "200px"
   });
   selectSection.appendChild(objectSelect);
-  
+
   const emptyOption = $e("option", {}, "-- None --");
   objectSelect.appendChild(emptyOption);
-  
+
   const detailsContainer = $e("div", {
     display: "none",
     flexDirection: "column",
     gap: "20px"
   });
   body.appendChild(detailsContainer);
-  
+
   banner.show("Loading objects...", "info");
-  
+
   let objectsList = [];
   it().then((session) => {
     if (!session?.instanceUrl || !session?.sessionId) {
       banner.show("Salesforce session not detected.", "error");
       return;
     }
-    
+
     globalThis.chrome.runtime.sendMessage({
       type: "GET_ALL_OBJECTS",
       instanceUrl: session.instanceUrl,
@@ -28227,7 +28618,7 @@ function renderObjectDetails(container, isDark, onBack) {
       });
     });
   });
-  
+
   objectSelect.addEventListener("change", () => {
     const objName = objectSelect.value;
     if (!objName || objName === "-- None --") {
@@ -28236,11 +28627,11 @@ function renderObjectDetails(container, isDark, onBack) {
     }
     loadObjectDetails(objName);
   });
-  
+
   function loadObjectDetails(objName) {
     banner.show(`Describing ${objName}...`, "info");
     detailsContainer.style.display = "none";
-    
+
     it().then((session) => {
       globalThis.chrome.runtime.sendMessage({
         type: "DESCRIBE_FOR_SAMPLE",
@@ -28257,20 +28648,20 @@ function renderObjectDetails(container, isDark, onBack) {
       });
     });
   }
-  
+
   function renderLoadedDetails(data, objName) {
     detailsContainer.innerHTML = "";
     detailsContainer.style.display = "flex";
-    
+
     const objInfo = objectsList.find(o => o.QualifiedApiName === objName) || {};
-    
+
     const summaryRow = $e("div", {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
       gap: "16px"
     });
     detailsContainer.appendChild(summaryRow);
-    
+
     const createCard = (title, val) => {
       const card = $e("div", {
         background: e.panel,
@@ -28285,12 +28676,12 @@ function renderObjectDetails(container, isDark, onBack) {
       card.appendChild($e("div", { fontSize: "15px", fontWeight: "800", color: e.text }, val));
       return card;
     };
-    
+
     summaryRow.appendChild(createCard("Label", data.label || objName));
     summaryRow.appendChild(createCard("API Name", objName));
     summaryRow.appendChild(createCard("Key Prefix", objInfo.KeyPrefix || "N/A"));
     summaryRow.appendChild(createCard("Type", objInfo.IsCustomizable ? "Custom Object" : "Standard Object"));
-    
+
     const capabilities = $e("div", {
       display: "flex",
       gap: "8px",
@@ -28298,7 +28689,7 @@ function renderObjectDetails(container, isDark, onBack) {
       marginTop: "4px"
     });
     detailsContainer.appendChild(capabilities);
-    
+
     const addBadge = (lbl, active) => {
       const b = $e("span", {
         fontSize: "11px",
@@ -28312,11 +28703,11 @@ function renderObjectDetails(container, isDark, onBack) {
       capabilities.appendChild(b);
     };
     addBadge("Createable", data.createable);
-    
+
     const fields = data.fields || [];
     const customFieldsCount = fields.filter(f => f.name.endsWith("__c")).length;
     const standardFieldsCount = fields.length - customFieldsCount;
-    
+
     const statsRow = $e("div", {
       display: "grid",
       gridTemplateColumns: "repeat(3, 1fr)",
@@ -28327,7 +28718,7 @@ function renderObjectDetails(container, isDark, onBack) {
     statsRow.appendChild(createCard("Total Fields", String(fields.length)));
     statsRow.appendChild(createCard("Standard Fields", String(standardFieldsCount)));
     statsRow.appendChild(createCard("Custom Fields", String(customFieldsCount)));
-    
+
     const actionRow = $e("div", {
       display: "flex",
       gap: "12px",
@@ -28335,7 +28726,7 @@ function renderObjectDetails(container, isDark, onBack) {
       marginTop: "12px"
     });
     detailsContainer.appendChild(actionRow);
-    
+
     const searchInput = $e("input", {
       flex: "1",
       padding: "8px 12px",
@@ -28348,7 +28739,7 @@ function renderObjectDetails(container, isDark, onBack) {
       placeholder: "Filter fields by label, API name or type..."
     });
     actionRow.appendChild(searchInput);
-    
+
     const exportBtn = $e("button", {
       padding: "8px 14px",
       fontSize: "13px",
@@ -28360,7 +28751,7 @@ function renderObjectDetails(container, isDark, onBack) {
       cursor: "pointer"
     }, "Download CSV");
     actionRow.appendChild(exportBtn);
-    
+
     exportBtn.addEventListener("click", () => {
       let csv = "Label,API Name,Type,Length,Required,Unique,External ID\n";
       fields.forEach(f => {
@@ -28375,7 +28766,7 @@ function renderObjectDetails(container, isDark, onBack) {
       link.click();
       document.body.removeChild(link);
     });
-    
+
     const tableDiv = $e("div", {
       marginTop: "10px",
       border: `1px solid ${e.border}`,
@@ -28383,14 +28774,14 @@ function renderObjectDetails(container, isDark, onBack) {
       overflow: "hidden"
     });
     detailsContainer.appendChild(tableDiv);
-    
+
     const table = $e("table", {
       width: "100%",
       borderCollapse: "collapse",
       fontSize: "13px"
     });
     tableDiv.appendChild(table);
-    
+
     const thead = $e("thead");
     const tr = $e("tr");
     ["Label", "API Name", "Type", "Length", "Properties"].forEach(col => {
@@ -28408,20 +28799,20 @@ function renderObjectDetails(container, isDark, onBack) {
     });
     thead.appendChild(tr);
     table.appendChild(thead);
-    
+
     const tbody = $e("tbody");
     table.appendChild(tbody);
-    
+
     function filterTable() {
       tbody.innerHTML = "";
       const term = searchInput.value.toLowerCase().trim();
       const filtered = fields.filter(f => {
-        return !term || 
-               f.label.toLowerCase().includes(term) || 
-               f.name.toLowerCase().includes(term) || 
+        return !term ||
+               f.label.toLowerCase().includes(term) ||
+               f.name.toLowerCase().includes(term) ||
                f.type.toLowerCase().includes(term);
       });
-      
+
       filtered.forEach((f, idx) => {
         const row = $e("tr", {
           borderBottom: `1px solid ${e.divider}`,
@@ -28429,18 +28820,18 @@ function renderObjectDetails(container, isDark, onBack) {
         });
         row.addEventListener("mouseover", () => { row.style.background = e.rowHover; });
         row.addEventListener("mouseout", () => { row.style.background = idx % 2 === 0 ? "transparent" : e.zebra; });
-        
+
         row.appendChild($e("td", { padding: "10px 14px", fontWeight: "700" }, f.label));
         row.appendChild($e("td", { padding: "10px 14px", fontFamily: "monospace", fontSize: "12px" }, f.name));
         row.appendChild($e("td", { padding: "10px 14px" }, f.type));
         row.appendChild($e("td", { padding: "10px 14px" }, String(f.length || "")));
-        
+
         const props = [];
         if (!f.nillable && !f.defaultedOnCreate) props.push("Required");
         if (f.unique) props.push("Unique");
         if (f.externalId) props.push("ExtID");
         if (f.calculated) props.push("Formula");
-        
+
         const tdProps = $e("td", { padding: "10px 14px" });
         props.forEach(p => {
           const badge = $e("span", {
@@ -28458,7 +28849,7 @@ function renderObjectDetails(container, isDark, onBack) {
         tbody.appendChild(row);
       });
     }
-    
+
     searchInput.addEventListener("input", filterTable);
     filterTable();
   }
@@ -28555,14 +28946,14 @@ function loadAllFieldsIncludingRelationships(objectName, baseFields, callback, p
     callback(baseFields);
     return;
   }
-  
+
   let pending = refFields.length;
   const combinedFields = [...baseFields];
-  
+
   refFields.forEach(f => {
     const parentObj = f.referenceTo[0];
     const relName = f.relationshipName;
-    
+
     Ti(parentObj, (parentFields) => {
       const added = [];
       parentFields.forEach(pf => {
@@ -31911,8 +32302,8 @@ function Wa(o) {
           {
             id: "sampledata",
             icon: "🧪",
-            label: "Sample Data",
-            desc: "Generate test records",
+            label: "Multiple Data Generator",
+            desc: "Generate test records for multiple objects at once",
           },
           {
             id: "whereused",
@@ -33912,11 +34303,6 @@ ${at.error}`),
         if (
           (f.length > 0 && (x = null),
           (r.style.display =
-            x === "export" ||
-            x === "querybuilder" ||
-            x === "permcompare" ||
-            x === "accessmap" ||
-            x === "dataimport" ||
             x === "sampledata" ||
             x === "sampledatabulk" ||
             x === "magicfill" ||
@@ -34911,8 +35297,8 @@ ${at.error}`),
             {
               id: "sampledata",
               icon: "🧪",
-              label: "Sample Data",
-              desc: "Generate test records (sandbox & scratch only)",
+              label: "Multiple Data Generator",
+              desc: "Generate test records for multiple objects (sandbox & scratch only)",
               run: () => {
                 ((u.value = ""), (x = "sampledata"), oe());
               },
@@ -36152,6 +36538,448 @@ function Ju() {
         document.addEventListener("keydown", g, !0);
       }));
 }
+// Flow Tools Helpers and Logic
+function jsonToXml(json, rootName = 'Flow') {
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+  xml += `<${rootName} xmlns="http://soap.sforce.com/2006/04/metadata">\n`;
+  
+  function convert(obj, indent = '    ') {
+    let s = '';
+    const keys = Object.keys(obj).sort();
+    for (const key of keys) {
+      if (obj[key] === null || obj[key] === undefined) continue;
+      const val = obj[key];
+      if (Array.isArray(val)) {
+        val.forEach(item => {
+          s += `${indent}<${key}>\n`;
+          if (typeof item === 'object') {
+            s += convert(item, indent + '    ');
+          } else {
+            s += `${indent}    ${escapeXml(item)}\n`;
+          }
+          s += `${indent}</${key}>\n`;
+        });
+      } else if (typeof val === 'object') {
+        s += `${indent}<${key}>\n`;
+        s += convert(val, indent + '    ');
+        s += `${indent}</${key}>\n`;
+      } else {
+        s += `${indent}<${key}>${escapeXml(val)}</${key}>\n`;
+      }
+    }
+    return s;
+  }
+  
+  function escapeXml(unsafe) {
+    return String(unsafe)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+  
+  xml += convert(json);
+  xml += `</${rootName}>`;
+  return xml;
+}
+
+function xmlToJson(xmlStr) {
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(xmlStr, "text/xml");
+  const root = xmlDoc.documentElement;
+  
+  const arrayKeys = new Set([
+    'actionCalls', 'apexClassInputParameters', 'assignments', 'choices', 'collectionProcessors',
+    'constants', 'decisions', 'formulas', 'inputParameters', 'loops', 'outputParameters',
+    'processMetadataValues', 'recordCreates', 'recordDeletes', 'recordLookups', 'recordUpdates',
+    'rules', 'screens', 'stages', 'startElementReference', 'steps', 'textTemplates', 'variables',
+    'fields', 'sortFields', 'stageSteps', 'conditions', 'inputAssignments', 'outputAssignments',
+    'items', 'filters', 'queriedFields'
+  ]);
+
+  function parseNode(node) {
+    const childNodes = Array.from(node.childNodes);
+    const isTextOnly = childNodes.every(c => c.nodeType === 3 || c.nodeType === 8);
+    if (isTextOnly) {
+      const txt = node.textContent.trim();
+      if (txt === 'true') return true;
+      if (txt === 'false') return false;
+      if (!isNaN(txt) && txt !== '') return Number(txt);
+      return txt;
+    }
+    
+    const obj = {};
+    childNodes.forEach(child => {
+      if (child.nodeType !== 1) return;
+      const key = child.nodeName;
+      const val = parseNode(child);
+      
+      if (arrayKeys.has(key)) {
+        if (!obj[key]) {
+          obj[key] = [];
+        }
+        obj[key].push(val);
+      } else {
+        if (obj.hasOwnProperty(key)) {
+          if (!Array.isArray(obj[key])) {
+            obj[key] = [obj[key]];
+          }
+          obj[key].push(val);
+        } else {
+          obj[key] = val;
+        }
+      }
+    });
+    return obj;
+  }
+  
+  return parseNode(root);
+}
+
+function callFlowApi(endpoint, method = "GET", body = null) {
+  return new Promise((resolve, reject) => {
+    it().then(creds => {
+      if (!creds?.instanceUrl || !creds?.sessionId) {
+        reject(new Error("Salesforce session not detected."));
+        return;
+      }
+      globalThis.chrome.runtime.sendMessage({
+        type: "REST_EXPLORE",
+        instanceUrl: creds.instanceUrl,
+        sessionId: creds.sessionId,
+        endpoint: endpoint,
+        method: method,
+        body: body ? JSON.stringify(body) : null
+      }, response => {
+        if (!response || !response.success) {
+          reject(new Error(response?.error || "Background script communication failed."));
+        } else {
+          const res = response.data;
+          if (!res.ok) {
+            reject(new Error(res.body || `HTTP ${res.status}: ${res.statusText}`));
+          } else {
+            let data = null;
+            if (res.body) {
+              try {
+                data = JSON.parse(res.body);
+              } catch {
+                data = res.body;
+              }
+            }
+            resolve(data);
+          }
+        }
+      });
+    });
+  });
+}
+
+function handleFlowCopyXml() {
+  const match = window.location.href.match(/[?&]flowId=([^&]+)/);
+  if (!match) {
+    ot("Could not detect Flow ID from URL", "error");
+    return;
+  }
+  const flowId = match[1];
+  ot("Fetching flow metadata...", "info");
+  callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "GET")
+    .then(data => {
+      if (!data?.Metadata) {
+        ot("No metadata found in flow record", "error");
+        return;
+      }
+      const xml = jsonToXml(data.Metadata);
+      navigator.clipboard.writeText(xml)
+        .then(() => {
+          ot("Flow XML copied to clipboard!", "success");
+        })
+        .catch(err => {
+          ot("Failed to copy to clipboard: " + err.message, "error");
+        });
+    })
+    .catch(err => {
+      ot("Error fetching flow: " + err.message, "error");
+    });
+}
+
+function handleFlowDownloadXml() {
+  const match = window.location.href.match(/[?&]flowId=([^&]+)/);
+  if (!match) {
+    ot("Could not detect Flow ID from URL", "error");
+    return;
+  }
+  const flowId = match[1];
+  ot("Fetching flow metadata for download...", "info");
+  callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "GET")
+    .then(data => {
+      if (!data?.Metadata) {
+        ot("No metadata found in flow record", "error");
+        return;
+      }
+      const xml = jsonToXml(data.Metadata);
+      const filename = `${data.FullName || 'flow'}.flow-meta.xml`;
+      const blob = new Blob([xml], { type: "text/xml;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      ot("Flow XML downloaded successfully!", "success");
+    })
+    .catch(err => {
+      ot("Error downloading flow: " + err.message, "error");
+    });
+}
+
+function handleFlowUploadXml() {
+  const match = window.location.href.match(/[?&]flowId=([^&]+)/);
+  if (!match) {
+    ot("Could not detect Flow ID from URL", "error");
+    return;
+  }
+  const flowId = match[1];
+  
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.xml';
+  input.style.display = 'none';
+  
+  input.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const xmlStr = evt.target.result;
+      try {
+        const metadata = xmlToJson(xmlStr);
+        ot("Checking flow version status...", "info");
+        
+        callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "GET")
+          .then(currentFlow => {
+            const isActive = currentFlow.Status === 'Active';
+            const fullName = currentFlow.FullName;
+            
+            if (isActive) {
+              if (confirm("The version of the flow you're updating is active and can't be overwritten. Would you like to save it as a new version?")) {
+                ot("Saving as new version...", "info");
+                callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow`, "POST", {
+                  FullName: fullName,
+                  Metadata: metadata
+                })
+                .then(res => {
+                  if (res && res.id) {
+                    ot("Saved as new version successfully! Redirecting...", "success");
+                    setTimeout(() => {
+                      window.location.href = window.location.href.replace(/flowId=[^&]+/, "flowId=" + res.id);
+                    }, 1500);
+                  } else {
+                    ot("Failed to save as new version", "error");
+                  }
+                })
+                .catch(err => {
+                  ot("Save failed: " + err.message, "error");
+                });
+              }
+            } else {
+              ot("Uploading flow XML...", "info");
+              callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "PATCH", { Metadata: metadata })
+                .then(() => {
+                  ot("Flow XML uploaded successfully! Reloading...", "success");
+                  setTimeout(() => {
+                    window.location.reload();
+                  }, 1500);
+                })
+                .catch(err => {
+                  ot("Upload failed: " + err.message, "error");
+                });
+            }
+          })
+          .catch(err => {
+            ot("Error checking flow status: " + err.message, "error");
+          });
+      } catch (err) {
+        ot("Invalid XML file structure: " + err.message, "error");
+      }
+    };
+    reader.readAsText(file);
+  });
+  
+  document.body.appendChild(input);
+  input.click();
+  document.body.removeChild(input);
+}
+
+function handleFlowDeleteVersion() {
+  const match = window.location.href.match(/[?&]flowId=([^&]+)/);
+  if (!match) {
+    ot("Could not detect Flow ID from URL", "error");
+    return;
+  }
+  const flowId = match[1];
+  
+  if (confirm("Are you sure you want to delete this flow version? This cannot be undone.")) {
+    ot("Deleting flow version...", "info");
+    callFlowApi(`/services/data/v60.0/tooling/sobjects/Flow/${flowId}`, "DELETE")
+      .then(() => {
+        ot("Flow version deleted successfully! Redirecting...", "success");
+        setTimeout(() => {
+          window.location.href = window.location.href.split('/builder_platform_interaction/')[0] + "/lightning/setup/Flows/home";
+        }, 1500);
+      })
+      .catch(err => {
+        ot("Delete failed: " + err.message, "error");
+      });
+  }
+}
+
+function injectFlowToolsMenu() {
+  if (document.getElementById("sf-flow-tools-menu-container")) return;
+  
+  // Find Flow Builder toolbar lists
+  let buttonGroups = document.querySelectorAll('.builder-header .slds-button-group-list');
+  if (!buttonGroups || buttonGroups.length === 0) {
+    buttonGroups = document.querySelectorAll('.slds-button-group-list');
+  }
+                       
+  let targetSibling = null;
+  let parentNode = null;
+  
+  if (buttonGroups && buttonGroups.length > 0) {
+    // Insert before the first button group list (so it's positioned stably before Run/Debug)
+    targetSibling = buttonGroups[0];
+    parentNode = targetSibling.parentNode;
+  } else {
+    // Fallback search
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const targetBtn = buttons.find(b => {
+      const txt = b.textContent.trim();
+      return txt === 'Run' || txt === 'Debug' || txt === 'Save' || txt === 'Save As New Version' || txt === 'Deactivate';
+    });
+    if (targetBtn) {
+      const group = targetBtn.closest('.slds-button-group-list') || targetBtn.closest('.slds-button-group');
+      if (group) {
+        targetSibling = group;
+        parentNode = group.parentNode;
+      } else {
+        targetSibling = targetBtn;
+        parentNode = targetBtn.parentNode;
+      }
+    }
+  }
+  
+  if (!parentNode || !targetSibling) return;
+  
+  const container = document.createElement('div');
+  container.id = "sf-flow-tools-menu-container";
+  Object.assign(container.style, {
+    position: "relative",
+    display: "inline-block",
+    marginRight: "0.5rem",
+    verticalAlign: "middle"
+  });
+  
+  const button = document.createElement('button');
+  button.className = "slds-button slds-button_neutral";
+  button.innerHTML = 'Flow Tools <span style="font-size: 8px; margin-left: 5px; vertical-align: middle;">▼</span>';
+  Object.assign(button.style, {
+    height: "32px",
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "0 12px"
+  });
+  
+  const dropdown = document.createElement('div');
+  dropdown.id = "sf-flow-tools-dropdown";
+  Object.assign(dropdown.style, {
+    position: "absolute",
+    top: "100%",
+    left: "0",
+    marginTop: "4px",
+    background: "#ffffff",
+    border: "1px solid #c9c9c9",
+    borderRadius: "4px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+    zIndex: "999999",
+    minWidth: "160px",
+    display: "none",
+    fontFamily: "sans-serif"
+  });
+  
+  const menuList = document.createElement('ul');
+  Object.assign(menuList.style, {
+    listStyle: "none",
+    margin: "0",
+    padding: "4px 0",
+    textAlign: "left"
+  });
+  
+  const menuItems = [
+    { label: "Copy XML", action: handleFlowCopyXml },
+    { label: "Download XML", action: handleFlowDownloadXml },
+    { label: "Upload XML", action: handleFlowUploadXml },
+    { label: "Delete Version", action: handleFlowDeleteVersion, style: { color: "#ea001e" } }
+  ];
+  
+  menuItems.forEach(item => {
+    const li = document.createElement('li');
+    li.textContent = item.label;
+    Object.assign(li.style, {
+      padding: "8px 16px",
+      cursor: "pointer",
+      fontSize: "13px",
+      color: "#080707",
+      backgroundColor: "transparent",
+      transition: "background-color 0.1s ease",
+      ...item.style
+    });
+    
+    li.addEventListener('mouseenter', () => {
+      li.style.backgroundColor = "#f3f2f2";
+    });
+    li.addEventListener('mouseleave', () => {
+      li.style.backgroundColor = "transparent";
+    });
+    
+    li.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dropdown.style.display = "none";
+      item.action();
+    });
+    
+    menuList.appendChild(li);
+  });
+  
+  dropdown.appendChild(menuList);
+  container.appendChild(button);
+  container.appendChild(dropdown);
+  
+  button.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isVisible = dropdown.style.display === "block";
+    document.querySelectorAll('#sf-flow-tools-dropdown').forEach(d => d.style.display = "none");
+    dropdown.style.display = isVisible ? "none" : "block";
+  });
+  
+  document.addEventListener('click', () => {
+    dropdown.style.display = "none";
+  });
+  
+  parentNode.insertBefore(container, targetSibling);
+}
+
+function initFlowBuilderTools() {
+  const t = () => {
+    if (window.location.href.includes('flowBuilder.app') || window.location.href.includes('flowRedirect.app')) {
+      injectFlowToolsMenu();
+    }
+  };
+  t();
+  setInterval(t, 1500);
+}
+
 function Zu() {
   ((document.documentElement.style.height = "100%"),
     (document.body.style.margin = "0"),
@@ -36186,7 +37014,8 @@ function zs() {
             return "";
           }
         },
-      }));
+      }),
+      initFlowBuilderTools());
 }
 document.readyState === "loading"
   ? document.addEventListener("DOMContentLoaded", zs)
