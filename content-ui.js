@@ -20176,6 +20176,15 @@ function Hp(o, t) {
   const e = t.isDark,
     n = kt(e);
   o.innerHTML = "";
+
+  let currentInstanceUrl = "";
+  let activeTab = "whereUsed"; // "whereUsed" (Referenced By) or "dependsOn" (Uses)
+  let lastSearchResults = { refRecords: [], depRecords: [], searchTerm: "" };
+
+  it().then((session) => {
+    if (session?.instanceUrl) currentInstanceUrl = session.instanceUrl;
+  });
+
   const i = It("div", {
     display: "flex",
     flexDirection: "column",
@@ -20185,6 +20194,8 @@ function Hp(o, t) {
     color: n.text,
   });
   o.appendChild(i);
+
+  // Top Header (← Tools | 🔎 Where Used | Find everything that references a component)
   const s = It("div", {
       display: "flex",
       alignItems: "center",
@@ -20208,20 +20219,24 @@ function Hp(o, t) {
       },
       "← Tools",
     );
-  (a.addEventListener("click", t.onBack), s.appendChild(a));
+  a.addEventListener("click", t.onBack);
+  s.appendChild(a);
+
   const l = It("div", { display: "flex", flexDirection: "column" });
-  (l.appendChild(
+  l.appendChild(
     It("div", { fontSize: "16px", fontWeight: "800" }, "🔎 Where Used"),
-  ),
-    l.appendChild(
-      It(
-        "div",
-        { fontSize: "12px", color: n.muted },
-        "Find everything that references a component",
-      ),
+  );
+  l.appendChild(
+    It(
+      "div",
+      { fontSize: "12px", color: n.muted },
+      "Find everything that references a component",
     ),
-    s.appendChild(l),
-    i.appendChild(s));
+  );
+  s.appendChild(l);
+  i.appendChild(s);
+
+  // Search Input Row (Input + Find Usages button)
   const d = It("div", {
       display: "flex",
       gap: "10px",
@@ -20254,19 +20269,23 @@ function Hp(o, t) {
       fontSize: "13px",
       fontWeight: "700",
       fontFamily: "inherit",
+      flexShrink: "0",
     },
     "Find usages",
   );
-  (d.appendChild(y),
-    d.appendChild(g),
-    i.appendChild(d),
-    i.appendChild(
-      It(
-        "div",
-        { padding: "0 24px 8px", fontSize: "11.5px", color: n.faint },
-        "Uses Salesforce’s Dependency API. Enter a custom field as Object.Field, or the exact API name of an Apex class, flow, LWC or Aura bundle. You can also paste the component’s record Id.",
-      ),
-    ));
+  d.appendChild(y);
+  d.appendChild(g);
+  i.appendChild(d);
+
+  i.appendChild(
+    It(
+      "div",
+      { padding: "0 24px 8px", fontSize: "11.5px", color: n.faint },
+      "Uses Salesforce’s Dependency API. Enter a custom field as Object.Field, or the exact API name of an Apex class, flow, LWC or Aura bundle. You can also paste the component’s record Id.",
+    ),
+  );
+
+  // Results Container
   const r = It("div", {
     flex: "1",
     minHeight: "0",
@@ -20274,204 +20293,492 @@ function Hp(o, t) {
     padding: "6px 24px 24px",
   });
   i.appendChild(r);
+
   const E = (k, c = n.muted) => {
-      ((r.innerHTML = ""),
-        r.appendChild(
-          It(
-            "div",
-            {
-              padding: "30px 6px",
-              textAlign: "center",
-              fontSize: "13px",
-              fontWeight: "600",
-              color: c,
-            },
-            k,
-          ),
-        ));
-    },
-    u = (k) => /^[a-zA-Z0-9]{15}$/.test(k) || /^[a-zA-Z0-9]{18}$/.test(k);
+    r.innerHTML = "";
+    r.appendChild(
+      It(
+        "div",
+        {
+          padding: "30px 6px",
+          textAlign: "center",
+          fontSize: "13px",
+          fontWeight: "600",
+          color: c,
+        },
+        k,
+      ),
+    );
+  };
+
+  const u = (k) => /^[a-zA-Z0-9]{15}$/.test(k) || /^[a-zA-Z0-9]{18}$/.test(k);
+
+  // Helper to open Salesforce Setup Pages
+  function getSalesforceSetupUrl(typeName, compName, compId) {
+    const tLower = (typeName || "").toLowerCase();
+    if (tLower.includes("standardentity") || tLower.includes("customobject") || tLower.includes("object")) {
+      return `/lightning/setup/ObjectManager/${compName}/Details/view`;
+    }
+    if (tLower.includes("customfield") || tLower.includes("field")) {
+      if (compName && compName.includes(".")) {
+        const obj = compName.split(".")[0];
+        return `/lightning/setup/ObjectManager/${obj}/FieldsAndRelationships/view`;
+      }
+      return `/lightning/setup/ObjectManager/home`;
+    }
+    if (tLower.includes("apexclass")) {
+      return compId ? `/lightning/setup/ApexClasses/page?address=%2F${compId}` : `/lightning/setup/ApexClasses/home`;
+    }
+    if (tLower.includes("apextrigger")) {
+      return compId ? `/lightning/setup/ApexTriggers/page?address=%2F${compId}` : `/lightning/setup/ApexTriggers/home`;
+    }
+    if (tLower.includes("flow")) {
+      return compId ? `/builder_platform_interaction/flowBuilder.app?flowId=${compId}` : `/lightning/setup/Flows/home`;
+    }
+    if (tLower.includes("visualforce") || tLower.includes("apexpage")) {
+      return compId ? `/lightning/setup/ApexPages/page?address=%2F${compId}` : `/lightning/setup/ApexPages/home`;
+    }
+    if (tLower.includes("layout")) {
+      return `/lightning/setup/ObjectManager/home`;
+    }
+    if (compId && (compId.length === 15 || compId.length === 18)) {
+      return `/${compId}`;
+    }
+    return `/lightning/setup/home`;
+  }
+
+  // Comprehensive Component ID Resolver
   async function b(k) {
-    if (u(k)) return { id: k };
+    if (u(k)) return { id: k, name: k };
+
+    // 1. If Object.Field format (e.g. Account.Industry or Account.MyField__c)
     if (k.includes(".")) {
-      const [O, x] = k.split("."),
-        L = await t.runQuery(
-          `SELECT DurableId FROM FieldDefinition WHERE EntityDefinition.QualifiedApiName = ${xo(O)} AND QualifiedApiName = ${xo(x)} LIMIT 1`,
+      const [O, x] = k.split(".");
+      const cleanDevName = x.replace(/__c$/i, "");
+      try {
+        const cfRes = await t.runQuery(
+          `SELECT Id, DeveloperName, TableEnumOrId FROM CustomField WHERE TableEnumOrId = ${xo(O)} AND (DeveloperName = ${xo(x)} OR DeveloperName = ${xo(cleanDevName)}) LIMIT 1`,
           !0,
         );
-      if (L.error) return { error: L.error };
-      const D = L.records?.[0]?.DurableId;
-      return D
-        ? { id: D.includes(".") ? D.split(".").pop() : D }
-        : { error: `Field “${k}” not found.` };
+        if (cfRes?.records && cfRes.records.length > 0) {
+          return { id: cfRes.records[0].Id, name: `${O}.${x}`, type: "CustomField" };
+        }
+      } catch {}
+
+      try {
+        const fdRes = await t.runQuery(
+          `SELECT DurableId, QualifiedApiName FROM FieldDefinition WHERE EntityDefinition.QualifiedApiName = ${xo(O)} AND (QualifiedApiName = ${xo(x)} OR DeveloperName = ${xo(x)}) LIMIT 1`,
+          !0,
+        );
+        if (fdRes?.records && fdRes.records.length > 0) {
+          const dId = fdRes.records[0].DurableId;
+          const targetId = dId && dId.includes(".") ? dId.split(".").pop() : dId;
+          return { id: targetId || `${O}.${x}`, name: `${O}.${x}`, type: "Field" };
+        }
+      } catch {}
     }
-    const c = [
-      ["ApexClass", "Name"],
-      ["ApexTrigger", "Name"],
-      ["LightningComponentBundle", "DeveloperName"],
-      ["AuraDefinitionBundle", "DeveloperName"],
-      ["FlowDefinition", "DeveloperName"],
+
+    // 2. Try Standard Metadata Types in Tooling API
+    const checks = [
+      { sobject: "ApexClass", field: "Name", type: "ApexClass" },
+      { sobject: "ApexTrigger", field: "Name", type: "ApexTrigger" },
+      { sobject: "LightningComponentBundle", field: "DeveloperName", type: "LWC" },
+      { sobject: "AuraDefinitionBundle", field: "DeveloperName", type: "Aura" },
+      { sobject: "FlowDefinition", field: "DeveloperName", type: "Flow" },
+      { sobject: "ApexPage", field: "Name", type: "VisualforcePage" },
+      { sobject: "ApexComponent", field: "Name", type: "VisualforceComponent" },
+      { sobject: "Layout", field: "Name", type: "Layout" },
+      { sobject: "ValidationRule", field: "ValidationName", type: "ValidationRule" },
+      { sobject: "CustomObject", field: "DeveloperName", type: "CustomObject" },
     ];
-    for (const [O, x] of c) {
-      const L = await t.runQuery(
-        `SELECT Id FROM ${O} WHERE ${x} = ${xo(k)} LIMIT 1`,
+
+    const cleanK = k.replace(/__c$/i, "");
+
+    for (const c of checks) {
+      try {
+        const query =
+          c.sobject === "CustomObject"
+            ? `SELECT Id, DeveloperName FROM CustomObject WHERE DeveloperName = ${xo(k)} OR DeveloperName = ${xo(cleanK)} LIMIT 1`
+            : `SELECT Id, ${c.field} FROM ${c.sobject} WHERE ${c.field} = ${xo(k)} LIMIT 1`;
+        const res = await t.runQuery(query, !0);
+        if (res?.records && res.records.length > 0) {
+          return { id: res.records[0].Id, name: k, type: c.type };
+        }
+      } catch {}
+    }
+
+    // 3. Try Standard Entities (e.g. Account, Contact, Lead, Opportunity, Case)
+    try {
+      const objRes = await t.runQuery(
+        `SELECT DurableId, QualifiedApiName FROM EntityDefinition WHERE QualifiedApiName = ${xo(k)} LIMIT 1`,
         !0,
       );
-      if (!L.error && L.records && L.records.length)
-        return { id: L.records[0].Id };
-    }
-    return {
-      error: `Couldn’t find “${k}”. Use Object.Field for a field, an exact API name for a class/flow/LWC, or paste the record Id.`,
-    };
+      if (objRes?.records && objRes.records.length > 0) {
+        return { id: objRes.records[0].DurableId || k, name: k, type: "StandardEntity" };
+      }
+    } catch {}
+
+    return { id: k, name: k, type: "Component" };
   }
+
+  // Execute Search (Bidirectional: Where Used & Depends On, Strictly WITHOUT ORDER BY)
   async function N() {
     const k = y.value.trim();
     if (!k) {
       t.flashToast("Enter a component API name or Id");
       return;
     }
-    ((g.style.pointerEvents = "none"),
-      (g.style.opacity = "0.6"),
-      E("Resolving component…"));
+    g.style.pointerEvents = "none";
+    g.style.opacity = "0.6";
+    E("Resolving component…");
+
     const c = await b(k);
-    if (c.error || !c.id) {
-      (E(c.error || "Could not resolve that component.", n.danger),
-        (g.style.pointerEvents = "auto"),
-        (g.style.opacity = "1"));
-      return;
-    }
     E("Searching dependencies…");
-    const O = `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType FROM MetadataComponentDependency WHERE RefMetadataComponentId = ${xo(c.id)} ORDER BY MetadataComponentType, MetadataComponentName`,
-      { records: x, error: L } = await t.runQuery(O, !0);
-    if (((g.style.pointerEvents = "auto"), (g.style.opacity = "1"), L)) {
-      const D =
-        /MetadataComponentDependency|not supported|INVALID_TYPE|sObject type|Dependency/i.test(
-          L,
-        );
-      E(
-        D
-          ? "Could not query the Dependency API for this org — it may be disabled in Setup."
-          : L,
-        n.danger,
+
+    const targetId = c.id || k;
+    const targetName = c.name || k;
+
+    // 1. Where Used (Who references this component)
+    const soqlRef = u(targetId)
+      ? `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, MetadataComponentNamespace FROM MetadataComponentDependency WHERE RefMetadataComponentId = ${xo(targetId)}`
+      : `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, MetadataComponentNamespace FROM MetadataComponentDependency WHERE RefMetadataComponentName = ${xo(targetName)}`;
+
+    // 2. Depends On (What this component references)
+    const soqlDep = u(targetId)
+      ? `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, MetadataComponentNamespace, RefMetadataComponentId, RefMetadataComponentName, RefMetadataComponentType, RefMetadataComponentNamespace FROM MetadataComponentDependency WHERE MetadataComponentId = ${xo(targetId)}`
+      : `SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType, MetadataComponentNamespace, RefMetadataComponentId, RefMetadataComponentName, RefMetadataComponentType, RefMetadataComponentNamespace FROM MetadataComponentDependency WHERE MetadataComponentName = ${xo(targetName)}`;
+
+    try {
+      const [resRef, resDep] = await Promise.all([
+        t.runQuery(soqlRef, !0),
+        t.runQuery(soqlDep, !0),
+      ]);
+
+      const refRecords = (resRef?.records || []).slice().sort((p1, p2) =>
+        (p1.MetadataComponentType || "").localeCompare(p2.MetadataComponentType || "") ||
+        (p1.MetadataComponentName || "").localeCompare(p2.MetadataComponentName || ""),
       );
-      return;
+
+      const depRecords = (resDep?.records || []).slice().sort((p1, p2) =>
+        (p1.RefMetadataComponentType || "").localeCompare(p2.RefMetadataComponentType || "") ||
+        (p1.RefMetadataComponentName || "").localeCompare(p2.RefMetadataComponentName || ""),
+      );
+
+      g.style.pointerEvents = "auto";
+      g.style.opacity = "1";
+
+      if (!refRecords.length && !depRecords.length) {
+        if (resRef?.error && resDep?.error) {
+          const err = resRef.error;
+          const isPerm = /MetadataComponentDependency|not supported|INVALID_TYPE|sObject type|Dependency/i.test(err);
+          E(isPerm ? "Could not query the Dependency API for this org — it may be disabled in Setup." : err, n.danger);
+        } else {
+          E(`No dependencies or references found for “${k}”. It may be unused or not tracked by the Dependency API.`);
+        }
+        return;
+      }
+
+      // Default active tab based on results
+      if (refRecords.length > 0) {
+        activeTab = "whereUsed";
+      } else {
+        activeTab = "dependsOn";
+      }
+
+      lastSearchResults = { refRecords, depRecords, searchTerm: k };
+      renderResults();
+    } catch (err) {
+      g.style.pointerEvents = "auto";
+      g.style.opacity = "1";
+      E(err?.message || "Dependency search failed", n.danger);
     }
-    F(k, x || []);
   }
-  function F(k, c) {
-    if (((r.innerHTML = ""), !c.length)) {
-      E(
-        `No references found for “${k}”. It may be unused, or its type isn’t tracked by the Dependency API.`,
-      );
-      return;
-    }
-    const O = It("div", {
+
+  // Render Result Cards & Tabs
+  function renderResults() {
+    r.innerHTML = "";
+    const { refRecords, depRecords, searchTerm } = lastSearchResults;
+
+    // Header Toolbar with Summary and Relationship Tabs
+    const headerRow = It("div", {
       display: "flex",
       alignItems: "center",
-      gap: "8px",
+      justifyContent: "space-between",
+      gap: "10px",
       flexWrap: "wrap",
-      margin: "4px 2px 14px",
+      margin: "4px 0 16px",
     });
-    (O.appendChild(
+
+    const titleWrap = It("div", { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" });
+    titleWrap.appendChild(
       It(
         "span",
         { fontSize: "14px", fontWeight: "800", color: n.text },
-        `${c.length} reference${c.length === 1 ? "" : "s"} to “${k}”`,
+        `Results for “${searchTerm}”`,
       ),
-    ),
-      r.appendChild(O));
+    );
+    headerRow.appendChild(titleWrap);
+
+    // Tab Buttons (Where Used vs Depends On)
+    const tabBtnWrap = It("div", { display: "flex", alignItems: "center", gap: "6px" });
+
+    const btnWhereUsed = It(
+      "button",
+      {
+        padding: "4px 12px",
+        fontSize: "12px",
+        fontWeight: activeTab === "whereUsed" ? "700" : "600",
+        borderRadius: "6px",
+        border: activeTab === "whereUsed" ? "none" : `1px solid ${n.border}`,
+        background: activeTab === "whereUsed" ? (e ? "rgba(59,130,246,0.25)" : "#d0e6ff") : "transparent",
+        color: activeTab === "whereUsed" ? (e ? "#60a5fa" : "#005fb2") : n.muted,
+        cursor: "pointer",
+        fontFamily: "inherit",
+      },
+      `Referenced By (${refRecords.length})`,
+    );
+    btnWhereUsed.addEventListener("click", () => {
+      activeTab = "whereUsed";
+      renderResults();
+    });
+    tabBtnWrap.appendChild(btnWhereUsed);
+
+    const btnDependsOn = It(
+      "button",
+      {
+        padding: "4px 12px",
+        fontSize: "12px",
+        fontWeight: activeTab === "dependsOn" ? "700" : "600",
+        borderRadius: "6px",
+        border: activeTab === "dependsOn" ? "none" : `1px solid ${n.border}`,
+        background: activeTab === "dependsOn" ? (e ? "rgba(59,130,246,0.25)" : "#d0e6ff") : "transparent",
+        color: activeTab === "dependsOn" ? (e ? "#60a5fa" : "#005fb2") : n.muted,
+        cursor: "pointer",
+        fontFamily: "inherit",
+      },
+      `Depends On (${depRecords.length})`,
+    );
+    btnDependsOn.addEventListener("click", () => {
+      activeTab = "dependsOn";
+      renderResults();
+    });
+    tabBtnWrap.appendChild(btnDependsOn);
+
+    headerRow.appendChild(tabBtnWrap);
+    r.appendChild(headerRow);
+
+    const currentRecords = activeTab === "whereUsed" ? refRecords : depRecords;
+
+    if (!currentRecords.length) {
+      r.appendChild(
+        It(
+          "div",
+          {
+            padding: "24px 12px",
+            textAlign: "center",
+            fontSize: "13px",
+            fontWeight: "600",
+            color: n.muted,
+            border: `1px dashed ${n.border}`,
+            borderRadius: "10px",
+          },
+          activeTab === "whereUsed"
+            ? `No components reference “${searchTerm}”.`
+            : `“${searchTerm}” does not reference any other components tracked by the Dependency API.`,
+        ),
+      );
+      return;
+    }
+
+    // Group records by type
     const x = new Map();
-    (c.forEach((D) => {
-      const U = D.MetadataComponentType || "Other",
-        $ = x.get(U) || [];
-      ($.push(D), x.set(U, $));
-    }),
-      Array.from(x.entries())
-        .sort((D, U) => D[0].localeCompare(U[0]))
-        .forEach(([D, U]) => {
-          const $ = It("div", {
-              border: `1px solid ${n.border}`,
+    currentRecords.forEach((D) => {
+      const U = activeTab === "whereUsed"
+        ? (D.MetadataComponentType || "Other")
+        : (D.RefMetadataComponentType || "Other");
+      const $ = x.get(U) || [];
+      $.push(D);
+      x.set(U, $);
+    });
+
+    Array.from(x.entries())
+      .sort((D, U) => D[0].localeCompare(U[0]))
+      .forEach(([typeName, items]) => {
+        const card = It("div", {
+          border: `1px solid ${n.border}`,
+          borderRadius: "12px",
+          overflow: "hidden",
+          marginBottom: "14px",
+          background: n.card,
+        });
+
+        const cardHeader = It("div", {
+          display: "flex",
+          alignItems: "center",
+          gap: "9px",
+          padding: "10px 16px",
+          background: n.headerBg,
+          borderBottom: `1px solid ${n.border}`,
+        });
+
+        cardHeader.appendChild(It("span", { fontSize: "16px" }, jp(typeName)));
+        cardHeader.appendChild(
+          It("span", { fontSize: "13.5px", fontWeight: "800", color: n.text }, typeName),
+        );
+        cardHeader.appendChild(
+          It(
+            "span",
+            {
+              marginLeft: "auto",
+              fontSize: "11px",
+              fontWeight: "700",
+              padding: "2px 8px",
               borderRadius: "12px",
+              background: "rgba(59,130,246,0.15)",
+              color: "#3b82f6",
+            },
+            String(items.length),
+          ),
+        );
+        card.appendChild(cardHeader);
+
+        items.forEach((C, Z) => {
+          const itemName = activeTab === "whereUsed"
+            ? (C.MetadataComponentName || C.MetadataComponentId || "(unnamed)")
+            : (C.RefMetadataComponentName || C.RefMetadataComponentId || "(unnamed)");
+          const itemId = activeTab === "whereUsed" ? C.MetadataComponentId : C.RefMetadataComponentId;
+          const itemNamespace = activeTab === "whereUsed" ? C.MetadataComponentNamespace : C.RefMetadataComponentNamespace;
+
+          const itemRow = It("div", {
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 16px",
+            borderTop: Z === 0 ? "none" : `1px solid ${n.divider}`,
+            gap: "10px",
+            transition: "background 0.1s",
+          });
+
+          itemRow.addEventListener("mouseover", () => {
+            itemRow.style.background = n.hover;
+          });
+          itemRow.addEventListener("mouseout", () => {
+            itemRow.style.background = "transparent";
+          });
+
+          const nameWrap = It("div", { display: "flex", alignItems: "center", gap: "8px", flex: "1", minWidth: "0" });
+          nameWrap.appendChild(It("span", { fontSize: "13px", color: n.muted }, "•"));
+          const nameSpan = It(
+            "span",
+            {
+              fontSize: "13px",
+              fontWeight: "600",
+              color: n.text,
+              whiteSpace: "nowrap",
               overflow: "hidden",
-              marginBottom: "12px",
-            }),
-            V = It("div", {
-              display: "flex",
-              alignItems: "center",
-              gap: "9px",
-              padding: "10px 14px",
-              background: n.headerBg,
-              borderBottom: `1px solid ${n.border}`,
-            });
-          (V.appendChild(It("span", { fontSize: "15px" }, jp(D))),
-            V.appendChild(
-              It("span", { fontSize: "13px", fontWeight: "800" }, D),
-            ),
-            V.appendChild(
+              textOverflow: "ellipsis",
+            },
+            itemName,
+          );
+          nameWrap.appendChild(nameSpan);
+
+          if (itemNamespace) {
+            nameWrap.appendChild(
               It(
                 "span",
                 {
-                  marginLeft: "auto",
-                  fontSize: "11.5px",
-                  fontWeight: "700",
-                  color: n.faint,
+                  fontSize: "10px",
+                  padding: "1px 5px",
+                  borderRadius: "3px",
+                  background: "rgba(255,255,255,0.08)",
+                  color: n.muted,
                 },
-                String(U.length),
+                itemNamespace,
               ),
-            ),
-            $.appendChild(V),
-            U.forEach((C, Z) => {
-              const X = It("div", {
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                padding: "9px 14px",
-                borderTop: Z === 0 ? "none" : `1px solid ${n.divider}`,
-              });
-              X.appendChild(
-                It(
-                  "span",
-                  {
-                    fontSize: "13px",
-                    fontWeight: "600",
-                    color: n.text,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    flex: "1",
-                  },
-                  C.MetadataComponentName ||
-                    C.MetadataComponentId ||
-                    "(unnamed)",
-                ),
-              );
-              const re = It(
-                "span",
-                {
-                  cursor: "pointer",
-                  color: n.faint,
-                  fontSize: "13px",
-                  flexShrink: "0",
-                },
-                "⧉",
-              );
-              ((re.title = "Copy name"),
-                re.addEventListener("click", () => {
-                  navigator.clipboard
-                    ?.writeText(C.MetadataComponentName || "")
-                    .then(() => t.flashToast("Copied"));
-                }),
-                X.appendChild(re),
-                $.appendChild(X));
-            }),
-            r.appendChild($));
-        }));
+            );
+          }
+          itemRow.appendChild(nameWrap);
+
+          // Action Buttons
+          const actionsWrap = It("div", { display: "flex", alignItems: "center", gap: "8px", flexShrink: "0" });
+
+          // Open in Salesforce Link
+          const sfLink = It(
+            "a",
+            {
+              fontSize: "11.5px",
+              color: "#0070d2",
+              fontWeight: "600",
+              cursor: "pointer",
+              textDecoration: "none",
+            },
+            "🔗 Open",
+          );
+          sfLink.addEventListener("click", () => {
+            const relUrl = getSalesforceSetupUrl(typeName, itemName, itemId);
+            const fullUrl = currentInstanceUrl ? `${currentInstanceUrl}${relUrl}` : relUrl;
+            globalThis.chrome?.runtime?.sendMessage({
+              type: "OPEN_TAB",
+              url: fullUrl,
+            });
+          });
+          actionsWrap.appendChild(sfLink);
+
+          // Copy Name
+          const copyBtn = It(
+            "span",
+            {
+              cursor: "pointer",
+              color: n.muted,
+              fontSize: "12px",
+              padding: "2px 4px",
+            },
+            "📋",
+          );
+          copyBtn.title = "Copy name";
+          copyBtn.addEventListener("click", () => {
+            navigator.clipboard
+              ?.writeText(itemName)
+              .then(() => t.flashToast("Copied"));
+          });
+          actionsWrap.appendChild(copyBtn);
+
+          // Pivot / Search this
+          const searchThisBtn = It(
+            "button",
+            {
+              background: "rgba(59,130,246,0.12)",
+              border: "1px solid rgba(59,130,246,0.25)",
+              color: "#3b82f6",
+              borderRadius: "4px",
+              padding: "2px 7px",
+              fontSize: "11px",
+              fontWeight: "700",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            },
+            "Search ➔",
+          );
+          searchThisBtn.title = `Find usages of ${itemName}`;
+          searchThisBtn.addEventListener("click", () => {
+            y.value = itemName;
+            N();
+          });
+          actionsWrap.appendChild(searchThisBtn);
+
+          itemRow.appendChild(actionsWrap);
+          card.appendChild(itemRow);
+        });
+
+        r.appendChild(card);
+      });
   }
-  (g.addEventListener("click", N),
-    y.addEventListener("keydown", (k) => {
-      k.key === "Enter" && N();
-    }),
-    setTimeout(() => y.focus(), 40));
+
+  g.addEventListener("click", N);
+  y.addEventListener("keydown", (k) => {
+    k.key === "Enter" && N();
+  });
+  setTimeout(() => y.focus(), 40);
 }
 const wa = (o) =>
   o.replace(/[&<>]/g, (t) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[t]);
