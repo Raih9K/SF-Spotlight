@@ -11181,784 +11181,6 @@ function QcBulk(o, t) {
 
   L.addEventListener("click", ge);
 }
-function Qc(o, t) {
-  const e = t.isDark,
-    n = kt(e);
-  o.innerHTML = "";
-  const i = Xe("div", {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    minHeight: "0",
-    background: n.bg,
-    color: n.text,
-  });
-  o.appendChild(i);
-  const s = Xe("div", {
-      display: "flex",
-      alignItems: "center",
-      gap: "12px",
-      padding: "14px 24px",
-      flexShrink: "0",
-      borderBottom: `1px solid ${n.divider}`,
-    }),
-    a = Xe(
-      "button",
-      {
-        background: "transparent",
-        border: `1px solid ${n.border}`,
-        color: n.text,
-        borderRadius: "8px",
-        padding: "6px 12px",
-        cursor: "pointer",
-        fontSize: "12.5px",
-        fontWeight: "600",
-        fontFamily: "inherit",
-      },
-      "← Tools",
-    );
-  (a.addEventListener("click", t.onBack), s.appendChild(a));
-  const l = Xe("div", { display: "flex", flexDirection: "column" });
-  (l.appendChild(
-    Xe(
-      "div",
-      { fontSize: "16px", fontWeight: "800" },
-      "🧪 Multiple Data Generator",
-    ),
-  ),
-    l.appendChild(
-      Xe(
-        "div",
-        { fontSize: "12px", color: n.muted },
-        "Analyze multiple objects and create realistic test records at once",
-      ),
-    ),
-    s.appendChild(l),
-    i.appendChild(s));
-  const d = Xe("div", {
-    flex: "1",
-    minHeight: "0",
-    overflow: "auto",
-    padding: "16px 24px",
-  });
-  i.appendChild(d);
-  const y = Xe("div", {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    padding: "10px 14px",
-    marginBottom: "14px",
-    borderRadius: "10px",
-    border: `1px solid ${n.warn}`,
-    background: e ? "rgba(245,158,11,0.12)" : "rgba(245,158,11,0.10)",
-    color: e ? "#fcd34d" : "#92400e",
-    fontSize: "12.5px",
-    fontWeight: "600",
-  });
-  ((y.innerHTML =
-    "⚠️&nbsp; For use in <b>sandbox &amp; scratch orgs only</b> — never generate data in a production org."),
-    d.appendChild(y));
-  let g = "unknown";
-  const r = Xe(
-    "div",
-    {
-      fontSize: "12.5px",
-      fontWeight: "700",
-      marginBottom: "14px",
-      color: n.muted,
-    },
-    "Checking org type…",
-  );
-  d.appendChild(r);
-
-  const E = Xe("div", {
-      display: "grid",
-      gridTemplateColumns: "2fr 1fr",
-      gap: "12px",
-      marginBottom: "12px",
-    }),
-    u = Xe("div", {});
-  u.appendChild(
-    Xe(
-      "label",
-      {
-        fontSize: "12px",
-        color: n.muted,
-        display: "block",
-        marginBottom: "6px",
-        fontWeight: "600",
-      },
-      "Objects",
-    ),
-  );
-  
-  const b = Xe("input", {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "9px 12px",
-    fontSize: "13px",
-    borderRadius: "8px",
-    border: `1px solid ${n.border}`,
-    background: n.panel,
-    color: n.text,
-    fontFamily: "inherit",
-    outline: "none",
-  });
-  ((b.placeholder = "Account"), b.setAttribute("list", "sample-obj-list-single"));
-  const N = Xe("datalist");
-  ((N.id = "sample-obj-list-single"),
-    u.appendChild(b),
-    u.appendChild(N),
-    E.appendChild(u));
-  const F = Xe("div", {});
-  F.appendChild(
-    Xe(
-      "label",
-      {
-        fontSize: "12px",
-        color: n.muted,
-        display: "block",
-        marginBottom: "6px",
-        fontWeight: "600",
-      },
-      "How many records (1–200)",
-    ),
-  );
-  const k = Xe("input", {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "9px 12px",
-    fontSize: "13px",
-    borderRadius: "8px",
-    border: `1px solid ${n.border}`,
-    background: n.panel,
-    color: n.text,
-    fontFamily: "inherit",
-    outline: "none",
-  });
-  ((k.type = "number"),
-    (k.min = "1"),
-    (k.max = "200"),
-    (k.value = "25"),
-    F.appendChild(k),
-    E.appendChild(F),
-    d.appendChild(E));
-  const c = Xe("div", {
-      display: "flex",
-      alignItems: "center",
-      gap: "16px",
-      marginBottom: "14px",
-      flexWrap: "wrap",
-    }),
-    O = Xe("label", {
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "7px",
-      fontSize: "12.5px",
-      color: n.text,
-      cursor: "pointer",
-    }),
-    x = Xe("input");
-  ((x.type = "checkbox"), (x.checked = true),
-    O.appendChild(x),
-    O.appendChild(
-      document.createTextNode(
-        "Also fill optional fields (more validation risk)",
-      ),
-    ),
-    optionalsDiv.appendChild(O));
-    
-  const L = Xe(
-    "button",
-    {
-      marginLeft: "auto",
-      background: n.accent,
-      border: "none",
-      color: "#fff",
-      borderRadius: "8px",
-      padding: "9px 18px",
-      cursor: "pointer",
-      fontSize: "13px",
-      fontWeight: "700",
-      fontFamily: "inherit",
-    },
-    "⚡ Generate previews",
-  );
-  (optionalsDiv.appendChild(L), d.appendChild(optionalsDiv));
-  
-  const D = Xe("div", {});
-  d.appendChild(D);
-  const U = Xe("div", { marginTop: "14px" });
-  d.appendChild(U);
-
-  let generatedData = {};
-  let objectFields = {};
-  let insertedIds = {};
-  let se = null;
-
-  const addObjToList = (val) => {
-    const cleanVal = val.trim();
-    if (cleanVal && availableObjects.has(cleanVal)) {
-      selectedObjects.add(cleanVal);
-      b.value = "";
-      renderPills();
-      De();
-    }
-  };
-
-  b.addEventListener("input", () => {
-    const val = b.value.trim();
-    if (availableObjects.has(val)) {
-      addObjToList(val);
-    }
-  });
-
-  b.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      addObjToList(b.value);
-    }
-  });
-
-  (t.orgInfo().then((M) => {
-    g = zc(M);
-    const K = M?.name ? ` · ${M.name}` : "";
-    (g === "sandbox"
-      ? ((r.textContent = `✅ Sandbox org${K} — safe to generate data.`),
-        (r.style.color = n.ok))
-      : g === "scratch"
-        ? ((r.textContent = `✅ Scratch / trial org${K} — safe to generate data.`),
-          (r.style.color = n.ok))
-        : g === "production"
-          ? ((r.innerHTML = `⛔ <b>Production org detected${K}</b> — you'll be asked to confirm before any records are inserted.`),
-            (r.style.color = n.danger))
-          : ((r.textContent =
-              "⚠️ Could not verify org type — you'll be asked to confirm before inserting."),
-            (r.style.color = n.warn)),
-      De());
-  }),
-    t.listObjects().then((M) => {
-      M.slice(0, 2e3).forEach((K) => {
-        availableObjects.add(K.name);
-        const j = document.createElement("option");
-        ((j.value = K.name), (j.label = K.label), N.appendChild(j));
-      });
-    }));
-
-  const re = () => !(g === "sandbox" || g === "scratch");
-  const De = () => {
-    if (!se) return;
-    const M = Object.keys(generatedData).length > 0;
-    ((se.style.opacity = M ? "1" : "0.5"),
-      (se.style.pointerEvents = M ? "auto" : "none"));
-  };
-
-  function Be(M) {
-    const K = Xe("div", {
-        position: "absolute",
-        inset: "0",
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: "10",
-        padding: "20px",
-      }),
-      j = Xe("div", {
-        maxWidth: "420px",
-        width: "100%",
-        background: n.panel,
-        border: `1px solid ${n.danger}`,
-        borderRadius: "14px",
-        padding: "20px",
-        boxShadow: "0 10px 40px rgba(0,0,0,0.35)",
-      });
-    
-    let totalCount = 0;
-    Object.keys(generatedData).forEach(k => totalCount += generatedData[k].length);
-    
-    (j.appendChild(
-      Xe(
-        "div",
-        {
-          fontSize: "15px",
-          fontWeight: "800",
-          color: n.danger,
-          marginBottom: "8px",
-        },
-        "⚠️ This is not a sandbox or scratch org",
-      ),
-    ),
-      j.appendChild(
-        Xe(
-          "div",
-          {
-            fontSize: "13px",
-            color: n.text,
-            lineHeight: "1.5",
-            marginBottom: "16px",
-          },
-          `You're about to insert ${totalCount} record${totalCount === 1 ? "" : "s"} across ${Object.keys(generatedData).length} objects. This tool is meant for sandbox & scratch orgs — inserting test data into a production org can be hard to undo. Continue only if you're sure.`,
-        ),
-      ));
-    const q = Xe("div", {
-        display: "flex",
-        gap: "10px",
-        justifyContent: "flex-end",
-      }),
-      P = Xe(
-        "button",
-        {
-          background: "transparent",
-          border: `1px solid ${n.border}`,
-          color: n.text,
-          borderRadius: "8px",
-          padding: "8px 16px",
-          cursor: "pointer",
-          fontSize: "13px",
-          fontWeight: "600",
-          fontFamily: "inherit",
-        },
-        "Cancel",
-      ),
-      ee = Xe(
-        "button",
-        {
-          background: n.danger,
-          border: "none",
-          color: "#fff",
-          borderRadius: "8px",
-          padding: "8px 16px",
-          cursor: "pointer",
-          fontSize: "13px",
-          fontWeight: "700",
-          fontFamily: "inherit",
-        },
-        "Insert anyway",
-      );
-    (P.addEventListener("click", () => K.remove()),
-      ee.addEventListener("click", () => {
-        (K.remove(), M());
-      }),
-      q.appendChild(P),
-      q.appendChild(ee),
-      j.appendChild(q),
-      K.appendChild(j),
-      i.appendChild(K));
-  }
-
-  async function be(M) {
-    const K = { lookups: {}, seq: Date.now() % 1e5 },
-      j = [],
-      q = Array.from(new Set(M.map((P) => P.referenceTo[0]).filter(Boolean)));
-    for (const P of q) {
-      const ee = await t.queryRecords(`SELECT Id FROM ${P} LIMIT 50`);
-      K.lookups[P] = (ee.records || []).map((G) => G.Id).filter(Boolean);
-    }
-    return (
-      M.forEach((P) => {
-        ei(P) &&
-          !(K.lookups[P.referenceTo[0]] || []).length &&
-          j.push(`${P.label} → needs an existing ${P.referenceTo[0]}`);
-      }),
-      { ctx: K, missing: j }
-    );
-  }
-
-  async function ge() {
-    if (selectedObjects.size === 0) {
-      t.flashToast("Select at least one object first");
-      return;
-    }
-    let K = parseInt(k.value, 10) || 0;
-    ((K = Math.max(1, Math.min(200, K))),
-      (k.value = String(K)),
-      (D.innerHTML = ""),
-      (U.innerHTML = ""),
-      (generatedData = {}),
-      (objectFields = {}),
-      (insertedIds = {}));
-      
-    const previewsContainer = Xe("div", { display: "flex", flexDirection: "column", gap: "16px" });
-    D.appendChild(previewsContainer);
-    
-    for (const objName of selectedObjects) {
-      const objTitle = Xe("div", { fontWeight: "700", fontSize: "14px", marginTop: "10px" }, `Analyzing ${objName}...`);
-      previewsContainer.appendChild(objTitle);
-      
-      const j = await t.describeObject(objName);
-      if (j.error || !j.fields) {
-        objTitle.textContent = `❌ ${objName}: ${j.error || "Could not describe this object."}`;
-        objTitle.style.color = n.danger;
-        continue;
-      }
-      if (j.createable === !1) {
-        objTitle.textContent = `❌ ${objName}: Object not createable.`;
-        objTitle.style.color = n.danger;
-        continue;
-      }
-      
-      objectFields[objName] = j.fields;
-      const q = x.checked,
-        P = j.fields.filter(
-          (w) => pa(w) && !w.defaultedOnCreate && (ei(w) || (q && w.nillable)),
-        ),
-        ee = P.filter((w) => w.type === "reference");
-        
-      objTitle.textContent = `Resolving lookups for ${objName}...`;
-      const { ctx: G, missing: T } = await be(ee);
-      if (T.length) {
-        objTitle.innerHTML = "";
-        const w = Xe("div", {
-          padding: "14px",
-          borderRadius: "10px",
-          border: `1px solid ${n.danger}`,
-          background: e ? "rgba(239,68,68,0.10)" : "rgba(239,68,68,0.06)",
-          color: e ? "#fca5a5" : "#b91c1c",
-          fontSize: "13px",
-        });
-        w.appendChild(
-          Xe(
-            "div",
-            { fontWeight: "700", marginBottom: "6px" },
-            `❌ ${objName} - Missing required related records:`,
-          )
-        );
-        T.forEach((H) =>
-          w.appendChild(Xe("div", { fontSize: "12.5px" }, `• ${H}`)),
-        );
-        objTitle.appendChild(w);
-        continue;
-      }
-      
-      const records = [];
-      for (let w = 0; w < K; w++) {
-        const H = { attributes: { type: objName } };
-        P.forEach((p) => {
-          const A = ua(p, w, G);
-          A != null && A !== "" && (H[p.name] = A);
-        });
-        records.push(H);
-      }
-      
-      generatedData[objName] = records;
-      
-      objTitle.innerHTML = "";
-      const objSection = Xe("div", {
-        border: `1px solid ${n.border}`,
-        borderRadius: "12px",
-        overflow: "hidden",
-      });
-      
-      const objHeader = Xe("div", {
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "12px",
-        padding: "10px 14px",
-        background: n.headerBg,
-        borderBottom: `1px solid ${n.border}`,
-      });
-      
-      objHeader.appendChild(
-        Xe("span", { fontSize: "13px", fontWeight: "700" }, `🧪 ${objName} (${records.length} records ready)`)
-      );
-      
-      const toggleBtn = Xe("button", {
-        background: "transparent",
-        border: `1px solid ${n.border}`,
-        color: n.text,
-        borderRadius: "7px",
-        padding: "4px 10px",
-        cursor: "pointer",
-        fontSize: "12px",
-        fontWeight: "600",
-        fontFamily: "inherit",
-      }, "Show Preview");
-      
-      objHeader.appendChild(toggleBtn);
-      objSection.appendChild(objHeader);
-      
-      const previewTableContainer = Xe("div", { display: "none" });
-      const T_table = Xe("table", {
-        width: "100%",
-        borderCollapse: "collapse",
-        fontSize: "12.5px",
-        tableLayout: "fixed",
-      });
-      
-      const firstRecord = records[0] || {};
-      P.forEach((Q, S) => {
-        const Y = Xe("tr", {
-          borderTop: S === 0 ? "none" : `1px solid ${n.divider}`,
-        });
-        Y.appendChild(
-          Xe(
-            "td",
-            { padding: "8px 14px", width: "34%", wordBreak: "break-word" },
-            `${Q.label}${ei(Q) ? " *" : ""}`,
-          )
-        );
-        Y.appendChild(
-          Xe(
-            "td",
-            { padding: "8px 14px", width: "22%", color: n.muted },
-            Me(Q),
-          )
-        );
-        
-        const Se = firstRecord[Q.name];
-        const oe = Xe("td", { padding: "5px 10px" });
-        const we = Xe("input", {
-          width: "100%",
-          boxSizing: "border-box",
-          padding: "6px 8px",
-          fontSize: "12.5px",
-          fontFamily: "monospace",
-          border: `1px solid ${n.border}`,
-          borderRadius: "6px",
-          background: n.panel,
-          color: n.text,
-          outline: "none",
-        });
-        we.value = Se === void 0 ? "" : String(Se);
-        we.placeholder = "—";
-        we.addEventListener("change", () => {
-          const Te = Gc(Q, we.value);
-          records.forEach((fe) => {
-            Te === void 0 ? delete fe[Q.name] : (fe[Q.name] = Te);
-          });
-          Te !== void 0 && (we.value = String(Te));
-        });
-        
-        oe.appendChild(we);
-        Y.appendChild(oe);
-        T_table.appendChild(Y);
-      });
-      
-      previewTableContainer.appendChild(T_table);
-      objSection.appendChild(previewTableContainer);
-      previewsContainer.appendChild(objSection);
-      
-      toggleBtn.addEventListener("click", () => {
-        const isCollapsed = previewTableContainer.style.display === "none";
-        previewTableContainer.style.display = isCollapsed ? "block" : "none";
-        toggleBtn.textContent = isCollapsed ? "Hide Preview" : "Show Preview";
-      });
-    }
-    
-    let totalCount = 0;
-    Object.keys(generatedData).forEach(k => totalCount += generatedData[k].length);
-    
-    if (totalCount > 0) {
-      const p = Xe("div", {
-        display: "flex",
-        alignItems: "center",
-        gap: "10px",
-        marginTop: "12px",
-      });
-      const A = Xe(
-        "span",
-        { fontSize: "12px", color: n.muted },
-        `${totalCount} record${totalCount === 1 ? "" : "s"} ready across ${Object.keys(generatedData).length} objects`
-      );
-      p.appendChild(A);
-      
-      se = Xe(
-        "button",
-        {
-          marginLeft: "auto",
-          background: n.ok,
-          border: "none",
-          color: "#fff",
-          borderRadius: "8px",
-          padding: "9px 18px",
-          cursor: "pointer",
-          fontSize: "13px",
-          fontWeight: "700",
-          fontFamily: "inherit",
-        },
-        `⬆ Insert ${totalCount} records`,
-      );
-      se.addEventListener("click", ye);
-      p.appendChild(se);
-      D.appendChild(p);
-      De();
-    }
-  }
-
-  const Me = (M) =>
-    M.type === "string" || M.type === "textarea"
-      ? `Text(${M.length || "?"})`
-      : M.type === "reference"
-        ? `Lookup(${M.referenceTo[0] || "?"})`
-        : M.type.charAt(0).toUpperCase() + M.type.slice(1);
-
-  function ye() {
-    if (Object.keys(generatedData).length) {
-      if (re()) {
-        Be(te);
-        return;
-      }
-      te();
-    }
-  }
-
-  async function te() {
-    if (!Object.keys(generatedData).length) return;
-    let totalCount = 0;
-    Object.keys(generatedData).forEach(k => totalCount += generatedData[k].length);
-    
-    if (se) {
-      se.textContent = "Inserting...";
-      se.style.pointerEvents = "none";
-    }
-    
-    let totalInserted = 0;
-    let failuresList = [];
-    
-    for (const objName of Object.keys(generatedData)) {
-      const records = generatedData[objName];
-      const M = await t.insertRecords(objName, records);
-      if (M.error) {
-        failuresList.push(`${objName}: ${M.error}`);
-        continue;
-      }
-      const K = M.results || [];
-      const successes = K.filter((q) => q.success && q.id).map((q) => q.id);
-      insertedIds[objName] = successes;
-      totalInserted += successes.length;
-      
-      K.filter((q) => !q.success).forEach((q) => {
-        const P = (q.errors && q.errors[0]) || {};
-        failuresList.push(`${objName} - ${P.statusCode || "ERROR"}: ${P.message || "insert failed"}`);
-      });
-    }
-    
-    z(totalInserted, totalCount, Le(failuresList));
-  }
-
-  const Le = (M) => Array.from(new Set(M)).slice(0, 8);
-
-  function z(M, K, j) {
-    U.innerHTML = "";
-    const q = Xe("div", {
-      border: `1px solid ${M > 0 ? n.ok : n.danger}`,
-      borderRadius: "12px",
-      padding: "14px",
-      background: e ? "rgba(255,255,255,0.02)" : "#fff",
-    });
-    
-    q.appendChild(
-      Xe(
-        "div",
-        {
-          fontSize: "14px",
-          fontWeight: "800",
-          color: M > 0 ? n.ok : n.danger,
-        },
-        `Inserted ${M} of ${K} record${K === 1 ? "" : "s"}`,
-      )
-    );
-    
-    if (j.length) {
-      q.appendChild(
-        Xe(
-          "div",
-          { fontSize: "12px", color: n.muted, margin: "8px 0 4px" },
-          `${K - M} failed — top reasons (often validation rules or triggers):`,
-        )
-      );
-      const P = Xe("pre", {
-        margin: "0",
-        padding: "10px 12px",
-        borderRadius: "8px",
-        background: e ? "rgba(239,68,68,0.10)" : "rgba(239,68,68,0.06)",
-        color: e ? "#fca5a5" : "#b91c1c",
-        fontSize: "12px",
-        whiteSpace: "pre-wrap",
-        fontFamily: "monospace",
-      });
-      ((P.textContent = j.join(`\n`)),
-        q.appendChild(P));
-    }
-    
-    const allInsertedIds = [];
-    Object.keys(insertedIds).forEach(oName => {
-      allInsertedIds.push(...insertedIds[oName]);
-    });
-    
-    if (allInsertedIds.length) {
-      const P = Xe("div", {
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-          marginTop: "12px",
-          flexWrap: "wrap",
-        });
-      
-      const G = Xe(
-        "button",
-        {
-          background: "transparent",
-          border: `1px solid ${n.danger}`,
-          color: n.danger,
-          borderRadius: "8px",
-          padding: "7px 12px",
-          cursor: "pointer",
-          fontSize: "12.5px",
-          fontWeight: "700",
-          fontFamily: "inherit",
-        },
-        `🗑 Delete these ${allInsertedIds.length} records`,
-      );
-      
-      G.addEventListener("click", async () => {
-        G.textContent = "Deleting...";
-        G.style.pointerEvents = "none";
-        
-        let deleteFailed = false;
-        let deleteError = "";
-        
-        for (const objName of Object.keys(insertedIds)) {
-          const ids = insertedIds[objName];
-          if (ids.length === 0) continue;
-          const T = await t.deleteRecords(ids);
-          if (T.error) {
-            deleteFailed = true;
-            deleteError = T.error;
-          } else {
-            insertedIds[objName] = [];
-          }
-        }
-        
-        if (deleteFailed) {
-          t.flashToast(deleteError);
-          G.textContent = "Delete failed — retry";
-          G.style.pointerEvents = "auto";
-          return;
-        }
-        
-        t.flashToast(`Deleted generated records`);
-        U.innerHTML = "";
-      });
-      
-      P.appendChild(G);
-      q.appendChild(P);
-    }
-    
-    U.appendChild(q);
-    if (se) {
-      let totalCount = 0;
-      Object.keys(generatedData).forEach(k => totalCount += generatedData[k].length);
-      se.textContent = `⬆ Insert ${totalCount} records`;
-      De();
-    }
-  }
-
-  L.addEventListener("click", ge);
-}
 const $o = "data-sfsl-magic",
   Yc = new Set([
     "string",
@@ -13739,6 +12961,1981 @@ function ks(o) {
       return;
     } catch {}
   window.open(o, "_blank");
+}
+function renderPermClone(o, t) {
+  const isDark = t.isDark,
+    n = kt(isDark);
+  o.innerHTML = "";
+
+  const container = rt("div", {
+    height: "100%",
+    minHeight: "0",
+    display: "flex",
+    flexDirection: "column",
+    background: n.bg,
+    color: n.text,
+    fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    position: "relative",
+  });
+  o.appendChild(container);
+
+  // Top header bar
+  const header = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 24px",
+    flexShrink: "0",
+    borderBottom: `1px solid ${n.divider}`,
+    background: n.headerBg || n.panel,
+  });
+
+  const headerLeft = rt("div", { display: "flex", alignItems: "center", gap: "10px" });
+  const backBtn = rt("button", {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    color: n.muted,
+    fontFamily: "inherit",
+    fontSize: "13px",
+    fontWeight: "700",
+  });
+  backBtn.innerHTML = '<span style="font-size:15px">←</span> Tools';
+  backBtn.addEventListener("click", t.onBack);
+  headerLeft.appendChild(backBtn);
+  headerLeft.appendChild(rt("span", { color: n.faint }, "/"));
+  headerLeft.appendChild(
+    rt("div", { fontSize: "15px", fontWeight: "800", color: n.text, display: "flex", alignItems: "center", gap: "8px" }, "🧬 Profile & Permission Master Clone")
+  );
+  header.appendChild(headerLeft);
+
+  const headerRight = rt("div", { display: "flex", alignItems: "center", gap: "10px" });
+  const statusBadge = rt("span", {
+    fontSize: "11px",
+    fontWeight: "700",
+    padding: "3px 9px",
+    borderRadius: "12px",
+    background: "rgba(59,130,246,0.15)",
+    color: "#3b82f6",
+  }, "Ready");
+  headerRight.appendChild(statusBadge);
+
+  const guideBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "4px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "ℹ️ Guide");
+  guideBtn.addEventListener("click", showGuideModal);
+  headerRight.appendChild(guideBtn);
+  header.appendChild(headerRight);
+  container.appendChild(header);
+
+  // Main scrollable body
+  const bodyWrap = rt("div", {
+    flex: "1",
+    minHeight: "0",
+    overflow: "auto",
+    padding: "20px 24px 120px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "18px",
+  });
+  container.appendChild(bodyWrap);
+
+  // Guide Modal
+  function showGuideModal() {
+    const overlay = rt("div", {
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "100%",
+      height: "100%",
+      background: "rgba(0,0,0,0.6)",
+      zIndex: "999999",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      backdropFilter: "blur(4px)",
+    });
+    const modal = rt("div", {
+      background: n.panel,
+      border: `1px solid ${n.border}`,
+      borderRadius: "14px",
+      width: "580px",
+      maxWidth: "92vw",
+      maxHeight: "85vh",
+      overflow: "auto",
+      padding: "24px",
+      boxShadow: "0 20px 50px rgba(0,0,0,0.4)",
+    });
+    modal.innerHTML = `
+      <div style="font-size:18px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+        <span>🧬</span> Profile & Permission Master Clone Guide
+      </div>
+      <div style="font-size:13px;line-height:1.6;color:${n.text};display:flex;flex-direction:column;gap:12px">
+        <p><b>Convert Profiles to Permission Sets:</b> Salesforce is transitioning permissions from Profiles to Permission Sets. This tool enables 1-click migration of all Profile CRUDQ, FLS, System Permissions, Apex classes, Visualforce pages, and Custom permissions into a clean, modern Permission Set.</p>
+        <p><b>Granular Control:</b> Select exactly which domains to clone (Objects, FLS, System flags, Apex/VF/Custom Perms) and filter by specific sObjects.</p>
+        <p><b>Batch Engine:</b> Employs high-performance composite batching with intelligent error isolation and license compatibility handling.</p>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:20px">
+        <button id="guide-close-btn" style="background:#3b82f6;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">Got it</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    modal.querySelector("#guide-close-btn").addEventListener("click", () => overlay.remove());
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+  }
+
+  // State
+  let securityPrincipals = [];
+  let userLicenses = [];
+  let availableObjects = [];
+  let selectedSourcePrincipal = null;
+  let sourcePermSetId = null;
+  let isAnalyzingSource = false;
+  let isExecuting = false;
+
+  let sourcePermissions = {
+    objects: [],
+    fields: [],
+    system: [],
+    apex: [],
+    vf: [],
+    customPerms: [],
+  };
+
+  // Modules toggles
+  const modulesState = {
+    objects: true,
+    fields: true,
+    system: true,
+    apex: true,
+    vf: true,
+    customPerms: true,
+  };
+
+  // Object scoping
+  let objectScopeMode = "all"; // "all" | "specific"
+  let selectedObjectFilters = new Set();
+
+  // Active preview tab
+  let activeTab = "objects";
+  let previewFilter = "";
+
+  // 1. Source & Target Card
+  const configGrid = rt("div", {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
+    gap: "16px",
+  });
+  bodyWrap.appendChild(configGrid);
+
+  // Source Card
+  const sourceCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  configGrid.appendChild(sourceCard);
+
+  const sourceTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: n.text,
+  });
+  sourceTitle.innerHTML = `<span style="font-size:16px">👤</span> 1. Select Source Security Principal`;
+  sourceCard.appendChild(sourceTitle);
+
+  const sourceSelect = rt("select", {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "13px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+  });
+  sourceSelect.innerHTML = `<option value="">— Loading Profiles & Permission Sets… —</option>`;
+  sourceCard.appendChild(sourceSelect);
+
+  const sourceDetails = rt("div", {
+    fontSize: "12px",
+    color: n.muted,
+    minHeight: "22px",
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: "8px",
+  });
+  sourceCard.appendChild(sourceDetails);
+
+  // Target Card
+  const targetCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  configGrid.appendChild(targetCard);
+
+  const targetTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: n.text,
+  });
+  targetTitle.innerHTML = `<span style="font-size:16px">🎯</span> 2. Target Configuration`;
+  targetCard.appendChild(targetTitle);
+
+  // Target Mode Tabs (New PermSet vs Existing PermSet)
+  const targetModeWrap = rt("div", {
+    display: "flex",
+    gap: "8px",
+    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
+    padding: "3px",
+    borderRadius: "8px",
+    width: "fit-content",
+  });
+  targetCard.appendChild(targetModeWrap);
+
+  let targetMode = "new"; // "new" | "existing"
+
+  const newModeBtn = rt("button", {
+    padding: "5px 12px",
+    fontSize: "12px",
+    fontWeight: "700",
+    borderRadius: "6px",
+    border: "none",
+    cursor: "pointer",
+    background: targetMode === "new" ? "#3b82f6" : "transparent",
+    color: targetMode === "new" ? "#fff" : n.muted,
+    fontFamily: "inherit",
+  }, "🆕 New Permission Set");
+  targetModeWrap.appendChild(newModeBtn);
+
+  const existModeBtn = rt("button", {
+    padding: "5px 12px",
+    fontSize: "12px",
+    fontWeight: "700",
+    borderRadius: "6px",
+    border: "none",
+    cursor: "pointer",
+    background: targetMode === "existing" ? "#3b82f6" : "transparent",
+    color: targetMode === "existing" ? "#fff" : n.muted,
+    fontFamily: "inherit",
+  }, "🔄 Merge Existing");
+  targetModeWrap.appendChild(existModeBtn);
+
+  // Target New Form
+  const targetNewForm = rt("div", { display: "flex", flexDirection: "column", gap: "10px" });
+  targetCard.appendChild(targetNewForm);
+
+  const labelRow = rt("div", { display: "flex", gap: "10px" });
+  targetNewForm.appendChild(labelRow);
+
+  const labelInputWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  labelInputWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Master Label"));
+  const targetLabelInput = rt("input", {
+    padding: "8px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "13px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  targetLabelInput.placeholder = "e.g. Sales Operations Cloned";
+  labelInputWrap.appendChild(targetLabelInput);
+  labelRow.appendChild(labelInputWrap);
+
+  const nameInputWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  nameInputWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "API Developer Name"));
+  const targetApiNameInput = rt("input", {
+    padding: "8px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "13px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  targetApiNameInput.placeholder = "e.g. Sales_Operations_Cloned";
+  nameInputWrap.appendChild(targetApiNameInput);
+  labelRow.appendChild(nameInputWrap);
+
+  targetLabelInput.addEventListener("input", () => {
+    const slug = targetLabelInput.value
+      .replace(/[^a-zA-Z0-9]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "");
+    targetApiNameInput.value = slug;
+    updateCloneSummary();
+  });
+
+  targetApiNameInput.addEventListener("input", updateCloneSummary);
+
+  const licenseRow = rt("div", { display: "flex", gap: "10px" });
+  targetNewForm.appendChild(licenseRow);
+
+  const licenseWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  licenseWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "User License (Optional)"));
+  const licenseSelect = rt("select", {
+    padding: "8px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  licenseSelect.innerHTML = `<option value="">— None (Assignable to Any License) —</option>`;
+  licenseWrap.appendChild(licenseSelect);
+  licenseRow.appendChild(licenseWrap);
+
+  const descWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  descWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Description"));
+  const descInput = rt("input", {
+    padding: "8px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  descInput.placeholder = "Cloned via SF Spotlight";
+  descWrap.appendChild(descInput);
+  licenseRow.appendChild(descWrap);
+
+  // Target Existing Form
+  const targetExistingForm = rt("div", { display: "none", flexDirection: "column", gap: "10px" });
+  targetCard.appendChild(targetExistingForm);
+
+  targetExistingForm.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Select Target Permission Set"));
+  const targetExistingSelect = rt("select", {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "13px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    boxSizing: "border-box",
+  });
+  targetExistingSelect.innerHTML = `<option value="">— Select Target Permission Set —</option>`;
+  targetExistingSelect.addEventListener("change", updateCloneSummary);
+  targetExistingForm.appendChild(targetExistingSelect);
+
+  newModeBtn.addEventListener("click", () => {
+    targetMode = "new";
+    newModeBtn.style.background = "#3b82f6";
+    newModeBtn.style.color = "#fff";
+    existModeBtn.style.background = "transparent";
+    existModeBtn.style.color = n.muted;
+    targetNewForm.style.display = "flex";
+    targetExistingForm.style.display = "none";
+    updateCloneSummary();
+  });
+
+  existModeBtn.addEventListener("click", () => {
+    targetMode = "existing";
+    existModeBtn.style.background = "#3b82f6";
+    existModeBtn.style.color = "#fff";
+    newModeBtn.style.background = "transparent";
+    newModeBtn.style.color = n.muted;
+    targetNewForm.style.display = "none";
+    targetExistingForm.style.display = "flex";
+    updateCloneSummary();
+  });
+
+  // Custom Toggle Switch Helper (No native input CSS interference!)
+  function createToggleSwitch(checked, onChange) {
+    const switchBox = rt("div", {
+      width: "36px",
+      height: "20px",
+      borderRadius: "10px",
+      background: checked ? "#3b82f6" : (isDark ? "#334155" : "#cbd5e1"),
+      position: "relative",
+      cursor: "pointer",
+      transition: "background 0.2s ease",
+      flexShrink: "0",
+    });
+    const knob = rt("div", {
+      width: "14px",
+      height: "14px",
+      borderRadius: "50%",
+      background: "#ffffff",
+      position: "absolute",
+      top: "3px",
+      left: checked ? "19px" : "3px",
+      transition: "left 0.2s ease",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+    });
+    switchBox.appendChild(knob);
+    switchBox.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const newVal = !checked;
+      checked = newVal;
+      switchBox.style.background = checked ? "#3b82f6" : (isDark ? "#334155" : "#cbd5e1");
+      knob.style.left = checked ? "19px" : "3px";
+      onChange(checked);
+    });
+    return {
+      element: switchBox,
+      setChecked: (val) => {
+        checked = !!val;
+        switchBox.style.background = checked ? "#3b82f6" : (isDark ? "#334155" : "#cbd5e1");
+        knob.style.left = checked ? "19px" : "3px";
+      },
+      getChecked: () => checked,
+    };
+  }
+
+  // 2. Granular Module Selection & Scoping Section
+  const modulesCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  });
+  bodyWrap.appendChild(modulesCard);
+
+  const modulesHeader = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "10px",
+  });
+  modulesCard.appendChild(modulesHeader);
+
+  const modulesTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: n.text,
+  });
+  modulesTitle.innerHTML = `<span style="font-size:16px">⚙️</span> 3. Permission Domains to Clone`;
+  modulesHeader.appendChild(modulesTitle);
+
+  const selectBtns = rt("div", { display: "flex", gap: "8px" });
+  const selectAllBtn = rt("button", {
+    background: "transparent",
+    border: "none",
+    color: "#3b82f6",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "Select All");
+  const deselectAllBtn = rt("button", {
+    background: "transparent",
+    border: "none",
+    color: n.muted,
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "Deselect All");
+  selectBtns.appendChild(selectAllBtn);
+  selectBtns.appendChild(rt("span", { color: n.faint }, "·"));
+  selectBtns.appendChild(deselectAllBtn);
+  modulesHeader.appendChild(selectBtns);
+
+  // Module items grid (Clean Cards with Custom Toggle Switches)
+  const modulesGrid = rt("div", {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: "12px",
+  });
+  modulesCard.appendChild(modulesGrid);
+
+  const moduleDefinitions = [
+    { key: "objects", icon: "📦", label: "Object Permissions", desc: "CRUD, View All, Modify All" },
+    { key: "fields", icon: "🔤", label: "Field Permissions", desc: "Field-Level Security (FLS)" },
+    { key: "system", icon: "⚙️", label: "System Permissions", desc: "User & admin boolean flags" },
+    { key: "apex", icon: "⚡", label: "Apex Classes", desc: "Apex class access permissions" },
+    { key: "vf", icon: "📄", label: "Visualforce Pages", desc: "Visualforce page accesses" },
+    { key: "customPerms", icon: "🔑", label: "Custom Permissions", desc: "Custom platform permissions" },
+  ];
+
+  const moduleElements = {};
+
+  moduleDefinitions.forEach((mod) => {
+    const item = rt("div", {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "12px 14px",
+      borderRadius: "10px",
+      border: `1px solid ${modulesState[mod.key] ? "rgba(59,130,246,0.35)" : n.border}`,
+      background: modulesState[mod.key] ? (isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)") : "transparent",
+      cursor: "pointer",
+      userSelect: "none",
+      transition: "all 0.15s ease",
+      gap: "10px",
+    });
+
+    const info = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "3px", minWidth: "0" });
+    const topRow = rt("div", { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" });
+    topRow.innerHTML = `<span style="font-size:13px;font-weight:700;color:${n.text};display:flex;align-items:center;gap:5px">${mod.icon} ${mod.label}</span>`;
+    
+    const countChip = rt("span", {
+      fontSize: "11px",
+      fontWeight: "700",
+      padding: "1px 7px",
+      borderRadius: "10px",
+      background: "rgba(59,130,246,0.12)",
+      color: "#3b82f6",
+    }, "0");
+    topRow.appendChild(countChip);
+    info.appendChild(topRow);
+
+    info.appendChild(rt("span", { fontSize: "11px", color: n.muted }, mod.desc));
+    item.appendChild(info);
+
+    const toggle = createToggleSwitch(modulesState[mod.key], (val) => {
+      modulesState[mod.key] = val;
+      item.style.borderColor = val ? "rgba(59,130,246,0.35)" : n.border;
+      item.style.background = val ? (isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)") : "transparent";
+      updateCloneButton();
+      updateCloneSummary();
+    });
+
+    item.appendChild(toggle.element);
+
+    item.addEventListener("click", () => {
+      const newVal = !modulesState[mod.key];
+      modulesState[mod.key] = newVal;
+      toggle.setChecked(newVal);
+      item.style.borderColor = newVal ? "rgba(59,130,246,0.35)" : n.border;
+      item.style.background = newVal ? (isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)") : "transparent";
+      updateCloneButton();
+      updateCloneSummary();
+    });
+
+    moduleElements[mod.key] = { item, toggle, countChip };
+    modulesGrid.appendChild(item);
+  });
+
+  selectAllBtn.addEventListener("click", () => {
+    Object.keys(modulesState).forEach((k) => {
+      modulesState[k] = true;
+      moduleElements[k].toggle.setChecked(true);
+      moduleElements[k].item.style.borderColor = "rgba(59,130,246,0.35)";
+      moduleElements[k].item.style.background = isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)";
+    });
+    updateCloneButton();
+    updateCloneSummary();
+  });
+
+  deselectAllBtn.addEventListener("click", () => {
+    Object.keys(modulesState).forEach((k) => {
+      modulesState[k] = false;
+      moduleElements[k].toggle.setChecked(false);
+      moduleElements[k].item.style.borderColor = n.border;
+      moduleElements[k].item.style.background = "transparent";
+    });
+    updateCloneButton();
+    updateCloneSummary();
+  });
+
+  // Object Scope Section
+  const scopeWrap = rt("div", {
+    borderTop: `1px solid ${n.divider}`,
+    paddingTop: "14px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  });
+  modulesCard.appendChild(scopeWrap);
+
+  const scopeHeader = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "10px",
+  });
+  scopeWrap.appendChild(scopeHeader);
+
+  scopeHeader.appendChild(
+    rt("div", { fontSize: "13px", fontWeight: "700", color: n.text, display: "flex", alignItems: "center", gap: "6px" }, "🎯 Object Scoping Filter:")
+  );
+
+  const scopeToggleWrap = rt("div", {
+    display: "flex",
+    gap: "6px",
+    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
+    padding: "3px",
+    borderRadius: "6px",
+  });
+  scopeHeader.appendChild(scopeToggleWrap);
+
+  const scopeAllBtn = rt("button", {
+    padding: "4px 10px",
+    fontSize: "12px",
+    fontWeight: "700",
+    borderRadius: "4px",
+    border: "none",
+    cursor: "pointer",
+    background: objectScopeMode === "all" ? "#3b82f6" : "transparent",
+    color: objectScopeMode === "all" ? "#fff" : n.muted,
+    fontFamily: "inherit",
+  }, "All Objects");
+  scopeToggleWrap.appendChild(scopeAllBtn);
+
+  const scopeSpecificBtn = rt("button", {
+    padding: "4px 10px",
+    fontSize: "12px",
+    fontWeight: "700",
+    borderRadius: "4px",
+    border: "none",
+    cursor: "pointer",
+    background: objectScopeMode === "specific" ? "#3b82f6" : "transparent",
+    color: objectScopeMode === "specific" ? "#fff" : n.muted,
+    fontFamily: "inherit",
+  }, "Specific Objects only");
+  scopeToggleWrap.appendChild(scopeSpecificBtn);
+
+  const specificObjectsBox = rt("div", {
+    display: "none",
+    flexDirection: "column",
+    gap: "8px",
+    background: isDark ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.02)",
+    padding: "12px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+  });
+  scopeWrap.appendChild(specificObjectsBox);
+
+  const specificSearchRow = rt("div", { display: "flex", gap: "10px", alignItems: "center" });
+  specificObjectsBox.appendChild(specificSearchRow);
+
+  const objSearchInput = rt("input", {
+    flex: "1",
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#fff",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    boxSizing: "border-box",
+  });
+  objSearchInput.placeholder = "Filter objects (e.g. Account, Contact, Custom__c)…";
+  specificSearchRow.appendChild(objSearchInput);
+
+  const selectFilteredObjsBtn = rt("button", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: "transparent",
+    color: "#3b82f6",
+    fontSize: "11.5px",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "Select All Filtered");
+  specificSearchRow.appendChild(selectFilteredObjsBtn);
+
+  const clearSelectedObjsBtn = rt("button", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: "transparent",
+    color: n.muted,
+    fontSize: "11.5px",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "Clear Selected");
+  specificSearchRow.appendChild(clearSelectedObjsBtn);
+
+  const objectTagsContainer = rt("div", {
+    maxHeight: "150px",
+    overflow: "auto",
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    padding: "4px 0",
+  });
+  specificObjectsBox.appendChild(objectTagsContainer);
+
+  scopeAllBtn.addEventListener("click", () => {
+    objectScopeMode = "all";
+    scopeAllBtn.style.background = "#3b82f6";
+    scopeAllBtn.style.color = "#fff";
+    scopeSpecificBtn.style.background = "transparent";
+    scopeSpecificBtn.style.color = n.muted;
+    specificObjectsBox.style.display = "none";
+    renderPreview();
+    updateCloneSummary();
+  });
+
+  scopeSpecificBtn.addEventListener("click", () => {
+    objectScopeMode = "specific";
+    scopeSpecificBtn.style.background = "#3b82f6";
+    scopeSpecificBtn.style.color = "#fff";
+    scopeAllBtn.style.background = "transparent";
+    scopeAllBtn.style.color = n.muted;
+    specificObjectsBox.style.display = "flex";
+    renderObjectTags();
+    renderPreview();
+    updateCloneSummary();
+  });
+
+  // 3. Live Pre-Clone Analysis & Diff Review Section
+  const previewCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  });
+  bodyWrap.appendChild(previewCard);
+
+  const previewHeader = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "10px",
+  });
+  previewCard.appendChild(previewHeader);
+
+  const previewTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: n.text,
+  });
+  previewTitle.innerHTML = `<span style="font-size:16px">🔍</span> 4. Pre-Clone Inspection & Analysis`;
+  previewHeader.appendChild(previewTitle);
+
+  // Tabs
+  const previewTabsWrap = rt("div", {
+    display: "flex",
+    gap: "6px",
+    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
+    padding: "3px",
+    borderRadius: "8px",
+    flexWrap: "wrap",
+  });
+  previewHeader.appendChild(previewTabsWrap);
+
+  const previewTabs = [
+    { key: "objects", label: "Objects (CRUDQ)" },
+    { key: "fields", label: "Fields (FLS)" },
+    { key: "system", label: "System Perms" },
+    { key: "apex", label: "Apex & VF" },
+    { key: "customPerms", label: "Custom Perms" },
+  ];
+
+  const tabButtons = {};
+
+  previewTabs.forEach((tb) => {
+    const btn = rt("button", {
+      padding: "5px 12px",
+      fontSize: "12px",
+      fontWeight: "700",
+      borderRadius: "6px",
+      border: "none",
+      cursor: "pointer",
+      background: activeTab === tb.key ? "#3b82f6" : "transparent",
+      color: activeTab === tb.key ? "#fff" : n.muted,
+      fontFamily: "inherit",
+    }, tb.label);
+    btn.addEventListener("click", () => {
+      activeTab = tb.key;
+      previewTabs.forEach((oTb) => {
+        tabButtons[oTb.key].style.background = activeTab === oTb.key ? "#3b82f6" : "transparent";
+        tabButtons[oTb.key].style.color = activeTab === oTb.key ? "#fff" : n.muted;
+      });
+      renderPreview();
+    });
+    tabButtons[tb.key] = btn;
+    previewTabsWrap.appendChild(btn);
+  });
+
+  // Filter input inside preview
+  const previewSearchRow = rt("div", { display: "flex", alignItems: "center", gap: "10px" });
+  previewCard.appendChild(previewSearchRow);
+
+  const previewSearchInput = rt("input", {
+    flex: "1",
+    padding: "8px 12px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    boxSizing: "border-box",
+  });
+  previewSearchInput.placeholder = "Search preview table…";
+  previewSearchInput.addEventListener("input", () => {
+    previewFilter = previewSearchInput.value.toLowerCase().trim();
+    renderPreview();
+  });
+  previewSearchRow.appendChild(previewSearchInput);
+
+  const previewTableContainer = rt("div", {
+    maxHeight: "360px",
+    overflow: "auto",
+    border: `1px solid ${n.divider}`,
+    borderRadius: "8px",
+    background: isDark ? "#0f172a" : "#ffffff",
+  });
+  previewCard.appendChild(previewTableContainer);
+
+  // 4. Sticky Bottom Action Bar
+  const stickyActionBar = rt("div", {
+    position: "fixed",
+    bottom: "0",
+    left: "0",
+    right: "0",
+    background: isDark ? "rgba(15,23,42,0.94)" : "rgba(255,255,255,0.96)",
+    backdropFilter: "blur(14px)",
+    WebkitBackdropFilter: "blur(14px)",
+    borderTop: `1px solid ${n.divider}`,
+    boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
+    zIndex: "100",
+    padding: "14px 24px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  });
+  container.appendChild(stickyActionBar);
+
+  // Progress Bar Container (inside sticky bar, hidden by default)
+  const progressBox = rt("div", {
+    display: "none",
+    flexDirection: "column",
+    gap: "8px",
+    background: isDark ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.03)",
+    padding: "10px 14px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+  });
+  stickyActionBar.appendChild(progressBox);
+
+  const progressHeader = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    fontSize: "12px",
+    fontWeight: "700",
+  });
+  const progressStatusLabel = rt("span", { color: n.text }, "Initializing clone engine…");
+  const progressPercentLabel = rt("span", { color: "#3b82f6" }, "0%");
+  progressHeader.appendChild(progressStatusLabel);
+  progressHeader.appendChild(progressPercentLabel);
+  progressBox.appendChild(progressHeader);
+
+  const progressBarTrack = rt("div", {
+    width: "100%",
+    height: "6px",
+    borderRadius: "3px",
+    background: isDark ? "#334155" : "#e2e8f0",
+    overflow: "hidden",
+  });
+  const progressBarFill = rt("div", {
+    width: "0%",
+    height: "100%",
+    borderRadius: "3px",
+    background: "linear-gradient(90deg, #3b82f6, #10b981)",
+    transition: "width 0.2s ease-out",
+  });
+  progressBarTrack.appendChild(progressBarFill);
+  progressBox.appendChild(progressBarTrack);
+
+  // Log Output Box
+  const logTerminal = rt("div", {
+    maxHeight: "120px",
+    overflow: "auto",
+    background: isDark ? "#020617" : "#1e293b",
+    color: "#e2e8f0",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: "11px",
+    padding: "8px 10px",
+    borderRadius: "6px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "3px",
+    lineHeight: "1.4",
+  });
+  progressBox.appendChild(logTerminal);
+
+  function logMsg(type, text) {
+    const row = rt("div", { display: "flex", gap: "8px", alignItems: "flex-start" });
+    const time = new Date().toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const timeSpan = rt("span", { color: "#64748b", flexShrink: "0" }, `[${time}]`);
+    let badgeColor = "#38bdf8";
+    if (type === "SUCCESS") badgeColor = "#4ade80";
+    if (type === "WARN") badgeColor = "#facc15";
+    if (type === "ERROR") badgeColor = "#f87171";
+
+    const badge = rt("span", { color: badgeColor, fontWeight: "700", flexShrink: "0" }, `[${type}]`);
+    const msg = rt("span", { color: type === "ERROR" ? "#fca5a5" : "#f1f5f9" }, text);
+    row.appendChild(timeSpan);
+    row.appendChild(badge);
+    row.appendChild(msg);
+    logTerminal.appendChild(row);
+    logTerminal.scrollTop = logTerminal.scrollHeight;
+  }
+
+  // Result Summary Card
+  const resultCard = rt("div", {
+    display: "none",
+    flexDirection: "column",
+    gap: "10px",
+    background: isDark ? "rgba(16,185,129,0.1)" : "rgba(16,185,129,0.06)",
+    border: "1px solid rgba(16,185,129,0.35)",
+    borderRadius: "10px",
+    padding: "12px 16px",
+  });
+  stickyActionBar.appendChild(resultCard);
+
+  // Main Action Row
+  const actionRow = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "12px",
+  });
+  stickyActionBar.appendChild(actionRow);
+
+  const actionSummaryWrap = rt("div", { display: "flex", flexDirection: "column", gap: "2px", minWidth: "0" });
+  const actionMainSummary = rt("div", {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: n.text,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  }, "Select a source to begin cloning.");
+  const actionSubSummary = rt("div", { fontSize: "11.5px", color: n.muted }, "Configure domains and click Start Master Clone.");
+  actionSummaryWrap.appendChild(actionMainSummary);
+  actionSummaryWrap.appendChild(actionSubSummary);
+  actionRow.appendChild(actionSummaryWrap);
+
+  const startCloneBtn = rt("button", {
+    background: "#3b82f6",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "8px",
+    padding: "10px 24px",
+    fontSize: "13.5px",
+    fontWeight: "800",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    boxShadow: "0 4px 14px rgba(59,130,246,0.35)",
+    transition: "all 0.15s ease",
+    flexShrink: "0",
+  });
+  startCloneBtn.innerHTML = `<span>⚡</span> Start Master Clone`;
+  startCloneBtn.addEventListener("click", executeClone);
+  actionRow.appendChild(startCloneBtn);
+
+  // Helper: Update Clone Summary Text
+  function updateCloneSummary() {
+    if (!selectedSourcePrincipal) {
+      actionMainSummary.textContent = "Select a source Profile or Permission Set above.";
+      actionSubSummary.textContent = "All Object, Field, System, and Code accesses will be analyzed.";
+      return;
+    }
+
+    const targetDesc = targetMode === "new"
+      ? `New PermSet "${targetApiNameInput.value.trim() || 'New_Permission_Set'}"`
+      : `Existing PermSet "${targetExistingSelect.options[targetExistingSelect.selectedIndex]?.text || 'Target'}"`;
+
+    const activeDomainCount = Object.values(modulesState).filter(Boolean).length;
+    actionMainSummary.innerHTML = `<span style="color:#3b82f6">${selectedSourcePrincipal.label}</span> ➔ <span style="color:#10b981">${targetDesc}</span>`;
+    actionSubSummary.textContent = `${activeDomainCount} domain${activeDomainCount === 1 ? '' : 's'} enabled · ${sourcePermissions.objects.length} Objects · ${sourcePermissions.fields.length} Fields · ${sourcePermissions.system.length} System Flags`;
+  }
+
+  // Helper: Update Clone Button state
+  function updateCloneButton() {
+    if (!selectedSourcePrincipal) {
+      startCloneBtn.disabled = true;
+      startCloneBtn.style.opacity = "0.5";
+      startCloneBtn.style.cursor = "not-allowed";
+      return;
+    }
+
+    const hasAnyModule = Object.values(modulesState).some(Boolean);
+    if (!hasAnyModule) {
+      startCloneBtn.disabled = true;
+      startCloneBtn.style.opacity = "0.5";
+      startCloneBtn.style.cursor = "not-allowed";
+      return;
+    }
+
+    startCloneBtn.disabled = false;
+    startCloneBtn.style.opacity = "1";
+    startCloneBtn.style.cursor = "pointer";
+  }
+
+  // Load initial data
+  async function loadInitialData() {
+    sourceDetails.textContent = "Loading security principals and licenses…";
+    try {
+      const [permsRes, licRes, objRes] = await Promise.all([
+        t.runQuery(
+          "SELECT Id, Label, Name, IsOwnedByProfile, ProfileId, Profile.Name, Type, Description FROM PermissionSet WHERE Type != 'Group' ORDER BY IsOwnedByProfile DESC, Label LIMIT 2000"
+        ),
+        t.runQuery(
+          "SELECT Id, Name, TotalLicenses, UsedLicenses, Status FROM UserLicense WHERE Status = 'Active' ORDER BY Name"
+        ),
+        t.runQuery(
+          "SELECT QualifiedApiName, Label FROM EntityDefinition WHERE IsCustomizable = true AND IsDeprecatedAndHidden = false ORDER BY Label LIMIT 1000"
+        ),
+      ]);
+
+      if (permsRes.error) {
+        sourceDetails.textContent = `Error loading principals: ${permsRes.error}`;
+        return;
+      }
+
+      securityPrincipals = (permsRes.records || []).map((r) => ({
+        id: r.Id,
+        isProfile: !!r.IsOwnedByProfile,
+        profileId: r.ProfileId,
+        profileName: r.Profile?.Name,
+        name: r.Name,
+        label: r.IsOwnedByProfile ? `Profile: ${r.Profile?.Name || r.Label}` : r.Label || r.Name,
+        description: r.Description || "",
+      })).sort((a, b) => a.label.localeCompare(b.label));
+
+      userLicenses = licRes.records || [];
+      availableObjects = (objRes.records || []).map((o) => ({
+        apiName: o.QualifiedApiName,
+        label: o.Label || o.QualifiedApiName,
+      }));
+
+      // Populate dropdowns
+      populateSourceSelect();
+      populateLicenseSelect();
+      populateExistingTargetSelect();
+
+      sourceDetails.textContent = `${securityPrincipals.length} security principals loaded.`;
+    } catch (err) {
+      sourceDetails.textContent = `Error: ${err?.message || err}`;
+    }
+  }
+
+  function populateSourceSelect() {
+    sourceSelect.innerHTML = `<option value="">— Select Source Profile / Permission Set —</option>`;
+    
+    const profGroup = rt("optgroup");
+    profGroup.label = "👤 Profiles";
+    const permGroup = rt("optgroup");
+    permGroup.label = "🔑 Permission Sets";
+
+    securityPrincipals.forEach((p) => {
+      const opt = rt("option");
+      opt.value = p.id;
+      opt.textContent = p.label;
+      if (p.isProfile) {
+        profGroup.appendChild(opt);
+      } else {
+        permGroup.appendChild(opt);
+      }
+    });
+
+    sourceSelect.appendChild(profGroup);
+    sourceSelect.appendChild(permGroup);
+  }
+
+  function populateLicenseSelect() {
+    licenseSelect.innerHTML = `<option value="">— None (Assignable to Any License) —</option>`;
+    userLicenses.forEach((lic) => {
+      const opt = rt("option");
+      opt.value = lic.Id;
+      opt.textContent = `${lic.Name} (${lic.UsedLicenses || 0}/${lic.TotalLicenses || 0} used)`;
+      licenseSelect.appendChild(opt);
+    });
+  }
+
+  function populateExistingTargetSelect() {
+    targetExistingSelect.innerHTML = `<option value="">— Select Target Permission Set —</option>`;
+    securityPrincipals
+      .filter((p) => !p.isProfile)
+      .forEach((p) => {
+        const opt = rt("option");
+        opt.value = p.id;
+        opt.textContent = p.label;
+        targetExistingSelect.appendChild(opt);
+      });
+  }
+
+  // Handle Source Selection
+  sourceSelect.addEventListener("change", async () => {
+    const sId = sourceSelect.value;
+    if (!sId) {
+      selectedSourcePrincipal = null;
+      sourcePermSetId = null;
+      sourceDetails.textContent = "";
+      updateCloneButton();
+      updateCloneSummary();
+      return;
+    }
+
+    selectedSourcePrincipal = securityPrincipals.find((p) => p.id === sId);
+    sourcePermSetId = sId;
+
+    sourceDetails.innerHTML = `<span style="color:#3b82f6;font-weight:700">Analyzing permissions for "${selectedSourcePrincipal.label}"…</span>`;
+    statusBadge.textContent = "Analyzing…";
+    statusBadge.style.color = "#f59e0b";
+    statusBadge.style.background = "rgba(245,158,11,0.15)";
+
+    // Set default target name
+    const cleanLabel = selectedSourcePrincipal.isProfile
+      ? `${selectedSourcePrincipal.profileName || selectedSourcePrincipal.name} Cloned`
+      : `${selectedSourcePrincipal.label} Cloned`;
+    targetLabelInput.value = cleanLabel;
+    targetApiNameInput.value = cleanLabel.replace(/[^a-zA-Z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+    descInput.value = `Cloned from ${selectedSourcePrincipal.label} via SF Spotlight Master Clone`;
+
+    updateCloneSummary();
+    await loadSourcePermissions(selectedSourcePrincipal);
+  });
+
+  // Standard Salesforce System Permission fields fallback list
+  const STANDARD_SYSTEM_PERMS = [
+    "PermissionsApiEnabled", "PermissionsModifyAllData", "PermissionsViewAllData",
+    "PermissionsCustomizeApplication", "PermissionsManageUsers", "PermissionsAuthorApex",
+    "PermissionsViewSetup", "PermissionsExportReport", "PermissionsRunReports",
+    "PermissionsBulkApiHardDelete", "PermissionsManageSandboxes", "PermissionsManageCustomPermissions",
+    "PermissionsManageConnectedApps", "PermissionsManageProfilesPermissionsets", "PermissionsViewAllUsers",
+    "PermissionsManageRoles", "PermissionsManageSharing", "PermissionsViewDataCategories",
+    "PermissionsManageDataCategories", "PermissionsManageIpAddresses", "PermissionsManageAuthProviders",
+    "PermissionsMassEmail", "PermissionsSendEmail", "PermissionsCreateCustomizeFilters",
+    "PermissionsManageInteraction", "PermissionsTransferAnyEntity", "PermissionsEditTask",
+    "PermissionsEditEvent", "PermissionsConvertLeads", "PermissionsTransferAnyLead",
+    "PermissionsViewEncryptedData", "PermissionsImportPersonal", "PermissionsManageReports",
+    "PermissionsManageDashboards", "PermissionsViewPublicReports", "PermissionsViewPublicDashboards",
+    "PermissionsManagePublicReports", "PermissionsManagePublicDashboards", "PermissionsManageSearchIndices"
+  ];
+
+  // Fetch all permissions for source (Profiles & PermissionSets)
+  async function loadSourcePermissions(source) {
+    isAnalyzingSource = true;
+    const pSetId = source.id;
+    const profileId = source.profileId;
+
+    try {
+      // 1. Discover all system permission fields on PermissionSet via describe
+      let permFields = [];
+      try {
+        const descRes = await t.apiCall({
+          type: "REST_EXPLORE",
+          endpoint: "/services/data/v60.0/sobjects/PermissionSet/describe",
+          method: "GET",
+        });
+        if (descRes.success && descRes.data && descRes.data.body) {
+          const descObj = JSON.parse(descRes.data.body);
+          if (Array.isArray(descObj.fields)) {
+            permFields = descObj.fields
+              .filter((f) => f.name.startsWith("Permissions") && f.type === "boolean")
+              .map((f) => f.name);
+          }
+        }
+      } catch {}
+
+      if (permFields.length === 0) {
+        permFields = STANDARD_SYSTEM_PERMS;
+      }
+
+      // Query system permissions chunked if needed
+      const fieldQueryStr = permFields.slice(0, 100).join(", ");
+
+      // 2. Parallel queries for ObjectPerms, FieldPerms, SystemPerms, SetupEntityAccess
+      const idFilter = profileId
+        ? `ParentId = '${pSetId}' OR Parent.ProfileId = '${profileId}'`
+        : `ParentId = '${pSetId}'`;
+
+      const [objRes, fieldRes, sysRes, setupRes] = await Promise.all([
+        t.runQuery(
+          `SELECT Id, ParentId, SobjectType, PermissionsCreate, PermissionsRead, PermissionsEdit, PermissionsDelete, PermissionsViewAllRecords, PermissionsModifyAllRecords FROM ObjectPermissions WHERE ${idFilter} ORDER BY SobjectType LIMIT 5000`
+        ),
+        t.runQuery(
+          `SELECT Id, ParentId, SobjectType, Field, PermissionsRead, PermissionsEdit FROM FieldPermissions WHERE ${idFilter} ORDER BY SobjectType, Field LIMIT 5000`
+        ),
+        t.runQuery(`SELECT Id, ${fieldQueryStr} FROM PermissionSet WHERE Id = '${pSetId}'`),
+        t.runQuery(
+          `SELECT Id, SetupEntityId, SetupEntityType FROM SetupEntityAccess WHERE ${idFilter} LIMIT 5000`
+        ),
+      ]);
+
+      // Deduplicate & Process Object Permissions
+      const objMap = new Map();
+      (objRes.records || []).forEach((rec) => {
+        if (!objMap.has(rec.SobjectType)) {
+          objMap.set(rec.SobjectType, rec);
+        }
+      });
+      sourcePermissions.objects = Array.from(objMap.values());
+
+      // Deduplicate & Process Field Permissions
+      const fieldMap = new Map();
+      (fieldRes.records || []).forEach((rec) => {
+        const key = `${rec.SobjectType}.${rec.Field}`;
+        if (!fieldMap.has(key)) {
+          fieldMap.set(key, rec);
+        }
+      });
+      sourcePermissions.fields = Array.from(fieldMap.values());
+
+      // Process System Permissions
+      sourcePermissions.system = [];
+      if (sysRes.records && sysRes.records[0]) {
+        const sysRec = sysRes.records[0];
+        Object.keys(sysRec).forEach((k) => {
+          if (k.startsWith("Permissions") && sysRec[k] === true) {
+            sourcePermissions.system.push({
+              apiName: k,
+              label: k.replace(/^Permissions/, "").replace(/([A-Z])/g, " $1").trim(),
+            });
+          }
+        });
+      }
+
+      // Process SetupEntityAccess
+      const setupRecs = setupRes.records || [];
+      const apexIds = setupRecs.filter((r) => r.SetupEntityType === "ApexClass").map((r) => r.SetupEntityId);
+      const vfIds = setupRecs.filter((r) => r.SetupEntityType === "ApexPage").map((r) => r.SetupEntityId);
+      const customPermIds = setupRecs.filter((r) => r.SetupEntityType === "CustomPermission").map((r) => r.SetupEntityId);
+
+      // Resolve Names for Apex, VF, Custom Perms
+      const [apexRes, vfRes, cpRes] = await Promise.all([
+        apexIds.length > 0
+          ? t.runQuery(`SELECT Id, Name, NamespacePrefix FROM ApexClass WHERE Id IN ('${apexIds.join("','")}') ORDER BY Name`)
+          : Promise.resolve({ records: [] }),
+        vfIds.length > 0
+          ? t.runQuery(`SELECT Id, Name, NamespacePrefix FROM ApexPage WHERE Id IN ('${vfIds.join("','")}') ORDER BY Name`)
+          : Promise.resolve({ records: [] }),
+        customPermIds.length > 0
+          ? t.runQuery(`SELECT Id, DeveloperName, MasterLabel FROM CustomPermission WHERE Id IN ('${customPermIds.join("','")}') ORDER BY DeveloperName`)
+          : Promise.resolve({ records: [] }),
+      ]);
+
+      sourcePermissions.apex = (apexRes.records || []).map((r) => ({ id: r.Id, name: r.Name, namespace: r.NamespacePrefix }));
+      sourcePermissions.vf = (vfRes.records || []).map((r) => ({ id: r.Id, name: r.Name, namespace: r.NamespacePrefix }));
+      sourcePermissions.customPerms = (cpRes.records || []).map((r) => ({ id: r.Id, name: r.DeveloperName, label: r.MasterLabel }));
+
+      // Update Count chips
+      moduleElements.objects.countChip.textContent = `${sourcePermissions.objects.length} Objects`;
+      moduleElements.fields.countChip.textContent = `${sourcePermissions.fields.length} Fields`;
+      moduleElements.system.countChip.textContent = `${sourcePermissions.system.length} Flags`;
+      moduleElements.apex.countChip.textContent = `${sourcePermissions.apex.length} Classes`;
+      moduleElements.vf.countChip.textContent = `${sourcePermissions.vf.length} Pages`;
+      moduleElements.customPerms.countChip.textContent = `${sourcePermissions.customPerms.length} Perms`;
+
+      // Update Tab Labels with Live Counts
+      tabButtons.objects.textContent = `Objects (${sourcePermissions.objects.length})`;
+      tabButtons.fields.textContent = `Fields (${sourcePermissions.fields.length})`;
+      tabButtons.system.textContent = `System Perms (${sourcePermissions.system.length})`;
+      tabButtons.apex.textContent = `Apex & VF (${sourcePermissions.apex.length + sourcePermissions.vf.length})`;
+      tabButtons.customPerms.textContent = `Custom Perms (${sourcePermissions.customPerms.length})`;
+
+      sourceDetails.innerHTML = `
+        <span style="color:#10b981;font-weight:700;display:inline-flex;align-items:center;gap:4px"><span>✓</span> Ready to Clone:</span>
+        <span style="color:${n.text}"><b>${sourcePermissions.objects.length}</b> Objects</span> ·
+        <span style="color:${n.text}"><b>${sourcePermissions.fields.length}</b> Fields</span> ·
+        <span style="color:${n.text}"><b>${sourcePermissions.system.length}</b> System Flags</span> ·
+        <span style="color:${n.text}"><b>${sourcePermissions.apex.length + sourcePermissions.vf.length + sourcePermissions.customPerms.length}</b> Code/Custom Perms</span>
+      `;
+
+      statusBadge.textContent = "Analysis Complete";
+      statusBadge.style.color = "#10b981";
+      statusBadge.style.background = "rgba(16,185,129,0.15)";
+
+      // Render tags and preview
+      renderObjectTags();
+      renderPreview();
+      updateCloneButton();
+      updateCloneSummary();
+    } catch (err) {
+      sourceDetails.innerHTML = `<span style="color:#ef4444">Error loading permissions: ${err?.message || err}</span>`;
+      statusBadge.textContent = "Error";
+      statusBadge.style.color = "#ef4444";
+      statusBadge.style.background = "rgba(239,68,68,0.15)";
+    } finally {
+      isAnalyzingSource = false;
+    }
+  }
+
+  // Render Object Filter Tags
+  function renderObjectTags() {
+    objectTagsContainer.innerHTML = "";
+    const filter = objSearchInput.value.toLowerCase().trim();
+
+    // Source available objects
+    const objectsWithPerms = new Set([
+      ...sourcePermissions.objects.map((o) => o.SobjectType),
+      ...sourcePermissions.fields.map((f) => f.SobjectType),
+    ]);
+
+    const objList = Array.from(objectsWithPerms).sort();
+
+    objList.forEach((objName) => {
+      if (filter && !objName.toLowerCase().includes(filter)) return;
+
+      const isChecked = selectedObjectFilters.has(objName);
+      const tag = rt("div", {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "5px",
+        padding: "4px 9px",
+        borderRadius: "14px",
+        fontSize: "11.5px",
+        fontWeight: isChecked ? "700" : "500",
+        border: `1px solid ${isChecked ? "#3b82f6" : n.border}`,
+        background: isChecked ? "rgba(59,130,246,0.15)" : "transparent",
+        color: isChecked ? "#3b82f6" : n.text,
+        cursor: "pointer",
+        userSelect: "none",
+        transition: "all 0.15s ease",
+      });
+
+      tag.innerHTML = `<span>${isChecked ? "✓" : "+"}</span> <span>${objName}</span>`;
+      tag.addEventListener("click", () => {
+        if (selectedObjectFilters.has(objName)) {
+          selectedObjectFilters.delete(objName);
+        } else {
+          selectedObjectFilters.add(objName);
+        }
+        renderObjectTags();
+        renderPreview();
+        updateCloneSummary();
+      });
+      objectTagsContainer.appendChild(tag);
+    });
+
+    if (objectTagsContainer.children.length === 0) {
+      objectTagsContainer.appendChild(
+        rt("div", { fontSize: "12px", color: n.muted, fontStyle: "italic" }, "No objects match filter.")
+      );
+    }
+  }
+
+  objSearchInput.addEventListener("input", renderObjectTags);
+
+  selectFilteredObjsBtn.addEventListener("click", () => {
+    const filter = objSearchInput.value.toLowerCase().trim();
+    const objectsWithPerms = new Set([
+      ...sourcePermissions.objects.map((o) => o.SobjectType),
+      ...sourcePermissions.fields.map((f) => f.SobjectType),
+    ]);
+    objectsWithPerms.forEach((objName) => {
+      if (!filter || objName.toLowerCase().includes(filter)) {
+        selectedObjectFilters.add(objName);
+      }
+    });
+    renderObjectTags();
+    renderPreview();
+    updateCloneSummary();
+  });
+
+  clearSelectedObjsBtn.addEventListener("click", () => {
+    selectedObjectFilters.clear();
+    renderObjectTags();
+    renderPreview();
+    updateCloneSummary();
+  });
+
+  // Render Pre-Clone Preview Table
+  function renderPreview() {
+    previewTableContainer.innerHTML = "";
+
+    if (!selectedSourcePrincipal) {
+      previewTableContainer.appendChild(
+        rt("div", { padding: "30px", textAlign: "center", color: n.muted, fontSize: "13px" }, "Select a source security principal to preview its permissions.")
+      );
+      return;
+    }
+
+    const isFilteredObj = (objName) => {
+      if (objectScopeMode === "all") return true;
+      return selectedObjectFilters.has(objName);
+    };
+
+    if (activeTab === "objects") {
+      const filteredObjects = sourcePermissions.objects.filter((rec) => {
+        if (!isFilteredObj(rec.SobjectType)) return false;
+        if (previewFilter && !rec.SobjectType.toLowerCase().includes(previewFilter)) return false;
+        return true;
+      });
+
+      if (filteredObjects.length === 0) {
+        previewTableContainer.appendChild(
+          rt("div", { padding: "24px", color: n.muted, fontSize: "13px", textAlign: "center" }, "No Object Permissions match current filters.")
+        );
+        return;
+      }
+
+      const table = rt("table", { width: "100%", borderCollapse: "collapse", fontSize: "12.5px" });
+      const thead = rt("thead");
+      thead.innerHTML = `
+        <tr style="background:${isDark ? "#1e293b" : "#f1f5f9"};border-bottom:1px solid ${n.divider};text-align:left;position:sticky;top:0;z-index:2">
+          <th style="padding:9px 12px;font-weight:700">SObject Name</th>
+          <th style="padding:9px 8px;font-weight:700;text-align:center">Create</th>
+          <th style="padding:9px 8px;font-weight:700;text-align:center">Read</th>
+          <th style="padding:9px 8px;font-weight:700;text-align:center">Edit</th>
+          <th style="padding:9px 8px;font-weight:700;text-align:center">Delete</th>
+          <th style="padding:9px 8px;font-weight:700;text-align:center">View All</th>
+          <th style="padding:9px 8px;font-weight:700;text-align:center">Modify All</th>
+        </tr>
+      `;
+      table.appendChild(thead);
+
+      const tbody = rt("tbody");
+      filteredObjects.forEach((rec, idx) => {
+        const tr = rt("tr", {
+          borderBottom: `1px solid ${n.divider}`,
+          background: idx % 2 === 0 ? "transparent" : (isDark ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.02)"),
+        });
+
+        const tdName = rt("td", { padding: "8px 12px", fontWeight: "600", color: n.text }, rec.SobjectType);
+        tr.appendChild(tdName);
+
+        ["PermissionsCreate", "PermissionsRead", "PermissionsEdit", "PermissionsDelete", "PermissionsViewAllRecords", "PermissionsModifyAllRecords"].forEach((permKey) => {
+          const td = rt("td", { padding: "8px 8px", textAlign: "center" });
+          const val = !!rec[permKey];
+          td.innerHTML = val
+            ? `<span style="color:#10b981;font-weight:800;background:rgba(16,185,129,0.15);padding:2px 8px;border-radius:10px;font-size:11px">YES</span>`
+            : `<span style="color:${n.faint};font-size:11px">—</span>`;
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      previewTableContainer.appendChild(table);
+    } else if (activeTab === "fields") {
+      const filteredFields = sourcePermissions.fields.filter((rec) => {
+        if (!isFilteredObj(rec.SobjectType)) return false;
+        const searchStr = `${rec.SobjectType} ${rec.Field}`.toLowerCase();
+        if (previewFilter && !searchStr.includes(previewFilter)) return false;
+        return true;
+      });
+
+      if (filteredFields.length === 0) {
+        previewTableContainer.appendChild(
+          rt("div", { padding: "24px", color: n.muted, fontSize: "13px", textAlign: "center" }, "No Field Permissions match current filters.")
+        );
+        return;
+      }
+
+      const table = rt("table", { width: "100%", borderCollapse: "collapse", fontSize: "12.5px" });
+      const thead = rt("thead");
+      thead.innerHTML = `
+        <tr style="background:${isDark ? "#1e293b" : "#f1f5f9"};border-bottom:1px solid ${n.divider};text-align:left;position:sticky;top:0;z-index:2">
+          <th style="padding:9px 12px;font-weight:700">SObject</th>
+          <th style="padding:9px 12px;font-weight:700">Field API Name</th>
+          <th style="padding:9px 8px;font-weight:700;text-align:center">Read Access</th>
+          <th style="padding:9px 8px;font-weight:700;text-align:center">Edit Access</th>
+        </tr>
+      `;
+      table.appendChild(thead);
+
+      const tbody = rt("tbody");
+      filteredFields.forEach((rec, idx) => {
+        const tr = rt("tr", {
+          borderBottom: `1px solid ${n.divider}`,
+          background: idx % 2 === 0 ? "transparent" : (isDark ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.02)"),
+        });
+
+        tr.appendChild(rt("td", { padding: "8px 12px", color: n.muted }, rec.SobjectType));
+        tr.appendChild(rt("td", { padding: "8px 12px", fontWeight: "600", color: n.text }, rec.Field));
+
+        const tdRead = rt("td", { padding: "8px 8px", textAlign: "center" });
+        tdRead.innerHTML = rec.PermissionsRead
+          ? `<span style="color:#10b981;font-weight:800;background:rgba(16,185,129,0.15);padding:2px 8px;border-radius:10px;font-size:11px">READ</span>`
+          : `<span style="color:${n.faint};font-size:11px">—</span>`;
+        tr.appendChild(tdRead);
+
+        const tdEdit = rt("td", { padding: "8px 8px", textAlign: "center" });
+        tdEdit.innerHTML = rec.PermissionsEdit
+          ? `<span style="color:#3b82f6;font-weight:800;background:rgba(59,130,246,0.15);padding:2px 8px;border-radius:10px;font-size:11px">EDIT</span>`
+          : `<span style="color:${n.faint};font-size:11px">—</span>`;
+        tr.appendChild(tdEdit);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      previewTableContainer.appendChild(table);
+    } else if (activeTab === "system") {
+      const filteredSys = sourcePermissions.system.filter((rec) => {
+        const searchStr = `${rec.apiName} ${rec.label}`.toLowerCase();
+        if (previewFilter && !searchStr.includes(previewFilter)) return false;
+        return true;
+      });
+
+      if (filteredSys.length === 0) {
+        previewTableContainer.appendChild(
+          rt("div", { padding: "24px", color: n.muted, fontSize: "13px", textAlign: "center" }, "No System Permissions enabled or matching filters.")
+        );
+        return;
+      }
+
+      const grid = rt("div", {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+        gap: "10px",
+        padding: "14px",
+      });
+
+      filteredSys.forEach((rec) => {
+        const card = rt("div", {
+          padding: "10px 12px",
+          borderRadius: "8px",
+          border: `1px solid ${n.border}`,
+          background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        });
+        card.innerHTML = `
+          <span style="color:#10b981;font-weight:800;font-size:14px">✓</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:700;color:${n.text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${rec.label}</div>
+            <div style="font-size:11px;color:${n.muted};font-family:monospace">${rec.apiName}</div>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+      previewTableContainer.appendChild(grid);
+    } else if (activeTab === "apex") {
+      const apexList = sourcePermissions.apex.filter((rec) => !previewFilter || rec.name.toLowerCase().includes(previewFilter));
+      const vfList = sourcePermissions.vf.filter((rec) => !previewFilter || rec.name.toLowerCase().includes(previewFilter));
+
+      if (apexList.length === 0 && vfList.length === 0) {
+        previewTableContainer.appendChild(
+          rt("div", { padding: "24px", color: n.muted, fontSize: "13px", textAlign: "center" }, "No Apex Classes or Visualforce Pages assigned.")
+        );
+        return;
+      }
+
+      const wrap = rt("div", { padding: "14px", display: "flex", flexDirection: "column", gap: "16px" });
+
+      if (apexList.length > 0) {
+        wrap.appendChild(rt("div", { fontSize: "13px", fontWeight: "800", color: n.text }, `⚡ Apex Classes (${apexList.length})`));
+        const apexGrid = rt("div", { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "8px" });
+        apexList.forEach((cls) => {
+          const item = rt("div", {
+            padding: "7px 11px",
+            borderRadius: "6px",
+            background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
+            border: `1px solid ${n.border}`,
+            fontSize: "12px",
+            fontWeight: "600",
+            color: n.text,
+          }, cls.namespace ? `${cls.namespace}.${cls.name}` : cls.name);
+          apexGrid.appendChild(item);
+        });
+        wrap.appendChild(apexGrid);
+      }
+
+      if (vfList.length > 0) {
+        wrap.appendChild(rt("div", { fontSize: "13px", fontWeight: "800", color: n.text }, `📄 Visualforce Pages (${vfList.length})`));
+        const vfGrid = rt("div", { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "8px" });
+        vfList.forEach((pg) => {
+          const item = rt("div", {
+            padding: "7px 11px",
+            borderRadius: "6px",
+            background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
+            border: `1px solid ${n.border}`,
+            fontSize: "12px",
+            fontWeight: "600",
+            color: n.text,
+          }, pg.namespace ? `${pg.namespace}.${pg.name}` : pg.name);
+          vfGrid.appendChild(item);
+        });
+        wrap.appendChild(vfGrid);
+      }
+
+      previewTableContainer.appendChild(wrap);
+    } else if (activeTab === "customPerms") {
+      const cpList = sourcePermissions.customPerms.filter((rec) => {
+        const searchStr = `${rec.name} ${rec.label}`.toLowerCase();
+        if (previewFilter && !searchStr.includes(previewFilter)) return false;
+        return true;
+      });
+
+      if (cpList.length === 0) {
+        previewTableContainer.appendChild(
+          rt("div", { padding: "24px", color: n.muted, fontSize: "13px", textAlign: "center" }, "No Custom Permissions assigned or matching filters.")
+        );
+        return;
+      }
+
+      const grid = rt("div", { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "10px", padding: "14px" });
+      cpList.forEach((cp) => {
+        const item = rt("div", {
+          padding: "10px 12px",
+          borderRadius: "8px",
+          background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
+          border: `1px solid ${n.border}`,
+        });
+        item.innerHTML = `
+          <div style="font-size:12.5px;font-weight:700;color:${n.text}">🔑 ${cp.label || cp.name}</div>
+          <div style="font-size:11px;color:${n.muted};font-family:monospace">${cp.name}</div>
+        `;
+        grid.appendChild(item);
+      });
+      previewTableContainer.appendChild(grid);
+    }
+  }
+
+  // Execution Engine
+  async function executeClone() {
+    if (isExecuting) return;
+    isExecuting = true;
+
+    startCloneBtn.disabled = true;
+    startCloneBtn.style.opacity = "0.6";
+    startCloneBtn.innerHTML = `<span>⏳</span> Cloning in Progress…`;
+    progressBox.style.display = "flex";
+    resultCard.style.display = "none";
+    logTerminal.innerHTML = "";
+
+    statusBadge.textContent = "Executing Clone…";
+    statusBadge.style.color = "#3b82f6";
+    statusBadge.style.background = "rgba(59,130,246,0.15)";
+
+    const setProgress = (percent, text) => {
+      progressBarFill.style.width = `${percent}%`;
+      progressPercentLabel.textContent = `${percent}%`;
+      progressStatusLabel.textContent = text;
+    };
+
+    setProgress(5, "Starting clone workflow…");
+    logMsg("INFO", `Initiating master clone from "${selectedSourcePrincipal.label}"`);
+
+    let targetPermSetId = null;
+    let targetLabel = "";
+
+    try {
+      // Step 1: Create or Resolve Target Permission Set
+      if (targetMode === "new") {
+        targetLabel = targetLabelInput.value.trim();
+        const targetApiName = targetApiNameInput.value.trim();
+        const targetDesc = descInput.value.trim() || `Cloned from ${selectedSourcePrincipal.label}`;
+        const targetLicId = licenseSelect.value || null;
+
+        if (!targetLabel || !targetApiName) {
+          throw new Error("Target Label and API Developer Name cannot be empty.");
+        }
+
+        setProgress(15, "Creating new Permission Set…");
+        logMsg("INFO", `Creating PermissionSet "${targetApiName}" (${targetLabel})…`);
+
+        const createRes = await t.apiCall({
+          type: "REST_EXPLORE",
+          endpoint: "/services/data/v60.0/sobjects/PermissionSet",
+          method: "POST",
+          body: JSON.stringify({
+            Name: targetApiName,
+            Label: targetLabel,
+            Description: targetDesc,
+            LicenseId: targetLicId,
+          }),
+        });
+
+        if (!createRes.success || !createRes.data || !createRes.data.ok) {
+          let errDetail = createRes.error || "";
+          try {
+            const parsed = JSON.parse(createRes.data?.body || "{}");
+            errDetail = parsed[0]?.message || parsed.message || createRes.data?.body || errDetail;
+          } catch {}
+          throw new Error(`Failed to create Permission Set: ${errDetail}`);
+        }
+
+        const bodyObj = JSON.parse(createRes.data.body);
+        targetPermSetId = bodyObj.id;
+        logMsg("SUCCESS", `Created new Permission Set ID: ${targetPermSetId}`);
+      } else {
+        targetPermSetId = targetExistingSelect.value;
+        if (!targetPermSetId) {
+          throw new Error("Please select an existing Target Permission Set.");
+        }
+        const targetObj = securityPrincipals.find((p) => p.id === targetPermSetId);
+        targetLabel = targetObj?.label || targetPermSetId;
+        logMsg("INFO", `Targeting existing Permission Set: ${targetLabel} (${targetPermSetId})`);
+      }
+
+      // Filter check helper
+      const isFilteredObj = (objName) => {
+        if (objectScopeMode === "all") return true;
+        return selectedObjectFilters.has(objName);
+      };
+
+      let clonedObjectsCount = 0;
+      let clonedFieldsCount = 0;
+      let clonedSetupCount = 0;
+      let clonedSystemCount = 0;
+
+      // Step 2: Clone Object Permissions
+      if (modulesState.objects && sourcePermissions.objects.length > 0) {
+        setProgress(30, "Cloning Object Permissions…");
+        const objsToClone = sourcePermissions.objects.filter((r) => isFilteredObj(r.SobjectType));
+        logMsg("INFO", `Cloning ${objsToClone.length} Object Permissions…`);
+
+        const records = objsToClone.map((r) => ({
+          attributes: { type: "ObjectPermissions" },
+          ParentId: targetPermSetId,
+          SobjectType: r.SobjectType,
+          PermissionsCreate: r.PermissionsCreate,
+          PermissionsRead: r.PermissionsRead,
+          PermissionsEdit: r.PermissionsEdit,
+          PermissionsDelete: r.PermissionsDelete,
+          PermissionsViewAllRecords: r.PermissionsViewAllRecords,
+          PermissionsModifyAllRecords: r.PermissionsModifyAllRecords,
+        }));
+
+        for (let i = 0; i < records.length; i += 100) {
+          const chunk = records.slice(i, i + 100);
+          const res = await t.apiCall({
+            type: "DATA_IMPORT",
+            operation: "insert",
+            sobject: "ObjectPermissions",
+            records: chunk,
+            allOrNone: false,
+          });
+
+          if (res.success && res.results) {
+            const successCount = res.results.filter((x) => x.success !== false).length;
+            clonedObjectsCount += successCount;
+            logMsg("SUCCESS", `Object batch ${Math.floor(i / 100) + 1}: ${successCount}/${chunk.length} inserted.`);
+          } else {
+            logMsg("WARN", `Object batch ${Math.floor(i / 100) + 1} warning: ${res.error || "Batch had errors"}`);
+          }
+        }
+      }
+
+      // Step 3: Clone Field Permissions
+      if (modulesState.fields && sourcePermissions.fields.length > 0) {
+        setProgress(55, "Cloning Field Permissions (FLS)…");
+        const fieldsToClone = sourcePermissions.fields.filter((r) => isFilteredObj(r.SobjectType));
+        logMsg("INFO", `Cloning ${fieldsToClone.length} Field Permissions…`);
+
+        const records = fieldsToClone.map((r) => ({
+          attributes: { type: "FieldPermissions" },
+          ParentId: targetPermSetId,
+          SobjectType: r.SobjectType,
+          Field: r.Field,
+          PermissionsRead: r.PermissionsRead,
+          PermissionsEdit: r.PermissionsEdit,
+        }));
+
+        for (let i = 0; i < records.length; i += 100) {
+          const chunk = records.slice(i, i + 100);
+          const res = await t.apiCall({
+            type: "DATA_IMPORT",
+            operation: "insert",
+            sobject: "FieldPermissions",
+            records: chunk,
+            allOrNone: false,
+          });
+
+          if (res.success && res.results) {
+            const successCount = res.results.filter((x) => x.success !== false).length;
+            clonedFieldsCount += successCount;
+            logMsg("SUCCESS", `Field batch ${Math.floor(i / 100) + 1}: ${successCount}/${chunk.length} inserted.`);
+          } else {
+            logMsg("WARN", `Field batch ${Math.floor(i / 100) + 1} warning: ${res.error || "Batch had errors"}`);
+          }
+        }
+      }
+
+      // Step 4: Clone SetupEntityAccess (Apex, VF, Custom Perms)
+      const setupIdsToClone = [];
+      if (modulesState.apex) sourcePermissions.apex.forEach((a) => setupIdsToClone.push(a.id));
+      if (modulesState.vf) sourcePermissions.vf.forEach((v) => setupIdsToClone.push(v.id));
+      if (modulesState.customPerms) sourcePermissions.customPerms.forEach((c) => setupIdsToClone.push(c.id));
+
+      if (setupIdsToClone.length > 0) {
+        setProgress(75, "Cloning Apex, VF & Custom Permissions…");
+        logMsg("INFO", `Assigning ${setupIdsToClone.length} Setup Entity Access items…`);
+
+        const records = setupIdsToClone.map((id) => ({
+          attributes: { type: "SetupEntityAccess" },
+          ParentId: targetPermSetId,
+          SetupEntityId: id,
+        }));
+
+        for (let i = 0; i < records.length; i += 100) {
+          const chunk = records.slice(i, i + 100);
+          const res = await t.apiCall({
+            type: "DATA_IMPORT",
+            operation: "insert",
+            sobject: "SetupEntityAccess",
+            records: chunk,
+            allOrNone: false,
+          });
+
+          if (res.success && res.results) {
+            const successCount = res.results.filter((x) => x.success !== false).length;
+            clonedSetupCount += successCount;
+            logMsg("SUCCESS", `Setup batch ${Math.floor(i / 100) + 1}: ${successCount}/${chunk.length} assigned.`);
+          } else {
+            logMsg("WARN", `Setup batch ${Math.floor(i / 100) + 1} warning: ${res.error || "Batch had errors"}`);
+          }
+        }
+      }
+
+      // Step 5: Apply System Permissions
+      if (modulesState.system && sourcePermissions.system.length > 0) {
+        setProgress(90, "Applying System Permissions…");
+        logMsg("INFO", `Applying ${sourcePermissions.system.length} System Permissions…`);
+
+        const patchBody = {};
+        sourcePermissions.system.forEach((s) => {
+          patchBody[s.apiName] = true;
+        });
+
+        const patchRes = await t.apiCall({
+          type: "REST_EXPLORE",
+          endpoint: `/services/data/v60.0/sobjects/PermissionSet/${targetPermSetId}`,
+          method: "PATCH",
+          body: JSON.stringify(patchBody),
+        });
+
+        if (patchRes.success && patchRes.data && patchRes.data.ok) {
+          clonedSystemCount = sourcePermissions.system.length;
+          logMsg("SUCCESS", `Successfully applied all ${clonedSystemCount} system permissions.`);
+        } else {
+          // If bulk patch failed (e.g. incompatible system flag on this license), try safe patch individually
+          logMsg("WARN", "Bulk system permission patch had flags incompatible with target license. Retrying individually…");
+          for (const s of sourcePermissions.system) {
+            try {
+              const indivRes = await t.apiCall({
+                type: "REST_EXPLORE",
+                endpoint: `/services/data/v60.0/sobjects/PermissionSet/${targetPermSetId}`,
+                method: "PATCH",
+                body: JSON.stringify({ [s.apiName]: true }),
+              });
+              if (indivRes.success && indivRes.data?.ok) {
+                clonedSystemCount++;
+              }
+            } catch {}
+          }
+          logMsg("SUCCESS", `Applied ${clonedSystemCount}/${sourcePermissions.system.length} compatible system permissions.`);
+        }
+      }
+
+      setProgress(100, "Clone completed successfully!");
+      logMsg("SUCCESS", `🎉 Master Clone completed for ${targetLabel}!`);
+      t.flashToast("Master Clone Completed Successfully!");
+
+      statusBadge.textContent = "Cloned Successfully";
+      statusBadge.style.color = "#10b981";
+      statusBadge.style.background = "rgba(16,185,129,0.15)";
+
+      // Setup URL deep link
+      const sfSetupUrl = `/lightning/setup/PermSets/page?address=%2F${targetPermSetId}`;
+
+      resultCard.style.display = "flex";
+      resultCard.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:15px;font-weight:800;color:#10b981;display:flex;align-items:center;gap:6px">
+              <span>🎉</span> Master Clone Completed!
+            </div>
+            <div style="font-size:12.5px;color:${n.text};margin-top:2px">
+              Target Permission Set: <b>${targetLabel}</b>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="open-setup-btn" style="background:#10b981;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+              <span>🔗</span> Open in Salesforce Setup
+            </button>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px;color:${n.muted};padding-top:6px;border-top:1px solid rgba(16,185,129,0.2)">
+          <span>📦 <b>${clonedObjectsCount}</b> Object Permissions</span> ·
+          <span>🔤 <b>${clonedFieldsCount}</b> Field Permissions</span> ·
+          <span>⚙️ <b>${clonedSystemCount}</b> System Flags</span> ·
+          <span>⚡ <b>${clonedSetupCount}</b> Code Accesses</span>
+        </div>
+      `;
+
+      resultCard.querySelector("#open-setup-btn").addEventListener("click", () => {
+        globalThis.chrome?.runtime?.sendMessage({
+          type: "OPEN_TAB",
+          url: sfSetupUrl,
+        });
+      });
+    } catch (err) {
+      logMsg("ERROR", `Clone Failed: ${err?.message || err}`);
+      setProgress(100, "Clone encountered an error.");
+      statusBadge.textContent = "Clone Failed";
+      statusBadge.style.color = "#ef4444";
+      statusBadge.style.background = "rgba(239,68,68,0.15)";
+      t.flashToast(`Error: ${err?.message || err}`);
+    } finally {
+      isExecuting = false;
+      startCloneBtn.disabled = false;
+      startCloneBtn.style.opacity = "1";
+      startCloneBtn.innerHTML = `<span>⚡</span> Start Master Clone`;
+    }
+  }
+
+  // Load data immediately
+  loadInitialData();
 }
 function Qe(o, t, e) {
   const n = document.createElement(o);
@@ -19979,7 +21176,7 @@ function zp(o, t) {
       x.appendChild(Z));
   };
   (L("🐞", "Fetch logs", () => t.goToTab("debug")),
-    L("🧪", "Multiple Data", () => t.openTool("sampledata")),
+    L("🧪", "Bulk Sample Data", () => t.openTool("sampledata")),
     L("⚡", "Run Apex", () => t.openTool("executeanonymous")),
     L("📈", "Org limits", () => t.openTool("orglimits")),
     L("🧭", "Automation map", () => t.openTool("automationmap")),
@@ -32609,8 +33806,8 @@ function Wa(o) {
           {
             id: "sampledata",
             icon: "🧪",
-            label: "Multiple Data Generator",
-            desc: "Generate test records for multiple objects at once",
+            label: "Bulk Sample Data Generator",
+            desc: "Analyze multiple objects and create realistic test records in bulk",
           },
           {
             id: "whereused",
@@ -32671,6 +33868,12 @@ function Wa(o) {
             icon: "🔐",
             label: "Permission Comparison",
             desc: "Compare profiles and permission sets",
+          },
+          {
+            id: "permclone",
+            icon: "🧬",
+            label: "Profile & Permission Clone",
+            desc: "Clone, convert & merge Profiles and Permission Sets",
           },
           {
             id: "accessmap",
@@ -34704,6 +35907,35 @@ ${at.error}`),
             hp(C, { isDark: he, onBack: Pe, flashToast: ot, runQuery: Ue });
             return;
           }
+          if (x === "permclone") {
+            renderPermClone(C, {
+              isDark: he,
+              onBack: Pe,
+              flashToast: ot,
+              runQuery: Ue,
+              apiCall: (ce) =>
+                new Promise((pe) => {
+                  it().then((Ee) => {
+                    if (!Ee?.instanceUrl || !Ee?.sessionId) {
+                      pe({
+                        success: false,
+                        error: "Salesforce session not detected",
+                      });
+                      return;
+                    }
+                    globalThis.chrome.runtime.sendMessage(
+                      {
+                        instanceUrl: Ee.instanceUrl,
+                        sessionId: Ee.sessionId,
+                        ...ce,
+                      },
+                      (Ye) => pe(Ye || { success: false, error: "No response" }),
+                    );
+                  });
+                }),
+            });
+            return;
+          }
           if (x === "accessmap") {
             ws(C, { isDark: he, onBack: Pe, flashToast: ot, runQuery: Ue });
             return;
@@ -34757,71 +35989,7 @@ ${at.error}`),
             });
             return;
           }
-          if (x === "sampledata") {
-            const Ce = (ce) =>
-              new Promise((pe) => {
-                it().then((Ee) => {
-                  if (!Ee?.instanceUrl || !Ee?.sessionId) {
-                    pe({
-                      success: !1,
-                      error: "Salesforce session not detected",
-                    });
-                    return;
-                  }
-                  globalThis.chrome.runtime.sendMessage(
-                    {
-                      instanceUrl: Ee.instanceUrl,
-                      sessionId: Ee.sessionId,
-                      ...ce,
-                    },
-                    (Ye) => pe(Ye || { success: !1, error: "No response" }),
-                  );
-                });
-              });
-            Qc(C, {
-              isDark: he,
-              onBack: Pe,
-              flashToast: ot,
-              recordUrl: (ce) => `${bt()}/${ce}`,
-              listObjects: () => new Promise((ce) => uo((pe) => ce(pe))),
-              describeObject: (ce) =>
-                Ce({ type: "DESCRIBE_FOR_SAMPLE", objectApiName: ce }).then(
-                  (pe) => (pe.success ? pe.data : { error: pe.error }),
-                ),
-              orgInfo: () =>
-                Ce({ type: "GET_ORG_INFO" }).then((ce) =>
-                  ce.success && ce.data
-                    ? {
-                        isSandbox: ce.data.IsSandbox === !0,
-                        orgType: ce.data.OrganizationType || "",
-                        trialExpiration: ce.data.TrialExpirationDate || null,
-                        name: ce.data.Name,
-                      }
-                    : null,
-                ),
-              queryRecords: Ue,
-              insertRecords: (ce, pe) =>
-                Ce({
-                  type: "DATA_IMPORT",
-                  operation: "insert",
-                  allOrNone: !1,
-                  records: pe,
-                }).then((Ee) =>
-                  Ee.success ? { results: Ee.results } : { error: Ee.error },
-                ),
-              deleteRecords: (ce) =>
-                Ce({
-                  type: "DATA_IMPORT",
-                  operation: "delete",
-                  ids: ce,
-                  allOrNone: !1,
-                }).then((pe) =>
-                  pe.success ? { results: pe.results } : { error: pe.error },
-                ),
-            });
-            return;
-          }
-          if (x === "sampledatabulk") {
+          if (x === "sampledata" || x === "sampledatabulk") {
             const Ce = (ce) =>
               new Promise((pe) => {
                 it().then((Ee) => {
@@ -35584,6 +36752,15 @@ ${at.error}`),
               },
             },
             {
+              id: "permclone",
+              icon: "🧬",
+              label: "Profile & Permission Clone",
+              desc: "Clone, convert & merge Profiles and Permission Sets with granular control",
+              run: () => {
+                ((u.value = ""), (x = "permclone"), oe());
+              },
+            },
+            {
               id: "accessmap",
               icon: "🗺️",
               label: "Access Explorer",
@@ -35604,19 +36781,10 @@ ${at.error}`),
             {
               id: "sampledata",
               icon: "🧪",
-              label: "Multiple Data Generator",
-              desc: "Generate test records for multiple objects (sandbox & scratch only)",
+              label: "Bulk Sample Data Generator",
+              desc: "Analyze multiple objects and create realistic test records in bulk",
               run: () => {
                 ((u.value = ""), (x = "sampledata"), oe());
-              },
-            },
-            {
-              id: "sampledatabulk",
-              icon: "🧪",
-              label: "Sample Data (Bulk)",
-              desc: "Generate test records for multiple objects at once",
-              run: () => {
-                ((u.value = ""), (x = "sampledatabulk"), oe());
               },
             },
             {
