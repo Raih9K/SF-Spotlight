@@ -9828,6 +9828,9 @@ function Ut(o) {
 function Mc() {
   ((Bt = []), Fo());
 }
+function deleteRecent(o) {
+  ((Bt = Bt.filter((t) => !(t.url === o.url && t.kind === o.kind))), Fo());
+}
 function da(o, t) {
   return tn.some((e) => e.url === o && e.kind === t);
 }
@@ -12829,6 +12832,7 @@ const Mt = {
     typoFix: !1,
     promptTemplateName: !0,
     showStop: !0,
+    deleteCheckboxes: !0,
   },
   Ui = [
     { id: "home", label: "Home", icon: "🏠" },
@@ -12899,6 +12903,7 @@ const vs = {
     apiVersion: "60.0",
     defaultHost: "",
     nicknames: {},
+    pinnedTools: ["sfhome", "export", "sampledata", "whereused"],
   },
   xi = { soql: 0, debugLogs: 0, rulesUpdated: 0, apexTests: 0 };
 let Es = Promise.resolve();
@@ -24386,7 +24391,7 @@ function uu(o, t) {
       ((a = { ...a, ...T }), kn(Mt.tools, a), be());
     },
     N = (T) => {
-      ((l = { ...l, ...T }), kn(Mt.prefs, l), be());
+      ((l = { ...l, ...T }), kn(Mt.prefs, l), Pa(l), be());
     },
     F = (T) => {
       ((g = Cs(T)), kn(Mt.tabConfig, g), be());
@@ -25564,6 +25569,14 @@ function uu(o, t) {
           "Local time",
           "Render datetime values in your local timezone instead of UTC.",
         ),
+      ),
+      H.appendChild(
+        C(
+          r.deleteCheckboxes,
+          (S) => k({ deleteCheckboxes: S }),
+          "Show delete checkboxes",
+          "Show checkboxes in the query results table to allow bulk deleting records.",
+        ),
       ));
     const p = x();
     (p.appendChild(
@@ -25624,7 +25637,19 @@ function uu(o, t) {
           k({ savedLimit: S }),
         ),
       ),
-      p.appendChild(A),
+      p.appendChild(A));
+    const clearBlock = Fe("div", { marginTop: "16px", display: "flex", gap: "12px" });
+    (clearBlock.appendChild(
+      Z("🗑  Clear query history", "danger", () => {
+        confirm("Are you sure you want to clear your SOQL query history?") && ((fn = []), Hu(), be());
+      }),
+    ),
+      clearBlock.appendChild(
+        Z("🗑  Clear saved queries", "danger", () => {
+          confirm("Are you sure you want to clear all saved SOQL queries?") && ((cn = []), ju(), be());
+        }),
+      ),
+      p.appendChild(clearBlock),
       T(w, H, p));
   }
   const j = (T) =>
@@ -28052,9 +28077,16 @@ try {
 let Pn = null,
   qi = !0,
   Na = !0,
-  Ma = !1;
+  Ma = !1,
+  globalPrefs = { ...gi };
+function saveGlobalPrefs(o) {
+  globalPrefs = { ...globalPrefs, ...o };
+  kn(Mt.prefs, globalPrefs);
+  Pa(globalPrefs);
+}
 function Pa(o) {
   const t = { ...gi, ...(o || {}) };
+  globalPrefs = t;
   ((Na = t.cacheEnabled),
     (Ma = t.cacheAutoUpdate),
     Yp(t.notifToast),
@@ -30402,6 +30434,7 @@ let Tt = {
   typoFix: !1,
   promptTemplateName: !0,
   showStop: !0,
+  deleteCheckboxes: !0,
 };
 function qu() {
   globalThis.chrome?.storage?.local?.get([ro], (o) => {
@@ -30787,6 +30820,92 @@ function Ku(o, t, e, n) {
     se = L("Download CSV");
   ((re.disabled = se.disabled = !0),
     (re.style.opacity = se.style.opacity = "0.5"));
+  const selectedRecordIds = new Set();
+  const deleteBtn = document.createElement("button");
+  (deleteBtn.textContent = "🗑 Bulk Delete"),
+    Object.assign(deleteBtn.style, {
+      fontSize: "13px",
+      fontWeight: "700",
+      padding: "8px 14px",
+      borderRadius: "8px",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      border: "none",
+      background: "#ef4444",
+      color: "#fff",
+      display: "none",
+    });
+  const updateDeleteBtnState = () => {
+    if (selectedRecordIds.size > 0) {
+      deleteBtn.style.display = "inline-block";
+      deleteBtn.textContent = `🗑 Delete Selected (${selectedRecordIds.size})`;
+    } else {
+      deleteBtn.style.display = "none";
+    }
+  };
+  deleteBtn.addEventListener("click", () => {
+    const idsToDelete = Array.from(selectedRecordIds);
+    if (idsToDelete.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${idsToDelete.length} record(s)?`)) return;
+    
+    deleteBtn.disabled = !0;
+    deleteBtn.textContent = "Deleting…";
+    
+    it().then((credentials) => {
+      if (!credentials?.instanceUrl || !credentials?.sessionId) {
+        ot("No active session");
+        deleteBtn.disabled = !1;
+        updateDeleteBtnState();
+        return;
+      }
+      
+      globalThis.chrome.runtime.sendMessage({
+        type: "DATA_IMPORT",
+        operation: "delete",
+        ids: idsToDelete,
+        allOrNone: !1,
+        instanceUrl: credentials.instanceUrl,
+        sessionId: credentials.sessionId
+      }, (res) => {
+        deleteBtn.disabled = !1;
+        if (!res?.success) {
+          ot(res?.error || "Delete failed");
+          updateDeleteBtnState();
+          return;
+        }
+        
+        const results = res.results || [];
+        const successIds = [];
+        const errors = [];
+        
+        results.forEach((r, idx) => {
+          if (r.success) {
+            successIds.push(idsToDelete[idx]);
+          } else {
+            const err = r.errors?.[0]?.message || "Unknown error";
+            errors.push(err);
+          }
+        });
+        
+        if (successIds.length > 0) {
+          ot(`Successfully deleted ${successIds.length} record(s)`);
+          G = G.filter(row => {
+            const rowId = row.Id || row.id;
+            return !successIds.includes(rowId);
+          });
+          u[b].rows = G;
+          successIds.forEach(id => selectedRecordIds.delete(id));
+        }
+        
+        if (errors.length > 0) {
+          ot(`Failed to delete ${errors.length} record(s): ${errors[0]}`);
+        }
+        
+        A();
+        updateDeleteBtnState();
+      });
+    });
+  });
   const De = D("Tooling API"),
     Be = D("Query All (deleted)");
   De.cb.checked = u[b].tooling;
@@ -30853,7 +30972,7 @@ function Ku(o, t, e, n) {
   ((M.style.flex = "1"), (M.style.minWidth = "12px"));
   const K = ue([De.l, Be.l], "14px"),
     j = Me(),
-    q = ue([re, se]);
+    q = ue([re, se, deleteBtn]);
   ((be.style.width = "170px"),
     (ge.style.marginLeft = "4px"),
     [te, Le, z, M, be, K, j, q, ge].forEach((h) => x.appendChild(h)),
@@ -30915,6 +31034,41 @@ function Ku(o, t, e, n) {
       });
       const xe = document.createElement("thead"),
         ze = document.createElement("tr");
+      if (Tt.deleteCheckboxes) {
+        const headerTh = document.createElement("th");
+        Object.assign(headerTh.style, {
+          position: "sticky",
+          top: "0",
+          textAlign: "center",
+          padding: "8px 12px",
+          background: mt === "dark" ? "#1e293b" : "#ffffff",
+          color: i.textPrimary,
+          fontWeight: "700",
+          whiteSpace: "nowrap",
+          border: `1px solid ${i.borderStrong}`,
+          width: "40px",
+        });
+        const headerCb = document.createElement("input");
+        headerCb.type = "checkbox";
+        headerCb.style.cursor = "pointer";
+        headerCb.addEventListener("change", () => {
+          const isChecked = headerCb.checked;
+          const rowCbs = B.querySelectorAll(".sf-row-cb");
+          selectedRecordIds.clear();
+          rowCbs.forEach((cb) => {
+            if (!cb.disabled) {
+              cb.checked = isChecked;
+              const recId = cb.dataset.id;
+              if (isChecked && recId) {
+                selectedRecordIds.add(recId);
+              }
+            }
+          });
+          updateDeleteBtnState();
+        });
+        headerTh.appendChild(headerCb);
+        ze.appendChild(headerTh);
+      }
       (v.forEach((he) => {
         const Pe = document.createElement("th");
         ((Pe.textContent = he),
@@ -30937,8 +31091,47 @@ function Ku(o, t, e, n) {
       if (
         (h.slice(0, R).forEach((he, Pe) => {
           const Ue = document.createElement("tr");
-          (Pe % 2 === 1 && (Ue.style.background = i.zebra),
-            v.forEach((Ce) => {
+          if (Pe % 2 === 1) {
+            Ue.style.background = i.zebra;
+          }
+          if (Tt.deleteCheckboxes) {
+            const rowTd = document.createElement("td");
+            Object.assign(rowTd.style, {
+              padding: "6px 12px",
+              textAlign: "center",
+              border: `1px solid ${i.divider}`,
+              verticalAlign: "middle",
+              width: "40px",
+            });
+            const rowCb = document.createElement("input");
+            rowCb.type = "checkbox";
+            rowCb.className = "sf-row-cb";
+            rowCb.style.cursor = "pointer";
+            const recId = he.Id || he.id;
+            if (recId) {
+              rowCb.dataset.id = recId;
+              rowCb.checked = selectedRecordIds.has(recId);
+              rowCb.addEventListener("change", () => {
+                if (rowCb.checked) {
+                  selectedRecordIds.add(recId);
+                } else {
+                  selectedRecordIds.delete(recId);
+                }
+                const allCbs = Array.from(B.querySelectorAll(".sf-row-cb:not(:disabled)"));
+                const headerCb = B.querySelector("thead input[type='checkbox']");
+                if (headerCb) {
+                  headerCb.checked = allCbs.length > 0 && allCbs.every(cb => cb.checked);
+                }
+                updateDeleteBtnState();
+              });
+            } else {
+              rowCb.disabled = true;
+              rowCb.title = "No Record Id found for this row";
+            }
+            rowTd.appendChild(rowCb);
+            Ue.appendChild(rowTd);
+          }
+          (v.forEach((Ce) => {
               const ce = document.createElement("td"),
                 pe = Tt.localTime ? Qu(he[Ce]) : he[Ce],
                 Ee = pe == null ? "" : String(pe);
@@ -30969,6 +31162,15 @@ function Ku(o, t, e, n) {
         }),
         B.appendChild(He),
         P.appendChild(B),
+        (() => {
+          if (Tt.deleteCheckboxes) {
+            const allCbs = Array.from(B.querySelectorAll(".sf-row-cb:not(:disabled)"));
+            const headerCb = B.querySelector("thead input[type='checkbox']");
+            if (headerCb) {
+              headerCb.checked = allCbs.length > 0 && allCbs.every(cb => cb.checked);
+            }
+          }
+        })(),
         h.length > R)
       ) {
         const he = document.createElement("div");
@@ -31116,6 +31318,8 @@ function Ku(o, t, e, n) {
         ($.style.display = "none"));
     },
     Te = () => {
+      selectedRecordIds.clear();
+      updateDeleteBtnState();
       let h = c.value.trim();
       if (!h) return;
       if ((fo("soql"), Tt.typoFix)) {
@@ -31333,31 +31537,68 @@ function Ku(o, t, e, n) {
             }),
             v.appendChild(ce));
         },
-        ze = (Ce, ce, pe) => {
-          const Ee = document.createElement("button");
+        ze = (Ce, ce, pe, onDelete) => {
+          const Ee = document.createElement("div");
           (Object.assign(Ee.style, {
-            display: "block",
+            display: "flex",
+            alignItems: "center",
             width: "100%",
-            textAlign: "left",
-            background: "transparent",
-            border: "none",
             borderRadius: "8px",
-            cursor: "pointer",
-            padding: "8px 10px",
+            padding: "2px 4px",
             fontFamily: "inherit",
             color: i.textPrimary,
           }),
-            (Ee.innerHTML = `<div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${Ce.replace(/</g, "&lt;")}</div><div style="font-size:11px;color:${i.textMuted};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:Fira Code,monospace">${ce.replace(/</g, "&lt;")}</div>`),
             Ee.addEventListener("mouseover", () => {
               Ee.style.background = i.hover;
             }),
             Ee.addEventListener("mouseout", () => {
               Ee.style.background = "transparent";
-            }),
-            Ee.addEventListener("click", () => {
+            }));
+          const btn = document.createElement("button");
+          (Object.assign(btn.style, {
+            display: "block",
+            flex: "1",
+            textAlign: "left",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: "6px 6px",
+            fontFamily: "inherit",
+            color: i.textPrimary,
+            minWidth: "0",
+          }),
+            (btn.innerHTML = `<div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${Ce.replace(/</g, "&lt;")}</div><div style="font-size:11px;color:${i.textMuted};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:Fira Code,monospace">${ce.replace(/</g, "&lt;")}</div>`),
+            btn.addEventListener("click", () => {
               ((c.value = pe), R(), c.focus());
             }),
-            v.appendChild(Ee));
+            Ee.appendChild(btn));
+          if (onDelete) {
+            const delBtn = document.createElement("button");
+            (Object.assign(delBtn.style, {
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "4px 8px",
+              color: i.textFaint,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: "4px",
+              marginLeft: "4px",
+            }),
+              delBtn.addEventListener("mouseover", () => {
+                ((delBtn.style.color = "#ef4444"), (delBtn.style.background = "rgba(239, 68, 68, 0.1)"));
+              }),
+              delBtn.addEventListener("mouseout", () => {
+                ((delBtn.style.color = i.textFaint), (delBtn.style.background = "transparent"));
+              }),
+              delBtn.addEventListener("click", (eClick) => {
+                ((eClick.stopPropagation()), onDelete());
+              }),
+              (delBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'),
+              Ee.appendChild(delBtn));
+          }
+          v.appendChild(Ee);
         },
         He = (Tt.templates || []).filter((Ce) => Ce.trim());
       if (cn.length === 0 && fn.length === 0 && He.length === 0) {
@@ -31374,11 +31615,18 @@ function Ku(o, t, e, n) {
         (xe("Templates"),
         He.forEach((Ce) => ze(Ce.replace(/\s+/g, " ").slice(0, 60), Ce, Ce))),
         cn.length &&
-          (xe("★ Saved"), cn.forEach((Ce) => ze(Ce.name, Ce.query, Ce.query))),
+          (xe("★ Saved"),
+          cn.forEach((Ce) =>
+            ze(Ce.name, Ce.query, Ce.query, () => {
+              ((cn = cn.filter((B) => B.name !== Ce.name || B.query !== Ce.query)), ju(), R(), X.click());
+            }),
+          )),
         fn.length &&
           (xe("Recent"),
           fn.forEach((Ce) =>
-            ze(Ce.query.replace(/\s+/g, " ").slice(0, 60), Ce.query, Ce.query),
+            ze(Ce.query.replace(/\s+/g, " ").slice(0, 60), Ce.query, Ce.query, () => {
+              ((fn = fn.filter((B) => B.query !== Ce.query)), Hu(), R(), X.click());
+            }),
           )),
         document.body.appendChild(v));
       const he = X.getBoundingClientRect(),
@@ -33165,6 +33413,31 @@ function Wa(o) {
           }),
           _.appendChild(v));
       }
+      if (f.onDelete) {
+        const v = document.createElement("span");
+        ((v.className = "sf-delete"),
+          (v.style.flexShrink = "0"),
+          (v.style.display = "flex"),
+          (v.style.alignItems = "center"),
+          (v.style.marginLeft = "8px"),
+          (v.style.color = s.textFaint),
+          (v.style.cursor = "pointer"),
+          (v.title = "Delete from history"),
+          (v.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'));
+        v.addEventListener("mouseover", () => {
+          v.style.color = "#ef4444";
+        });
+        v.addEventListener("mouseout", () => {
+          v.style.color = s.textFaint;
+        });
+        v.addEventListener("click", (xe) => {
+          (xe.preventDefault(),
+            xe.stopPropagation(),
+            f.onDelete(),
+            c === "recent" && oe());
+        });
+        _.appendChild(v);
+      }
       const I = document.createElement("div");
       return (
         (I.style.flexShrink = "0"),
@@ -33590,6 +33863,384 @@ function Wa(o) {
         _
       );
     },
+    getToolsList = () => [
+      {
+        id: "speedtest",
+        icon: "🏎️",
+        label: "Org Speed Test",
+        desc: "Run Salesforce speed test",
+        run: () => {
+          const he = `${bt()}/speedtest.jsp`;
+          (Ut({
+            kind: "tool",
+            icon: "🏎️",
+            title: "Org Speed Test",
+            subtitle: "speedtest.jsp",
+            meta: "Tool",
+            url: he,
+          }),
+            window.open(he, "_blank"),
+            gt());
+        },
+      },
+      {
+        id: "sfhome",
+        icon: "🏠",
+        label: "Salesforce Home",
+        desc: "Open Lightning home",
+        run: () => {
+          const he = `${bt()}/lightning/page/home`;
+          (Ut({
+            kind: "tool",
+            icon: "🏠",
+            title: "Salesforce Home",
+            subtitle: "Lightning home",
+            meta: "Tool",
+            url: he,
+          }),
+            window.open(he, "_blank"),
+            gt());
+        },
+      },
+      {
+        id: "webconsole",
+        icon: "🖥️",
+        label: "Web Console (Beta)",
+        desc: "Open /webconsole — requires Web Console (Beta) enabled in Setup → Development",
+        run: () => {
+          const he = `${bt()}/webconsole`;
+          (Ut({
+            kind: "tool",
+            icon: "🖥️",
+            title: "Web Console (Beta)",
+            subtitle: "/webconsole",
+            meta: "Tool",
+            url: he,
+          }),
+            window.open(he, "_blank"),
+            gt());
+        },
+      },
+      {
+        id: "webconsolesetup",
+        icon: "⚙️",
+        label: "Enable Web Console (Beta)",
+        desc: "Open the Web Console (Beta) setup page to turn it on",
+        run: () => {
+          const he = `${bt()}/lightning/setup/PlatformWebIdeSetup/home`;
+          (Ut({
+            kind: "tool",
+            icon: "⚙️",
+            title: "Enable Web Console (Beta)",
+            subtitle: "PlatformWebIdeSetup",
+            meta: "Setup",
+            url: he,
+          }),
+            window.open(he, "_blank"),
+            gt());
+        },
+      },
+      {
+        id: "settings",
+        icon: "⚙️",
+        label: "Settings",
+        desc: "Open the extension settings page",
+        run: () => {
+          (i(), gt());
+        },
+      },
+      {
+        id: "classic",
+        icon: "🕹️",
+        label: "Switch to Classic",
+        desc: "Open Salesforce Classic",
+        run: () => {
+          const he = `${bt()}/ltng/switcher?destination=classic`;
+          (window.open(he, "_blank"), gt());
+        },
+      },
+      {
+        id: "export",
+        icon: "📤",
+        label: "Export Data",
+        desc: "Run SOQL & export CSV",
+        run: () => {
+          ((u.value = ""), (x = "export"), oe());
+        },
+      },
+      {
+        id: "querybuilder",
+        icon: "🧱",
+        label: "Query Builder",
+        desc: "Build SOQL visually",
+        run: () => {
+          ((u.value = ""), (x = "querybuilder"), oe());
+        },
+      },
+      {
+        id: "orgdetails",
+        icon: "🏢",
+        label: "Org Details",
+        desc: "View this org’s info",
+        run: () => {
+          ((u.value = ""), (x = "orgdetails"), oe());
+        },
+      },
+      {
+        id: "objectmanager",
+        icon: "🛠️",
+        label: "Object Manager",
+        desc: "Create objects & fields with FLS",
+        run: () => {
+          ((u.value = ""), (x = "objectmanager"), oe());
+        },
+      },
+      {
+        id: "objectdetails",
+        icon: "📦",
+        label: "Object Details",
+        desc: "View fields, CRUDQ and export to CSV",
+        run: () => {
+          ((u.value = ""), (x = "objectdetails"), oe());
+        },
+      },
+      {
+        id: "bulkfieldcreator",
+        icon: "✨",
+        label: "Bulk Field Creator",
+        desc: "Create custom fields in bulk and set FLS",
+        run: () => {
+          ((u.value = ""), (x = "bulkfieldcreator"), oe());
+        },
+      },
+      {
+        id: "automationmap",
+        icon: "🧭",
+        label: "Automation Map",
+        desc: "What fires on save, in order",
+        run: () => {
+          ((u.value = ""), (x = "automationmap"), oe());
+        },
+      },
+      {
+        id: "flowmanager",
+        icon: "🌊",
+        label: "Flow Manager",
+        desc: "View, activate, deactivate & open flows",
+        run: () => {
+          ((u.value = ""), (x = "flowmanager"), oe());
+        },
+      },
+      {
+        id: "validationrules",
+        icon: "✅",
+        label: "Validation Rules",
+        desc: "Activate, deactivate & open validation rules",
+        run: () => {
+          ((u.value = ""), (x = "validationrules"), oe());
+        },
+      },
+      {
+        id: "whereused",
+        icon: "🔎",
+        label: "Where Used",
+        desc: "Find what references a component",
+        run: () => {
+          ((u.value = ""), (x = "whereused"), oe());
+        },
+      },
+      {
+        id: "restexplorer",
+        icon: "🧪",
+        label: "REST Explorer",
+        desc: "Call any Salesforce REST endpoint (Beta)",
+        run: () => {
+          ((u.value = ""), (x = "restexplorer"), oe());
+        },
+      },
+      {
+        id: "eventmonitor",
+        icon: "📡",
+        label: "Event Monitor (Beta)",
+        desc: "Subscribe to platform events, CDC & push topics live",
+        run: () => {
+          ((u.value = ""), (x = "eventmonitor"), oe());
+        },
+      },
+      {
+        id: "executeanonymous",
+        icon: "⚡",
+        label: "Execute Anonymous",
+        desc: "Run Apex & analyze the debug log",
+        run: () => {
+          ((u.value = ""), (x = "executeanonymous"), oe());
+        },
+      },
+      {
+        id: "permcompare",
+        icon: "🔐",
+        label: "Permission Comparison",
+        desc: "Compare profiles & permission sets",
+        run: () => {
+          ((u.value = ""), (x = "permcompare"), oe());
+        },
+      },
+      {
+        id: "permclone",
+        icon: "🧬",
+        label: "Profile & Permission Clone",
+        desc: "Clone, convert & merge Profiles and Permission Sets with granular control",
+        run: () => {
+          ((u.value = ""), (x = "permclone"), oe());
+        },
+      },
+      {
+        id: "accessmap",
+        icon: "🗺️",
+        label: "Access Explorer",
+        desc: "Object, field & user access map",
+        run: () => {
+          ((u.value = ""), (x = "accessmap"), oe());
+        },
+      },
+      {
+        id: "dataimport",
+        icon: "⬆️",
+        label: "Data Import",
+        desc: "Insert / update / upsert / delete from CSV",
+        run: () => {
+          ((u.value = ""), (x = "dataimport"), oe());
+        },
+      },
+      {
+        id: "sampledata",
+        icon: "🧪",
+        label: "Bulk Sample Data Generator",
+        desc: "Analyze multiple objects and create realistic test records in bulk",
+        run: () => {
+          ((u.value = ""), (x = "sampledata"), oe());
+        },
+      },
+      {
+        id: "release",
+        icon: "🚀",
+        label: "Salesforce Release",
+        desc: "Current release & updates",
+        run: () => {
+          ((u.value = ""), (x = "release"), oe());
+        },
+      },
+      {
+        id: "apiusage",
+        icon: "📊",
+        label: "API Usage",
+        desc: "Daily API limits",
+        run: () => {
+          ((u.value = ""), (x = "apiusage"), oe());
+        },
+      },
+      {
+        id: "storage",
+        icon: "💾",
+        label: "Storage Insights",
+        desc: "Data & file storage",
+        run: () => {
+          ((u.value = ""), (x = "storage"), oe());
+        },
+      },
+      {
+        id: "orglimits",
+        icon: "📈",
+        label: "Org Status",
+        desc: "All org limits & usage",
+        run: () => {
+          ((u.value = ""), (x = "orglimits"), oe());
+        },
+      },
+      {
+        id: "shortcuts",
+        icon: "🔖",
+        label: "Custom Shortcuts",
+        desc: "Save your own Setup links",
+        run: () => {
+          ((u.value = ""), (x = "shortcuts"), oe());
+        },
+      },
+      {
+        id: "inspectlwc",
+        icon: "🔍",
+        label: "Inspect Components",
+        desc: "Highlight LWCs on this page (Alt/⌥+Z)",
+        run: () => {
+          ((u.value = ""), wi());
+        },
+      },
+      {
+        id: "clearsession",
+        icon: "🧹",
+        label: "Clear Cache",
+        desc: "Clear cached session & reload",
+        run: () => {
+          const he = globalThis.chrome?.runtime;
+          (ot("Clearing cache & reloading…"),
+            he?.sendMessage(
+              { type: "CLEAR_SESSION_CACHE", hostname: Vt(en()) },
+              () => {
+                setTimeout(() => window.location.reload(), 300);
+              },
+            ),
+            gt());
+        },
+      },
+      {
+        id: "ghost",
+        icon: "👻",
+        label: "Ghost Session",
+        desc: "Open your session in Incognito",
+        run: () => {
+          it().then((he) => {
+            if (!he?.instanceUrl || !he?.sessionId) {
+              ot("Salesforce session not detected");
+              return;
+            }
+            const Pe = window.location.pathname || "/",
+              Ue = `${he.instanceUrl}/secur/frontdoor.jsp?sid=${encodeURIComponent(he.sessionId)}&retURL=${encodeURIComponent(Pe)}`;
+            (globalThis.chrome.runtime.sendMessage({
+              type: "OPEN_INCOGNITO_TAB",
+              url: Ue,
+            }),
+              gt());
+          });
+        },
+      },
+      {
+        id: "fieldapi",
+        icon: "🏷️",
+        label: "Show Field API Names",
+        desc: "On record pages",
+        toggleKey: "showFieldApi",
+      },
+      {
+        id: "magicfill",
+        icon: "✨",
+        label: "Magic Fill",
+        desc: "Auto-fill new-record modals",
+        run: () => {
+          ((u.value = ""), (x = "magicfill"), oe());
+        },
+      },
+      {
+        id: "whatsnew",
+        icon: "✨",
+        label: "What's New",
+        desc: "See the latest features",
+        run: () => {
+          const he =
+            globalThis.chrome?.runtime?.getManifest?.().version || "";
+          (gt(), ka(he, mt === "dark"));
+        },
+      },
+    ],
     Q = () => {
       const f = /Mac|iPhone|iPad|iPod/i.test(
           navigator.platform || navigator.userAgent,
@@ -33600,85 +34251,95 @@ function Wa(o) {
           Ie("tools").then(() => {
             ((x = R), oe());
           });
-        },
-        W = document.createElement("div");
-      ((W.textContent = "Quick actions"),
-        Object.assign(W.style, {
-          fontSize: "11px",
-          fontWeight: "800",
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: s.textFaint,
-          padding: "4px 12px 8px",
-        }),
-        _.appendChild(W));
-      const ie = [
-          {
+        };
+      const allTools = getToolsList();
+      const pinnedList = globalPrefs.pinnedTools || ["sfhome", "export", "sampledata", "whereused"];
+      const ie = [];
+      pinnedList.forEach((toolId) => {
+        if (toolId === "home") {
+          ie.push({
+            id: "home",
             icon: "🏠",
             title: "Home dashboard",
             desc: "Org health, debug status, quick actions and recents.",
             onClick: () => Ie("home"),
-          },
-          {
-            icon: "📤",
-            title: "Export data",
-            desc: "Run SOQL and export the results as CSV.",
-            onClick: () => m("export"),
-          },
-          {
-            icon: "🧪",
-            title: "Generate sample data",
-            desc: "Create realistic test records for any object.",
-            onClick: () => m("sampledata"),
-          },
-          {
-            icon: "🔎",
-            title: "Where is this used?",
-            desc: "Find everything that references a field, class or flow.",
-            onClick: () => m("whereused"),
-          },
-          {
-            icon: "🛠️",
-            title: "Browse all tools",
-            desc: "Object Manager, Automation Map, Org Status, and more.",
-            onClick: () => Ie("tools"),
-          },
-        ],
-        I = document.createElement("div");
-      (Object.assign(I.style, {
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "8px",
-        padding: "2px 12px 4px",
-      }),
-        ie.forEach((R) => {
-          const ne = document.createElement("button");
-          ((ne.title = `${R.title} — ${R.desc}`),
-            Object.assign(ne.style, {
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "5px",
-              width: "84px",
-              padding: "10px 6px",
-              borderRadius: "12px",
-              border: `1px solid ${s.chipBorder}`,
-              background: s.chipBg,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }),
-            (ne.innerHTML = `<span style="font-size:20px;line-height:1">${R.icon}</span><span style="font-size:11px;font-weight:600;text-align:center;line-height:1.2;color:${s.textMuted}">${R.title}</span>`),
-            ne.addEventListener("mouseover", () => {
-              ne.style.background = s.surfaceHover;
-            }),
-            ne.addEventListener("mouseout", () => {
-              ne.style.background = s.chipBg;
-            }),
-            ne.addEventListener("click", R.onClick),
-            I.appendChild(ne));
+          });
+          return;
+        }
+        const found = allTools.find((t) => t.id === toolId);
+        if (found) {
+          ie.push({
+            id: found.id,
+            icon: found.icon,
+            title: found.label,
+            desc: found.desc,
+            onClick: found.run ? found.run : () => {
+              if (found.toggleKey) {
+                const wt = found.toggleKey;
+                ((At[wt] = !At[wt]),
+                  Bi(),
+                  Sa(wt),
+                  ot(`${found.label}: ${At[wt] ? "On" : "Off"}`),
+                  oe());
+              }
+            },
+          });
+        }
+      });
+      ie.push({
+        icon: "🛠️",
+        title: "Browse all tools",
+        desc: "Object Manager, Automation Map, Org Status, and more.",
+        onClick: () => Ie("tools"),
+      });
+      if (ie.length > 0) {
+        const W = document.createElement("div");
+        ((W.textContent = "Quick actions"),
+          Object.assign(W.style, {
+            fontSize: "11px",
+            fontWeight: "800",
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            color: s.textFaint,
+            padding: "4px 12px 8px",
+          }),
+          _.appendChild(W));
+        const I = document.createElement("div");
+        (Object.assign(I.style, {
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "8px",
+          padding: "2px 12px 4px",
         }),
-        _.appendChild(I));
+          ie.forEach((R) => {
+            const ne = document.createElement("button");
+            ((ne.title = `${R.title} — ${R.desc}`),
+              Object.assign(ne.style, {
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "5px",
+                width: "84px",
+                padding: "10px 6px",
+                borderRadius: "12px",
+                border: `1px solid ${s.chipBorder}`,
+                background: s.chipBg,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }),
+              (ne.innerHTML = `<span style="font-size:20px;line-height:1">${R.icon}</span><span style="font-size:11px;font-weight:600;text-align:center;line-height:1.2;color:${s.textMuted}">${R.title}</span>`),
+              ne.addEventListener("mouseover", () => {
+                ne.style.background = s.surfaceHover;
+              }),
+              ne.addEventListener("mouseout", () => {
+                ne.style.background = s.chipBg;
+              }),
+              ne.addEventListener("click", R.onClick),
+              I.appendChild(ne));
+          }),
+          _.appendChild(I));
+      }
       const h = document.createElement("div");
       ((h.textContent = "Tips"),
         Object.assign(h.style, {
@@ -34326,6 +34987,9 @@ function Wa(o) {
                 }),
                   window.open(R.url, "_blank"),
                   gt());
+              },
+              onDelete: () => {
+                deleteRecent(R);
               },
             });
         if (W.length > 0) {
@@ -36529,384 +37193,7 @@ ${at.error}`),
           }
           x = null;
         }
-        const ie = [
-            {
-              id: "speedtest",
-              icon: "🏎️",
-              label: "Org Speed Test",
-              desc: "Run Salesforce speed test",
-              run: () => {
-                const he = `${bt()}/speedtest.jsp`;
-                (Ut({
-                  kind: "tool",
-                  icon: "🏎️",
-                  title: "Org Speed Test",
-                  subtitle: "speedtest.jsp",
-                  meta: "Tool",
-                  url: he,
-                }),
-                  window.open(he, "_blank"),
-                  gt());
-              },
-            },
-            {
-              id: "sfhome",
-              icon: "🏠",
-              label: "Salesforce Home",
-              desc: "Open Lightning home",
-              run: () => {
-                const he = `${bt()}/lightning/page/home`;
-                (Ut({
-                  kind: "tool",
-                  icon: "🏠",
-                  title: "Salesforce Home",
-                  subtitle: "Lightning home",
-                  meta: "Tool",
-                  url: he,
-                }),
-                  window.open(he, "_blank"),
-                  gt());
-              },
-            },
-            {
-              id: "webconsole",
-              icon: "🖥️",
-              label: "Web Console (Beta)",
-              desc: "Open /webconsole — requires Web Console (Beta) enabled in Setup → Development",
-              run: () => {
-                const he = `${bt()}/webconsole`;
-                (Ut({
-                  kind: "tool",
-                  icon: "🖥️",
-                  title: "Web Console (Beta)",
-                  subtitle: "/webconsole",
-                  meta: "Tool",
-                  url: he,
-                }),
-                  window.open(he, "_blank"),
-                  gt());
-              },
-            },
-            {
-              id: "webconsolesetup",
-              icon: "⚙️",
-              label: "Enable Web Console (Beta)",
-              desc: "Open the Web Console (Beta) setup page to turn it on",
-              run: () => {
-                const he = `${bt()}/lightning/setup/PlatformWebIdeSetup/home`;
-                (Ut({
-                  kind: "tool",
-                  icon: "⚙️",
-                  title: "Enable Web Console (Beta)",
-                  subtitle: "PlatformWebIdeSetup",
-                  meta: "Setup",
-                  url: he,
-                }),
-                  window.open(he, "_blank"),
-                  gt());
-              },
-            },
-            {
-              id: "settings",
-              icon: "⚙️",
-              label: "Settings",
-              desc: "Open the extension settings page",
-              run: () => {
-                (i(), gt());
-              },
-            },
-            {
-              id: "classic",
-              icon: "🕹️",
-              label: "Switch to Classic",
-              desc: "Open Salesforce Classic",
-              run: () => {
-                const he = `${bt()}/ltng/switcher?destination=classic`;
-                (window.open(he, "_blank"), gt());
-              },
-            },
-            {
-              id: "export",
-              icon: "📤",
-              label: "Export Data",
-              desc: "Run SOQL & export CSV",
-              run: () => {
-                ((u.value = ""), (x = "export"), oe());
-              },
-            },
-            {
-              id: "querybuilder",
-              icon: "🧱",
-              label: "Query Builder",
-              desc: "Build SOQL visually",
-              run: () => {
-                ((u.value = ""), (x = "querybuilder"), oe());
-              },
-            },
-            {
-              id: "orgdetails",
-              icon: "🏢",
-              label: "Org Details",
-              desc: "View this org’s info",
-              run: () => {
-                ((u.value = ""), (x = "orgdetails"), oe());
-              },
-            },
-            {
-              id: "objectmanager",
-              icon: "🛠️",
-              label: "Object Manager",
-              desc: "Create objects & fields with FLS",
-              run: () => {
-                ((u.value = ""), (x = "objectmanager"), oe());
-              },
-            },
-            {
-              id: "objectdetails",
-              icon: "📦",
-              label: "Object Details",
-              desc: "View fields, CRUDQ and export to CSV",
-              run: () => {
-                ((u.value = ""), (x = "objectdetails"), oe());
-              },
-            },
-            {
-              id: "bulkfieldcreator",
-              icon: "✨",
-              label: "Bulk Field Creator",
-              desc: "Create custom fields in bulk and set FLS",
-              run: () => {
-                ((u.value = ""), (x = "bulkfieldcreator"), oe());
-              },
-            },
-            {
-              id: "automationmap",
-              icon: "🧭",
-              label: "Automation Map",
-              desc: "What fires on save, in order",
-              run: () => {
-                ((u.value = ""), (x = "automationmap"), oe());
-              },
-            },
-            {
-              id: "flowmanager",
-              icon: "🌊",
-              label: "Flow Manager",
-              desc: "View, activate, deactivate & open flows",
-              run: () => {
-                ((u.value = ""), (x = "flowmanager"), oe());
-              },
-            },
-            {
-              id: "validationrules",
-              icon: "✅",
-              label: "Validation Rules",
-              desc: "Activate, deactivate & open validation rules",
-              run: () => {
-                ((u.value = ""), (x = "validationrules"), oe());
-              },
-            },
-            {
-              id: "whereused",
-              icon: "🔎",
-              label: "Where Used",
-              desc: "Find what references a component",
-              run: () => {
-                ((u.value = ""), (x = "whereused"), oe());
-              },
-            },
-            {
-              id: "restexplorer",
-              icon: "🧪",
-              label: "REST Explorer",
-              desc: "Call any Salesforce REST endpoint (Beta)",
-              run: () => {
-                ((u.value = ""), (x = "restexplorer"), oe());
-              },
-            },
-            {
-              id: "eventmonitor",
-              icon: "📡",
-              label: "Event Monitor (Beta)",
-              desc: "Subscribe to platform events, CDC & push topics live",
-              run: () => {
-                ((u.value = ""), (x = "eventmonitor"), oe());
-              },
-            },
-            {
-              id: "executeanonymous",
-              icon: "⚡",
-              label: "Execute Anonymous",
-              desc: "Run Apex & analyze the debug log",
-              run: () => {
-                ((u.value = ""), (x = "executeanonymous"), oe());
-              },
-            },
-            {
-              id: "permcompare",
-              icon: "🔐",
-              label: "Permission Comparison",
-              desc: "Compare profiles & permission sets",
-              run: () => {
-                ((u.value = ""), (x = "permcompare"), oe());
-              },
-            },
-            {
-              id: "permclone",
-              icon: "🧬",
-              label: "Profile & Permission Clone",
-              desc: "Clone, convert & merge Profiles and Permission Sets with granular control",
-              run: () => {
-                ((u.value = ""), (x = "permclone"), oe());
-              },
-            },
-            {
-              id: "accessmap",
-              icon: "🗺️",
-              label: "Access Explorer",
-              desc: "Object, field & user access map",
-              run: () => {
-                ((u.value = ""), (x = "accessmap"), oe());
-              },
-            },
-            {
-              id: "dataimport",
-              icon: "⬆️",
-              label: "Data Import",
-              desc: "Insert / update / upsert / delete from CSV",
-              run: () => {
-                ((u.value = ""), (x = "dataimport"), oe());
-              },
-            },
-            {
-              id: "sampledata",
-              icon: "🧪",
-              label: "Bulk Sample Data Generator",
-              desc: "Analyze multiple objects and create realistic test records in bulk",
-              run: () => {
-                ((u.value = ""), (x = "sampledata"), oe());
-              },
-            },
-            {
-              id: "release",
-              icon: "🚀",
-              label: "Salesforce Release",
-              desc: "Current release & updates",
-              run: () => {
-                ((u.value = ""), (x = "release"), oe());
-              },
-            },
-            {
-              id: "apiusage",
-              icon: "📊",
-              label: "API Usage",
-              desc: "Daily API limits",
-              run: () => {
-                ((u.value = ""), (x = "apiusage"), oe());
-              },
-            },
-            {
-              id: "storage",
-              icon: "💾",
-              label: "Storage Insights",
-              desc: "Data & file storage",
-              run: () => {
-                ((u.value = ""), (x = "storage"), oe());
-              },
-            },
-            {
-              id: "orglimits",
-              icon: "📈",
-              label: "Org Status",
-              desc: "All org limits & usage",
-              run: () => {
-                ((u.value = ""), (x = "orglimits"), oe());
-              },
-            },
-            {
-              id: "shortcuts",
-              icon: "🔖",
-              label: "Custom Shortcuts",
-              desc: "Save your own Setup links",
-              run: () => {
-                ((u.value = ""), (x = "shortcuts"), oe());
-              },
-            },
-            {
-              id: "inspectlwc",
-              icon: "🔍",
-              label: "Inspect Components",
-              desc: "Highlight LWCs on this page (Alt/⌥+Z)",
-              run: () => {
-                ((u.value = ""), wi());
-              },
-            },
-            {
-              id: "clearsession",
-              icon: "🧹",
-              label: "Clear Cache",
-              desc: "Clear cached session & reload",
-              run: () => {
-                const he = globalThis.chrome?.runtime;
-                (ot("Clearing cache & reloading…"),
-                  he?.sendMessage(
-                    { type: "CLEAR_SESSION_CACHE", hostname: Vt(en()) },
-                    () => {
-                      setTimeout(() => window.location.reload(), 300);
-                    },
-                  ),
-                  gt());
-              },
-            },
-            {
-              id: "ghost",
-              icon: "👻",
-              label: "Ghost Session",
-              desc: "Open your session in Incognito",
-              run: () => {
-                it().then((he) => {
-                  if (!he?.instanceUrl || !he?.sessionId) {
-                    ot("Salesforce session not detected");
-                    return;
-                  }
-                  const Pe = window.location.pathname || "/",
-                    Ue = `${he.instanceUrl}/secur/frontdoor.jsp?sid=${encodeURIComponent(he.sessionId)}&retURL=${encodeURIComponent(Pe)}`;
-                  (globalThis.chrome.runtime.sendMessage({
-                    type: "OPEN_INCOGNITO_TAB",
-                    url: Ue,
-                  }),
-                    gt());
-                });
-              },
-            },
-            {
-              id: "fieldapi",
-              icon: "🏷️",
-              label: "Show Field API Names",
-              desc: "On record pages",
-              toggleKey: "showFieldApi",
-            },
-            {
-              id: "magicfill",
-              icon: "✨",
-              label: "Magic Fill",
-              desc: "Auto-fill new-record modals",
-              run: () => {
-                ((u.value = ""), (x = "magicfill"), oe());
-              },
-            },
-            {
-              id: "whatsnew",
-              icon: "✨",
-              label: "What's New",
-              desc: "See the latest features",
-              run: () => {
-                const he =
-                  globalThis.chrome?.runtime?.getManifest?.().version || "";
-                (gt(), ka(he, mt === "dark"));
-              },
-            },
-          ],
+        const ie = getToolsList();
           I = new Map(lo.map((he, Pe) => [he, Pe])),
           h = ie
             .map((he, Pe) => ({ t: he, i: Pe }))
@@ -36987,6 +37274,54 @@ ${at.error}`),
             }),
               Ce.appendChild(wt));
           }
+          const pinBtn = document.createElement("button");
+          const isPinned = globalPrefs.pinnedTools ? globalPrefs.pinnedTools.includes(he.id) : ["sfhome", "export", "sampledata", "whereused"].includes(he.id);
+          Object.assign(pinBtn.style, {
+            position: "absolute",
+            top: "6px",
+            right: Pe ? "24px" : "6px",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "13px",
+            padding: "4px",
+            borderRadius: "4px",
+            lineHeight: "1",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "opacity 0.15s, transform 0.15s",
+            opacity: isPinned ? "1.0" : "0.0",
+            zIndex: "10",
+          });
+          pinBtn.innerHTML = isPinned ? "⭐" : "☆";
+          pinBtn.title = isPinned ? "Unpin from Quick Actions" : "Pin to Quick Actions";
+          pinBtn.addEventListener("click", (eClick) => {
+            eClick.preventDefault();
+            eClick.stopPropagation();
+            let currentPinned = globalPrefs.pinnedTools || ["sfhome", "export", "sampledata", "whereused"];
+            if (currentPinned.includes(he.id)) {
+              currentPinned = currentPinned.filter(id => id !== he.id);
+              pinBtn.innerHTML = "☆";
+              pinBtn.style.opacity = "0.0";
+            } else {
+              currentPinned = [...currentPinned, he.id];
+              pinBtn.innerHTML = "⭐";
+              pinBtn.style.opacity = "1.0";
+            }
+            saveGlobalPrefs({ pinnedTools: currentPinned });
+            oe();
+          });
+          Ce.appendChild(pinBtn);
+          Ce.addEventListener("mouseover", () => {
+            pinBtn.style.opacity = "1.0";
+          });
+          Ce.addEventListener("mouseout", () => {
+            const stillPinned = globalPrefs.pinnedTools ? globalPrefs.pinnedTools.includes(he.id) : ["sfhome", "export", "sampledata", "whereused"].includes(he.id);
+            if (!stillPinned) {
+              pinBtn.style.opacity = "0.0";
+            }
+          });
           let Ee = null;
           v &&
             ((Ee = document.createElement("span")),
