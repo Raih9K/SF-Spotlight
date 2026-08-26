@@ -12904,6 +12904,7 @@ const vs = {
     defaultHost: "",
     nicknames: {},
     pinnedTools: ["sfhome", "export", "sampledata", "whereused"],
+    ctrlShiftRReload: !0,
   },
   xi = { soql: 0, debugLogs: 0, rulesUpdated: 0, apexTests: 0 };
 let Es = Promise.resolve();
@@ -24313,6 +24314,7 @@ const du = [
       items: [
         { id: "appearance", label: "Appearance", icon: "🎨" },
         { id: "tabs", label: "Tabs", icon: "🧩" },
+        { id: "quickactions", label: "Quick Actions", icon: "⚡" },
         { id: "notification", label: "Notification", icon: "🔔" },
         { id: "privacy", label: "Privacy", icon: "🛡️" },
       ],
@@ -24813,6 +24815,269 @@ function uu(o, t) {
         S
       );
     };
+  function quickactions(T) {
+    const w = x();
+    w.appendChild(
+      D(
+        "Experience",
+        "Quick Actions",
+        "Reorder the Quick Actions shown at the top of your Setup tab, and toggle their visibility.",
+        Z("Reset", "ghost", () => N({ pinnedTools: ["sfhome", "export", "sampledata", "whereused"] })),
+      )
+    );
+    w.appendChild(L());
+    const H = "28px 1fr 84px",
+      p = Fe("div", {
+        display: "grid",
+        gridTemplateColumns: H,
+        gap: "8px",
+        alignItems: "center",
+        padding: "0 4px 8px",
+        fontSize: "11px",
+        fontWeight: "800",
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        color: n.faint,
+      });
+    ["#", "Tool", "Visible"].forEach((S, Y) =>
+      p.appendChild(
+        Fe(
+          "div",
+          Y === 2 ? { textAlign: "right" } : void 0,
+          S,
+        ),
+      ),
+    );
+    w.appendChild(p);
+    const A = Fe("div", {
+      border: `1px solid ${n.border}`,
+      borderRadius: "12px",
+      overflow: "hidden",
+    });
+    const tools = typeof getToolsList === "function" ? getToolsList() : (typeof globalThis.getToolsList === "function" ? globalThis.getToolsList() : []);
+    const pinned = l.pinnedTools || ["sfhome", "export", "sampledata", "whereused"];
+    const orderedTools = [];
+    pinned.forEach(id => {
+      const found = tools.find(t => t.id === id);
+      if (found) orderedTools.push({ ...found, isPinned: true });
+    });
+    tools.forEach(tool => {
+      if (!pinned.includes(tool.id)) {
+        orderedTools.push({ ...tool, isPinned: false });
+      }
+    });
+    let Q = -1;
+    orderedTools.forEach((S, Y) => {
+      const row = Fe("div", {
+        display: "grid",
+        gridTemplateColumns: H,
+        gap: "8px",
+        alignItems: "center",
+        padding: "10px 12px",
+        borderTop: Y === 0 ? "none" : `1px solid ${n.divider}`,
+        opacity: S.isPinned ? "1" : "0.55",
+      });
+      row.draggable = true;
+      row.addEventListener("dragstart", (je) => {
+        Q = Y;
+        row.style.opacity = "0.4";
+        try {
+          je.dataTransfer.effectAllowed = "move";
+          je.dataTransfer.setData("text/plain", S.id);
+        } catch {}
+      });
+      row.addEventListener("dragend", () => {
+        row.style.opacity = S.isPinned ? "1" : "0.55";
+        row.style.boxShadow = "none";
+        Q = -1;
+      });
+      row.addEventListener("dragover", (je) => {
+        je.preventDefault();
+        if (Q === -1 || Q === Y) {
+          row.style.boxShadow = "none";
+          return;
+        }
+        const Ge = row.getBoundingClientRect();
+        const J = je.clientY > Ge.top + Ge.height / 2;
+        row.style.boxShadow = J
+          ? `inset 0 -2px 0 ${n.accent}`
+          : `inset 0 2px 0 ${n.accent}`;
+      });
+      row.addEventListener("dragleave", () => {
+        row.style.boxShadow = "none";
+      });
+      row.addEventListener("drop", (je) => {
+        je.preventDefault();
+        row.style.boxShadow = "none";
+        if (Q === -1 || Q === Y) return;
+        const Ge = row.getBoundingClientRect();
+        const J = je.clientY > Ge.top + Ge.height / 2;
+        const reordered = [...orderedTools];
+        const [movedItem] = reordered.splice(Q, 1);
+        let destIdx = reordered.findIndex(t => t.id === S.id);
+        if (J) destIdx += 1;
+        reordered.splice(destIdx, 0, movedItem);
+        const newPinned = reordered.filter(t => t.isPinned).map(t => t.id);
+        N({ pinnedTools: newPinned });
+      });
+      const leftControls = Fe("div", { display: "flex", flexDirection: "column" });
+      const upArrow = Fe(
+        "button",
+        {
+          background: "transparent",
+          border: "none",
+          cursor: Y === 0 ? "default" : "pointer",
+          color: n.muted,
+          padding: "0",
+          lineHeight: "1",
+          opacity: Y === 0 ? "0.4" : "1",
+          fontSize: "11px",
+        },
+        "▲",
+      );
+      const downArrow = Fe(
+        "button",
+        {
+          background: "transparent",
+          border: "none",
+          cursor: Y === orderedTools.length - 1 ? "default" : "pointer",
+          color: n.muted,
+          padding: "0",
+          lineHeight: "1",
+          opacity: Y === orderedTools.length - 1 ? "0.4" : "1",
+          fontSize: "11px",
+        },
+        "▼",
+      );
+      upArrow.addEventListener("click", () => {
+        if (Y === 0) return;
+        const reordered = [...orderedTools];
+        [reordered[Y - 1], reordered[Y]] = [reordered[Y], reordered[Y - 1]];
+        const newPinned = reordered.filter(t => t.isPinned).map(t => t.id);
+        N({ pinnedTools: newPinned });
+      });
+      downArrow.addEventListener("click", () => {
+        if (Y === orderedTools.length - 1) return;
+        const reordered = [...orderedTools];
+        [reordered[Y + 1], reordered[Y]] = [reordered[Y], reordered[Y + 1]];
+        const newPinned = reordered.filter(t => t.isPinned).map(t => t.id);
+        N({ pinnedTools: newPinned });
+      });
+      leftControls.appendChild(upArrow);
+      leftControls.appendChild(downArrow);
+      row.appendChild(leftControls);
+      const middleContainer = Fe("div", {
+        display: "flex",
+        alignItems: "center",
+        gap: "9px",
+        fontSize: "13.5px",
+        fontWeight: "700",
+      });
+      const dragHandle = Fe(
+        "span",
+        {
+          color: n.faint,
+          cursor: "grab",
+          fontSize: "13px",
+          letterSpacing: "-1px",
+          userSelect: "none",
+        },
+        "⠿",
+      );
+      dragHandle.title = "Drag to reorder";
+      middleContainer.appendChild(dragHandle);
+      middleContainer.appendChild(Fe("span", void 0, S.icon || "🛠️"));
+      const textContainer = Fe("div", { display: "flex", flexDirection: "column", fontWeight: "normal" });
+      textContainer.appendChild(Fe("span", { fontWeight: "700", color: n.text }, S.label || S.id));
+      textContainer.appendChild(Fe("span", { fontSize: "11px", color: n.muted }, S.desc || ""));
+      middleContainer.appendChild(textContainer);
+      row.appendChild(middleContainer);
+      const rightContainer = Fe("div", { display: "flex", justifyContent: "flex-end" });
+      const viewButton = Fe(
+        "button",
+        {
+          background: "transparent",
+          border: `1px solid ${n.border}`,
+          borderRadius: "8px",
+          padding: "6px 9px",
+          cursor: "pointer",
+          color: S.isPinned ? n.accent : n.faint,
+          fontSize: "13px",
+        },
+        S.isPinned ? "👁" : "🚫",
+      );
+      viewButton.title = S.isPinned ? "Hide from Quick Actions" : "Show in Quick Actions";
+      viewButton.addEventListener("click", () => {
+        let newPinned = [...pinned];
+        if (S.isPinned) {
+          newPinned = newPinned.filter(id => id !== S.id);
+        } else {
+          newPinned.push(S.id);
+        }
+        N({ pinnedTools: newPinned });
+      });
+      rightContainer.appendChild(viewButton);
+      row.appendChild(rightContainer);
+      A.appendChild(row);
+    });
+    const browseRow = Fe("div", {
+      display: "grid",
+      gridTemplateColumns: H,
+      gap: "8px",
+      alignItems: "center",
+      padding: "10px 12px",
+      borderTop: `1px solid ${n.divider}`,
+      opacity: "0.85",
+    });
+    const browseLeftControls = Fe("div", { display: "flex", flexDirection: "column", opacity: "0.3" });
+    browseLeftControls.appendChild(Fe("span", { fontSize: "11px", textAlign: "center" }, "▲"));
+    browseLeftControls.appendChild(Fe("span", { fontSize: "11px", textAlign: "center" }, "▼"));
+    browseRow.appendChild(browseLeftControls);
+    const browseMiddle = Fe("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "9px",
+      fontSize: "13.5px",
+      fontWeight: "700",
+    });
+    const browseDragHandle = Fe("span", { color: n.faint, userSelect: "none", fontSize: "13px", letterSpacing: "-1px" }, "⠿");
+    browseDragHandle.style.cursor = "not-allowed";
+    browseMiddle.appendChild(browseDragHandle);
+    browseMiddle.appendChild(Fe("span", void 0, "🛠️"));
+    const browseTextContainer = Fe("div", { display: "flex", flexDirection: "column", fontWeight: "normal" });
+    browseTextContainer.appendChild(Fe("span", { fontWeight: "700", color: n.text }, "Browse all tools"));
+    browseTextContainer.appendChild(Fe("span", { fontSize: "11px", color: n.muted }, "Access the full tools directory"));
+    browseMiddle.appendChild(browseTextContainer);
+    browseRow.appendChild(browseMiddle);
+    const browseRight = Fe("div", { display: "flex", justifyContent: "flex-end" });
+    const browseViewButton = Fe(
+      "button",
+      {
+        background: "transparent",
+        border: `1px solid ${n.border}`,
+        borderRadius: "8px",
+        padding: "6px 9px",
+        cursor: "not-allowed",
+        color: n.faint,
+        fontSize: "13px",
+        opacity: "0.6",
+      },
+      "🚫",
+    );
+    browseViewButton.title = "Cannot hide this action";
+    browseRight.appendChild(browseViewButton);
+    browseRow.appendChild(browseRight);
+    A.appendChild(browseRow);
+    w.appendChild(A);
+    w.appendChild(
+      Fe(
+        "div",
+        { fontSize: "12px", color: n.muted, marginTop: "12px" },
+        "Drag rows (or use the arrows) to reorder. Applies to the overlay panel and takes effect next time you open it.",
+      ),
+    );
+    T(w);
+  }
   function be() {
     if (!c) return;
     c.innerHTML = "";
@@ -24828,6 +25093,8 @@ function uu(o, t) {
         return ye(T);
       case "tabs":
         return te(T);
+      case "quickactions":
+        return quickactions(T);
       case "notification":
         return Le(T);
       case "privacy":
@@ -24860,6 +25127,14 @@ function uu(o, t) {
           (S) => N({ cacheAutoUpdate: S }),
           "Auto update cache",
           "Keeps cached data fresh in the background.",
+        ),
+      ),
+      H.appendChild(
+        C(
+          l.ctrlShiftRReload !== !1,
+          (S) => N({ ctrlShiftRReload: S }),
+          "Ctrl+Shift+R hard reload shortcut",
+          "Hard reload the page (clear cache and reload) when you press Ctrl+Shift+R.",
         ),
       ));
     const p = Fe("div", { marginTop: "16px" });
@@ -30082,7 +30357,7 @@ function renderObjectDetails(container, isDark, onBack) {
     flex: "1",
     minHeight: "0",
     overflowY: "auto",
-    padding: "24px 28px"
+    padding: "16px 20px"
   });
   mainDiv.appendChild(body);
 
@@ -30093,7 +30368,7 @@ function renderObjectDetails(container, isDark, onBack) {
     display: "flex",
     gap: "12px",
     alignItems: "center",
-    marginBottom: "20px"
+    marginBottom: "12px"
   });
   body.appendChild(selectSection);
 
@@ -30123,7 +30398,7 @@ function renderObjectDetails(container, isDark, onBack) {
   const detailsContainer = $e("div", {
     display: "none",
     flexDirection: "column",
-    gap: "20px"
+    gap: "12px"
   });
   body.appendChild(detailsContainer);
 
@@ -30193,8 +30468,8 @@ function renderObjectDetails(container, isDark, onBack) {
 
     const summaryRow = $e("div", {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-      gap: "16px"
+      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+      gap: "10px"
     });
     detailsContainer.appendChild(summaryRow);
 
@@ -30202,14 +30477,14 @@ function renderObjectDetails(container, isDark, onBack) {
       const card = $e("div", {
         background: e.panel,
         border: `1px solid ${e.border}`,
-        borderRadius: "12px",
-        padding: "14px 18px",
+        borderRadius: "10px",
+        padding: "8px 12px",
         display: "flex",
         flexDirection: "column",
-        gap: "4px"
+        gap: "2px"
       });
-      card.appendChild($e("div", { fontSize: "11px", color: e.faint, fontWeight: "700", textTransform: "uppercase" }, title));
-      card.appendChild($e("div", { fontSize: "15px", fontWeight: "800", color: e.text }, val));
+      card.appendChild($e("div", { fontSize: "10px", color: e.faint, fontWeight: "700", textTransform: "uppercase" }, title));
+      card.appendChild($e("div", { fontSize: "13.5px", fontWeight: "800", color: e.text }, val));
       return card;
     };
 
@@ -30222,7 +30497,7 @@ function renderObjectDetails(container, isDark, onBack) {
       display: "flex",
       gap: "8px",
       flexWrap: "wrap",
-      marginTop: "4px"
+      marginTop: "0px"
     });
     detailsContainer.appendChild(capabilities);
 
@@ -30247,8 +30522,8 @@ function renderObjectDetails(container, isDark, onBack) {
     const statsRow = $e("div", {
       display: "grid",
       gridTemplateColumns: "repeat(3, 1fr)",
-      gap: "16px",
-      marginTop: "8px"
+      gap: "10px",
+      marginTop: "0px"
     });
     detailsContainer.appendChild(statsRow);
     statsRow.appendChild(createCard("Total Fields", String(fields.length)));
@@ -30259,7 +30534,7 @@ function renderObjectDetails(container, isDark, onBack) {
       display: "flex",
       gap: "12px",
       alignItems: "center",
-      marginTop: "12px"
+      marginTop: "4px"
     });
     detailsContainer.appendChild(actionRow);
 
@@ -34273,7 +34548,16 @@ function Wa(o) {
             icon: found.icon,
             title: found.label,
             desc: found.desc,
-            onClick: found.run ? found.run : () => {
+            onClick: found.run ? () => {
+              const nonPanelTools = ["speedtest", "sfhome", "webconsole", "webconsolesetup", "settings", "classic", "clearsession", "ghost", "whatsnew", "inspectlwc"];
+              if (!nonPanelTools.includes(found.id)) {
+                Ie("tools").then(() => {
+                  found.run();
+                });
+              } else {
+                found.run();
+              }
+            } : () => {
               if (found.toggleKey) {
                 const wt = found.toggleKey;
                 ((At[wt] = !At[wt]),
@@ -37274,54 +37558,7 @@ ${at.error}`),
             }),
               Ce.appendChild(wt));
           }
-          const pinBtn = document.createElement("button");
-          const isPinned = globalPrefs.pinnedTools ? globalPrefs.pinnedTools.includes(he.id) : ["sfhome", "export", "sampledata", "whereused"].includes(he.id);
-          Object.assign(pinBtn.style, {
-            position: "absolute",
-            top: "6px",
-            right: Pe ? "24px" : "6px",
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            fontSize: "13px",
-            padding: "4px",
-            borderRadius: "4px",
-            lineHeight: "1",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "opacity 0.15s, transform 0.15s",
-            opacity: isPinned ? "1.0" : "0.0",
-            zIndex: "10",
-          });
-          pinBtn.innerHTML = isPinned ? "⭐" : "☆";
-          pinBtn.title = isPinned ? "Unpin from Quick Actions" : "Pin to Quick Actions";
-          pinBtn.addEventListener("click", (eClick) => {
-            eClick.preventDefault();
-            eClick.stopPropagation();
-            let currentPinned = globalPrefs.pinnedTools || ["sfhome", "export", "sampledata", "whereused"];
-            if (currentPinned.includes(he.id)) {
-              currentPinned = currentPinned.filter(id => id !== he.id);
-              pinBtn.innerHTML = "☆";
-              pinBtn.style.opacity = "0.0";
-            } else {
-              currentPinned = [...currentPinned, he.id];
-              pinBtn.innerHTML = "⭐";
-              pinBtn.style.opacity = "1.0";
-            }
-            saveGlobalPrefs({ pinnedTools: currentPinned });
-            oe();
-          });
-          Ce.appendChild(pinBtn);
-          Ce.addEventListener("mouseover", () => {
-            pinBtn.style.opacity = "1.0";
-          });
-          Ce.addEventListener("mouseout", () => {
-            const stillPinned = globalPrefs.pinnedTools ? globalPrefs.pinnedTools.includes(he.id) : ["sfhome", "export", "sampledata", "whereused"].includes(he.id);
-            if (!stillPinned) {
-              pinBtn.style.opacity = "0.0";
-            }
-          });
+
           let Ee = null;
           v &&
             ((Ee = document.createElement("span")),
@@ -38073,6 +38310,7 @@ ${at.error}`),
         });
     }
   }
+  globalThis.getToolsList = getToolsList;
   if (
     (n || Ae(),
     (l.style.display = "flex"),
@@ -38322,6 +38560,24 @@ function Ju() {
                   : r.data.type === "SF_OPEN_PANEL" && d();
           }));
         const g = (r) => {
+          if (
+            globalPrefs.ctrlShiftRReload !== !1 &&
+            r.ctrlKey &&
+            r.shiftKey &&
+            (r.key === "r" || r.key === "R")
+          ) {
+            r.preventDefault();
+            r.stopPropagation();
+            const he = globalThis.chrome?.runtime;
+            ot("Clearing cache & reloading…");
+            he?.sendMessage(
+              { type: "CLEAR_SESSION_CACHE", hostname: Vt(en()) },
+              () => {
+                setTimeout(() => window.location.reload(), 300);
+              },
+            );
+            return !1;
+          }
           if (
             (r.ctrlKey && r.altKey && (r.key === "d" || r.key === "D")) ||
             (r.altKey && r.code === "KeyS")
