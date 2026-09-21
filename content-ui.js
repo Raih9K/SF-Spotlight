@@ -10173,7 +10173,18 @@ const jc = [
   qc = ["Market St", "Oak Ave", "Cedar Rd", "Pine Blvd", "Elm Way", "Hill Dr"],
   Wt = (o) => o[Math.floor(Math.random() * o.length)],
   Zt = (o, t) => Math.floor(Math.random() * (t - o + 1)) + o,
-  Jo = (o, t) => (t > 0 && o.length > t ? o.slice(0, t) : o);
+  Jo = (o, t) => {
+    if (t > 0 && o.length > t) {
+      const m = o.match(/-[0-9]+$/);
+      if (m) {
+        const sfx = m[0];
+        const left = t - sfx.length;
+        if (left > 0) return o.slice(0, left) + sfx;
+      }
+      return o.slice(0, t);
+    }
+    return o;
+  };
 function Zo(o, t, e) {
   const n = Math.min(t > 0 ? t : 0, 2),
     i = o > 0 ? Math.max(1, o - (t > 0 ? t : 0)) : 6;
@@ -10204,7 +10215,7 @@ function Gc(o, t) {
   }
 }
 function ua(o, t, e) {
-  const n = o.unique ? `-${e.seq}${t}` : "";
+  const n = `-${e.seq}${t}`;
   switch (o.type) {
     case "string":
     case "textarea":
@@ -12030,6 +12041,51 @@ function hp(o, t) {
     borderBottom: `1px solid ${n.divider}`,
   });
   i.appendChild(l);
+  let compareMode = "perm"; // "perm" | "user"
+  const modeSwitchWrap = rt("div", {
+    display: "inline-flex",
+    background: e ? "#1e293b" : "#e2e8f0",
+    borderRadius: "8px",
+    padding: "3px",
+    gap: "3px",
+    marginRight: "4px",
+  });
+  const permModeBtn = rt(
+    "button",
+    {
+      background: n.accent,
+      color: "#fff",
+      border: "none",
+      borderRadius: "6px",
+      padding: "5px 12px",
+      fontSize: "12px",
+      fontWeight: "700",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      transition: "all 0.15s ease",
+    },
+    "🔐 Profiles & Perm Sets",
+  );
+  const userModeBtn = rt(
+    "button",
+    {
+      background: "transparent",
+      color: n.muted,
+      border: "none",
+      borderRadius: "6px",
+      padding: "5px 12px",
+      fontSize: "12px",
+      fontWeight: "500",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      transition: "all 0.15s ease",
+    },
+    "👤 Users",
+  );
+  modeSwitchWrap.appendChild(permModeBtn);
+  modeSwitchWrap.appendChild(userModeBtn);
+  l.appendChild(modeSwitchWrap);
+
   const d = () =>
       rt("select", {
         flex: "1",
@@ -12087,14 +12143,23 @@ function hp(o, t) {
   });
   i.appendChild(E);
   let u = "objects";
-  const tabs = [
+  const permTabs = [
     { id: "system", label: "🛡️ System" },
     { id: "objects", label: "📦 Objects" },
     { id: "fields", label: "🔑 FLS" },
     { id: "apex", label: "☕ Apex" },
     { id: "vf", label: "📄 VF Pages" },
     { id: "custom", label: "🔑 Custom" },
-    { id: "dependency", label: "📊 Dependency" }
+    { id: "dependency", label: "📊 Dependency" },
+  ];
+  const userTabs = [
+    { id: "assigned", label: "📋 Assigned Sets" },
+    { id: "objects", label: "📦 Objects" },
+    { id: "fields", label: "🔑 FLS" },
+    { id: "system", label: "🛡️ System" },
+    { id: "apex", label: "☕ Apex" },
+    { id: "vf", label: "📄 VF Pages" },
+    { id: "custom", label: "🔑 Custom" },
   ];
   const b = rt("div", {
       display: "inline-flex",
@@ -12102,28 +12167,8 @@ function hp(o, t) {
       borderRadius: "8px",
       overflow: "hidden",
       flexWrap: "wrap",
-    }),
-    N = {};
-  tabs.forEach(({ id: P, label: lbl }) => {
-    const ee = rt(
-      "button",
-      {
-        background: "transparent",
-        border: "none",
-        padding: "6px 14px",
-        cursor: "pointer",
-        fontSize: "12.5px",
-        fontFamily: "inherit",
-        color: n.muted,
-      },
-      lbl,
-    );
-    (ee.addEventListener("click", () => {
-      ((u = P), F(), te());
-    }),
-      (N[P] = ee),
-      b.appendChild(ee));
-  });
+    });
+  let N = {};
   const F = () =>
     Object.entries(N).forEach(([P, ee]) =>
       Object.assign(ee.style, {
@@ -12132,7 +12177,40 @@ function hp(o, t) {
         fontWeight: u === P ? "700" : "500",
       }),
     );
+  const renderTabs = () => {
+    b.innerHTML = "";
+    N = {};
+    const curTabs = compareMode === "user" ? userTabs : permTabs;
+    if (!curTabs.some((t) => t.id === u)) {
+      u = compareMode === "user" ? "assigned" : "objects";
+    }
+    curTabs.forEach(({ id: P, label: lbl }) => {
+      const ee = rt(
+        "button",
+        {
+          background: "transparent",
+          border: "none",
+          padding: "6px 14px",
+          cursor: "pointer",
+          fontSize: "12.5px",
+          fontFamily: "inherit",
+          color: n.muted,
+        },
+        lbl,
+      );
+      ee.addEventListener("click", () => {
+        u = P;
+        F();
+        te();
+      });
+      N[P] = ee;
+      b.appendChild(ee);
+    });
+    F();
+  };
+  renderTabs();
   E.appendChild(b);
+
   const k = rt("label", {
     display: "none",
     alignItems: "center",
@@ -12193,6 +12271,48 @@ function hp(o, t) {
     color: n.muted,
   });
   E.appendChild($);
+
+  const exportBtn = rt(
+    "button",
+    {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "5px",
+      background: n.panel,
+      border: `1px solid ${n.border}`,
+      borderRadius: "6px",
+      padding: "4px 10px",
+      fontSize: "12px",
+      fontWeight: "700",
+      color: n.text,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      marginLeft: "6px",
+    },
+    "📥 Export Tab CSV",
+  );
+  const exportFullBtn = rt(
+    "button",
+    {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "5px",
+      background: n.accent,
+      border: "none",
+      borderRadius: "6px",
+      padding: "4px 10px",
+      fontSize: "12px",
+      fontWeight: "700",
+      color: "#fff",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      marginLeft: "4px",
+    },
+    "⚡ Full Diff Audit CSV",
+  );
+  E.appendChild(exportBtn);
+  E.appendChild(exportFullBtn);
+
   const V = rt("div", {
     padding: "8px 24px",
     fontSize: "11.5px",
@@ -12222,48 +12342,158 @@ function hp(o, t) {
           .map(([ee, G]) => C(ee, G))
           .join(" &nbsp;·&nbsp; ");
         V.innerHTML = `Access: ${P}<br><span style="color:${n.grant}">■</span> granted &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
+      } else if (u === "assigned") {
+        V.innerHTML = `User Assignments:<br><span style="color:${n.grant}">■</span> assigned &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not assigned &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
       } else {
         V.innerHTML = `Access / Assignment:<br><span style="color:${n.grant}">■</span> granted / assigned &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted / assigned &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
       }
     },
     se = rt("div", { flex: "1", minHeight: "0", overflow: "auto" });
   i.appendChild(se);
+
   let De = [],
-    Be = null;
-  const be = (P) => De.find((ee) => ee.id === P)?.label || P,
-    ge = (P) => {
-      ((se.innerHTML = ""),
-        se.appendChild(
-          rt("div", { padding: "24px", color: n.muted, fontSize: "13px" }, P),
-        ));
+    userList = [],
+    Be = null,
+    userPermsCache = null,
+    cachedSystemFields = null,
+    currentExportData = null;
+
+  const permSetLabelMap = new Map();
+
+  function sanitizeFilename(name) {
+    return String(name || "comparison").replace(/[^a-zA-Z0-9_\-]/g, "_");
+  }
+
+  function downloadCSV(filename, headers, rows) {
+    const escapeVal = (val) => {
+      if (val == null) return '""';
+      const s = String(val).replace(/"/g, '""');
+      return `"${s}"`;
     };
-  (ge("Loading permission sets & profiles…"),
-    t
-      .runQuery(
-        "SELECT Id, Label, Name, IsOwnedByProfile, Profile.Name, Type FROM PermissionSet ORDER BY IsOwnedByProfile DESC, Label LIMIT 2000",
-      )
-      .then(({ records: P, error: ee }) => {
-        if (ee) {
-          ge("Could not load permission sets: " + ee);
-          return;
-        }
-        ((De = P.map((G) => ({
-          id: G.Id,
-          isProfile: !!G.IsOwnedByProfile,
-          isGroup: G.Type === "Group",
-          label: G.IsOwnedByProfile
-            ? `Profile: ${G.Profile?.Name || G.Label}`
-            : G.Type === "Group"
-              ? `Group: ${G.Label || G.Name}`
-              : G.Label || G.Name,
-        })).sort((G, T) => G.label.localeCompare(T.label))),
-          ue(y),
-          ue(g),
-          (y.selectedIndex = 0),
-          (g.selectedIndex = 0),
-          F(),
-          te());
-      }));
+    let csv = "\uFEFF" + headers.map(escapeVal).join(",") + "\r\n";
+    rows.forEach((row) => {
+      csv += row.map(escapeVal).join(",") + "\r\n";
+    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
+
+  function getGrantSources(parentIds) {
+    if (!parentIds) return "None";
+    const arr = parentIds instanceof Set ? Array.from(parentIds) : Array.isArray(parentIds) ? parentIds : [parentIds];
+    if (arr.length === 0) return "None";
+    const labels = arr.map((id) => permSetLabelMap.get(id) || id);
+    return Array.from(new Set(labels)).join("; ");
+  }
+
+  exportBtn.addEventListener("click", () => {
+    if (!currentExportData || !currentExportData.rows || currentExportData.rows.length === 0) {
+      if (t.flashToast) t.flashToast("No data currently available to export.");
+      else alert("No data currently available to export.");
+      return;
+    }
+    downloadCSV(currentExportData.filename, currentExportData.headers, currentExportData.rows);
+    if (t.flashToast) t.flashToast(`Exported ${currentExportData.rows.length} rows to CSV!`);
+  });
+
+  exportFullBtn.addEventListener("click", () => {
+    exportFullDiffReport();
+  });
+
+  const be = (P) => {
+    if (compareMode === "user") {
+      const uObj = userList.find((usr) => usr.id === P);
+      return uObj ? `${uObj.name}` : P;
+    }
+    return De.find((ee) => ee.id === P)?.label || P;
+  };
+
+  const ge = (P) => {
+    ((se.innerHTML = ""),
+      se.appendChild(
+        rt("div", { padding: "24px", color: n.muted, fontSize: "13px" }, P),
+      ));
+  };
+
+  ge("Loading permission sets & profiles…");
+  t.runQuery(
+    "SELECT Id, Label, Name, IsOwnedByProfile, Profile.Name, Type FROM PermissionSet ORDER BY IsOwnedByProfile DESC, Label LIMIT 2000",
+  ).then(({ records: P, error: ee }) => {
+    if (ee) {
+      ge("Could not load permission sets: " + ee);
+      return;
+    }
+    De = (P || []).map((G) => {
+      const lbl = G.IsOwnedByProfile
+        ? `Profile: ${G.Profile?.Name || G.Label}`
+        : G.Type === "Group"
+          ? `Group: ${G.Label || G.Name}`
+          : G.Label || G.Name;
+      permSetLabelMap.set(G.Id, lbl);
+      return {
+        id: G.Id,
+        isProfile: !!G.IsOwnedByProfile,
+        isGroup: G.Type === "Group",
+        label: lbl,
+      };
+    }).sort((G, T) => G.label.localeCompare(T.label));
+    populateDropdowns();
+    F();
+    te();
+  });
+
+  async function loadUsers() {
+    if (userList.length > 0) return userList;
+    ge("Loading active users…");
+    const { records: P, error: ee } = await t.runQuery(
+      "SELECT Id, Name, Username FROM User WHERE IsActive = true ORDER BY Name LIMIT 2000",
+    );
+    if (ee) {
+      ge("Could not load users: " + ee);
+      return [];
+    }
+    userList = (P || []).map((G) => ({
+      id: G.Id,
+      name: G.Name,
+      username: G.Username,
+      label: `${G.Name} (${G.Username})`,
+    }));
+    return userList;
+  }
+
+  function populateDropdowns() {
+    if (compareMode === "user") {
+      const fillSel = (sel) => {
+        sel.innerHTML = "";
+        const emptyOpt = rt("option");
+        emptyOpt.value = "";
+        emptyOpt.textContent = "— select a user —";
+        sel.appendChild(emptyOpt);
+        userList.forEach((usr) => {
+          const opt = rt("option");
+          opt.value = usr.id;
+          opt.textContent = usr.label;
+          sel.appendChild(opt);
+        });
+      };
+      fillSel(y);
+      fillSel(g);
+      y.selectedIndex = 0;
+      g.selectedIndex = 0;
+    } else {
+      ue(y);
+      ue(g);
+      y.selectedIndex = 0;
+      g.selectedIndex = 0;
+    }
+  }
+
   function ue(P) {
     P.innerHTML = "";
     const ee = rt("option");
@@ -12287,12 +12517,65 @@ function hp(o, t) {
      w("Permission Sets", T, ""),
      w("Permission Set Groups", psgs, /^Group:\s*/));
   }
+
+  const updateModeUI = async () => {
+    if (compareMode === "perm") {
+      permModeBtn.style.background = n.accent;
+      permModeBtn.style.color = "#fff";
+      permModeBtn.style.fontWeight = "700";
+      userModeBtn.style.background = "transparent";
+      userModeBtn.style.color = n.muted;
+      userModeBtn.style.fontWeight = "500";
+      populateDropdowns();
+      renderTabs();
+      Be = null;
+      userPermsCache = null;
+      currentExportData = null;
+      te();
+    } else {
+      userModeBtn.style.background = n.accent;
+      userModeBtn.style.color = "#fff";
+      userModeBtn.style.fontWeight = "700";
+      permModeBtn.style.background = "transparent";
+      permModeBtn.style.color = n.muted;
+      permModeBtn.style.fontWeight = "500";
+      if (userList.length === 0) {
+        await loadUsers();
+      }
+      populateDropdowns();
+      renderTabs();
+      Be = null;
+      userPermsCache = null;
+      currentExportData = null;
+      te();
+    }
+  };
+
+  permModeBtn.addEventListener("click", () => {
+    if (compareMode === "perm") return;
+    compareMode = "perm";
+    updateModeUI();
+  });
+
+  userModeBtn.addEventListener("click", () => {
+    if (compareMode === "user") return;
+    compareMode = "user";
+    updateModeUI();
+  });
+
   (y.addEventListener("change", () => {
-    ((Be = null), te());
+    Be = null;
+    userPermsCache = null;
+    currentExportData = null;
+    te();
   }),
     g.addEventListener("change", () => {
-      ((Be = null), te());
+      Be = null;
+      userPermsCache = null;
+      currentExportData = null;
+      te();
     }));
+
   const Me = (P, ee) => go.every(([, G]) => !!P?.[G] == !!ee?.[G]),
     ye = (P, ee) => {
       const G = rt("div", {
@@ -12332,7 +12615,213 @@ function hp(o, t) {
     return span;
   };
 
-  let cachedSystemFields = null;
+  async function loadUserAssignments(P, ee) {
+    ge("Loading user permissions & assignments…");
+    const { records: assignRecs, error: assignErr } = await t.runQuery(
+      `SELECT Id, AssigneeId, Assignee.Name, Assignee.Username, PermissionSetId, PermissionSet.Label, PermissionSet.Name, PermissionSet.IsOwnedByProfile, PermissionSet.ProfileId, PermissionSet.Profile.Name, PermissionSetGroupId, PermissionSetGroup.DeveloperName, PermissionSetGroup.MasterLabel FROM PermissionSetAssignment WHERE AssigneeId IN ('${P}', '${ee}')`
+    );
+    if (assignErr) {
+      ge("Could not load user assignments: " + assignErr);
+      return false;
+    }
+    assignRecs.forEach((r) => {
+      if (r.PermissionSetId) {
+        const lbl = r.PermissionSet.IsOwnedByProfile
+          ? (r.PermissionSet.Profile?.Name ? `Profile: ${r.PermissionSet.Profile.Name}` : r.PermissionSet.Label)
+          : (r.PermissionSet.Label || r.PermissionSet.Name);
+        permSetLabelMap.set(r.PermissionSetId, lbl);
+      }
+    });
+
+    const extractUserBundle = (assigneeId) => {
+      const userRecs = (assignRecs || []).filter((r) => r.AssigneeId === assigneeId);
+      const profileRec = userRecs.find((r) => r.PermissionSet?.IsOwnedByProfile);
+      const profileName = profileRec?.PermissionSet?.Profile?.Name || profileRec?.PermissionSet?.Label || "Standard User";
+      const psgMap = new Map();
+      userRecs.forEach((r) => {
+        if (r.PermissionSetGroupId && r.PermissionSetGroup) {
+          psgMap.set(r.PermissionSetGroupId, {
+            id: r.PermissionSetGroupId,
+            label: r.PermissionSetGroup.MasterLabel || r.PermissionSetGroup.DeveloperName,
+            name: r.PermissionSetGroup.DeveloperName,
+          });
+        }
+      });
+      const directPermSets = new Map();
+      userRecs.forEach((r) => {
+        if (!r.PermissionSet?.IsOwnedByProfile && !r.PermissionSetGroupId && r.PermissionSetId) {
+          directPermSets.set(r.PermissionSetId, {
+            id: r.PermissionSetId,
+            label: r.PermissionSet?.Label || r.PermissionSet?.Name,
+            name: r.PermissionSet?.Name,
+          });
+        }
+      });
+      const allPermSetIds = Array.from(new Set(userRecs.map((r) => r.PermissionSetId).filter(Boolean)));
+      return {
+        profileName,
+        psgs: Array.from(psgMap.values()),
+        directPermSets: Array.from(directPermSets.values()),
+        allPermSetIds,
+      };
+    };
+    userPermsCache = { key: `${P}|${ee}`, a: extractUserBundle(P), b: extractUserBundle(ee) };
+    return true;
+  }
+
+  async function compareAssignedSets(P, ee) {
+    if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+      const loaded = await loadUserAssignments(P, ee);
+      if (!loaded) return;
+    }
+    const { a: uA, b: uB } = userPermsCache;
+
+    const container = rt("div", { padding: "16px", display: "flex", flexDirection: "column", gap: "24px" });
+
+    // 1. Profile Section
+    const profTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginBottom: "8px", color: n.text }, "Profile");
+    container.appendChild(profTitle);
+
+    const profTable = M(["User Attribute", be(P), be(ee)]);
+    const profTbody = profTable.querySelector("tbody");
+    const profDiffers = uA.profileName !== uB.profileName;
+    if (!U || profDiffers) {
+      const tr = rt("tr", { background: profDiffers ? n.diff : "" });
+      tr.appendChild(rt("td", K(), "Assigned Profile"));
+      tr.appendChild(rt("td", j(), uA.profileName));
+      tr.appendChild(rt("td", j(), uB.profileName));
+      profTbody.appendChild(tr);
+      container.appendChild(profTable);
+    } else {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "Profiles are identical."));
+    }
+
+    // 2. Permission Set Groups Section
+    const allPsgs = new Map();
+    uA.psgs.forEach((g) => allPsgs.set(g.id, g));
+    uB.psgs.forEach((g) => allPsgs.set(g.id, g));
+    const setPsgA = new Set(uA.psgs.map((g) => g.id));
+    const setPsgB = new Set(uB.psgs.map((g) => g.id));
+
+    let sortedPsgIds = Array.from(allPsgs.keys()).sort((id1, id2) =>
+      (allPsgs.get(id1).label || "").localeCompare(allPsgs.get(id2).label || "")
+    );
+    if (x) {
+      sortedPsgIds = sortedPsgIds.filter((id) => {
+        const g = allPsgs.get(id);
+        return `${g.label} ${g.name}`.toLowerCase().includes(x);
+      });
+    }
+    if (U) {
+      sortedPsgIds = sortedPsgIds.filter((id) => setPsgA.has(id) !== setPsgB.has(id));
+    }
+
+    const psgTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginTop: "12px", marginBottom: "8px", color: n.text }, "Permission Set Groups");
+    container.appendChild(psgTitle);
+
+    if (sortedPsgIds.length === 0) {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "No Permission Set Groups match."));
+    } else {
+      const psgTable = M(["Permission Set Group", be(P), be(ee)]);
+      const psgTbody = psgTable.querySelector("tbody");
+      sortedPsgIds.forEach((id, idx) => {
+        const g = allPsgs.get(id);
+        const valA = setPsgA.has(id);
+        const valB = setPsgB.has(id);
+        const differs = valA !== valB;
+        const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+        tr.appendChild(rt("td", K(), `${g.label} (${g.name})`));
+        const tdA = rt("td", j());
+        tdA.appendChild(renderStatus(valA));
+        tr.appendChild(tdA);
+        const tdB = rt("td", j());
+        tdB.appendChild(renderStatus(valB));
+        tr.appendChild(tdB);
+        psgTbody.appendChild(tr);
+      });
+      container.appendChild(psgTable);
+    }
+
+    // 3. Directly Assigned Permission Sets
+    const allPerms = new Map();
+    uA.directPermSets.forEach((ps) => allPerms.set(ps.id, ps));
+    uB.directPermSets.forEach((ps) => allPerms.set(ps.id, ps));
+    const setPermA = new Set(uA.directPermSets.map((ps) => ps.id));
+    const setPermB = new Set(uB.directPermSets.map((ps) => ps.id));
+
+    let sortedPermIds = Array.from(allPerms.keys()).sort((id1, id2) =>
+      (allPerms.get(id1).label || "").localeCompare(allPerms.get(id2).label || "")
+    );
+    if (x) {
+      sortedPermIds = sortedPermIds.filter((id) => {
+        const ps = allPerms.get(id);
+        return `${ps.label} ${ps.name}`.toLowerCase().includes(x);
+      });
+    }
+    if (U) {
+      sortedPermIds = sortedPermIds.filter((id) => setPermA.has(id) !== setPermB.has(id));
+    }
+
+    const permTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginTop: "12px", marginBottom: "8px", color: n.text }, "Direct Permission Sets");
+    container.appendChild(permTitle);
+
+    if (sortedPermIds.length === 0) {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "No Direct Permission Sets match."));
+    } else {
+      const permTable = M(["Permission Set", be(P), be(ee)]);
+      const permTbody = permTable.querySelector("tbody");
+      sortedPermIds.forEach((id, idx) => {
+        const ps = allPerms.get(id);
+        const valA = setPermA.has(id);
+        const valB = setPermB.has(id);
+        const differs = valA !== valB;
+        const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+        tr.appendChild(rt("td", K(), `${ps.label} (${ps.name})`));
+        const tdA = rt("td", j());
+        tdA.appendChild(renderStatus(valA));
+        tr.appendChild(tdA);
+        const tdB = rt("td", j());
+        tdB.appendChild(renderStatus(valB));
+        tr.appendChild(tdB);
+        permTbody.appendChild(tr);
+      });
+      container.appendChild(permTable);
+    }
+
+    const exportHeaders = [
+      "Category",
+      "Item / Group / Profile",
+      `Assigned in ${be(P)}`,
+      `Assigned in ${be(ee)}`,
+      "Differs?",
+    ];
+    const exportRows = [];
+    if (!U || profDiffers) {
+      exportRows.push(["Profile", "Assigned Profile", uA.profileName, uB.profileName, profDiffers ? "YES" : "NO"]);
+    }
+    sortedPsgIds.forEach((id) => {
+      const g = allPsgs.get(id);
+      const valA = setPsgA.has(id);
+      const valB = setPsgB.has(id);
+      exportRows.push(["Permission Set Group", `${g.label} (${g.name})`, valA ? "Assigned" : "Not Assigned", valB ? "Assigned" : "Not Assigned", valA !== valB ? "YES" : "NO"]);
+    });
+    sortedPermIds.forEach((id) => {
+      const ps = allPerms.get(id);
+      const valA = setPermA.has(id);
+      const valB = setPermB.has(id);
+      exportRows.push(["Direct Permission Set", `${ps.label} (${ps.name})`, valA ? "Assigned" : "Not Assigned", valB ? "Assigned" : "Not Assigned", valA !== valB ? "YES" : "NO"]);
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_assigned_sets.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+
+    $.textContent = `${sortedPsgIds.length} group${sortedPsgIds.length === 1 ? "" : "s"}, ${sortedPermIds.length} perm set${sortedPermIds.length === 1 ? "" : "s"}`;
+    se.innerHTML = "";
+    se.appendChild(container);
+  }
+
   async function compareSystemPerms(P, ee) {
     if (!cachedSystemFields) {
       ge("Describing System Permissions...");
@@ -12349,7 +12838,7 @@ function hp(o, t) {
             instanceUrl: creds.instanceUrl,
             sessionId: creds.sessionId,
           },
-          (res) => resolve(res)
+          (res) => resolve(res),
         );
       });
       if (!fieldsRes || !fieldsRes.success || !fieldsRes.data) {
@@ -12357,27 +12846,68 @@ function hp(o, t) {
         return;
       }
       cachedSystemFields = fieldsRes.data
-        .map(f => f.name)
-        .filter(name => name.startsWith("Permissions"))
+        .map((f) => f.name)
+        .filter((name) => name.startsWith("Permissions"))
         .sort();
     }
 
-    ge("Loading System Permissions...");
-    const fieldsToQuery = cachedSystemFields.join(", ");
-    const { records: permSets, error: queryErr } = await t.runQuery(
-      `SELECT Id, ${fieldsToQuery} FROM PermissionSet WHERE Id IN ('${P}', '${ee}')`
-    );
-    if (queryErr) {
-      ge("Could not load system permissions data: " + queryErr);
+    ge(compareMode === "user" ? "Loading effective system permissions for users..." : "Loading System Permissions...");
+    let idsA = [P];
+    let idsB = [ee];
+    if (compareMode === "user") {
+      if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+        const loaded = await loadUserAssignments(P, ee);
+        if (!loaded) return;
+      }
+      idsA = userPermsCache.a.allPermSetIds;
+      idsB = userPermsCache.b.allPermSetIds;
+    }
+    const allIds = Array.from(new Set([...idsA, ...idsB]));
+    if (allIds.length === 0) {
+      ge("No permission sets found to compare.");
       return;
     }
+    const fieldsToQuery = cachedSystemFields.join(", ");
+    const idChunks = [];
+    for (let idx = 0; idx < allIds.length; idx += 200) {
+      idChunks.push(allIds.slice(idx, idx + 200));
+    }
+    let permSets = [];
+    for (const chunk of idChunks) {
+      const inList = chunk.map((id) => `'${id}'`).join(", ");
+      const { records: recs, error: queryErr } = await t.runQuery(
+        `SELECT Id, ${fieldsToQuery} FROM PermissionSet WHERE Id IN (${inList})`,
+      );
+      if (queryErr) {
+        ge("Could not load system permissions data: " + queryErr);
+        return;
+      }
+      permSets.push(...(recs || []));
+    }
 
-    const mapA = permSets.find(r => r.Id === P) || {};
-    const mapB = permSets.find(r => r.Id === ee) || {};
+    const setIdsA = new Set(idsA);
+    const setIdsB = new Set(idsB);
 
-    let filtered = cachedSystemFields.filter(f => !x || f.toLowerCase().includes(x));
+    const mapA = {};
+    const mapB = {};
+    const srcA = new Map(), srcB = new Map();
+    cachedSystemFields.forEach((f) => {
+      const grantA = new Set(), grantB = new Set();
+      permSets.forEach((r) => {
+        if (!!r[f]) {
+          if (setIdsA.has(r.Id)) grantA.add(r.Id);
+          if (setIdsB.has(r.Id)) grantB.add(r.Id);
+        }
+      });
+      if (grantA.size > 0) srcA.set(f, grantA);
+      if (grantB.size > 0) srcB.set(f, grantB);
+      mapA[f] = grantA.size > 0;
+      mapB[f] = grantB.size > 0;
+    });
+
+    let filtered = cachedSystemFields.filter((f) => !x || f.toLowerCase().includes(x));
     if (U) {
-      filtered = filtered.filter(f => !mapA[f] !== !mapB[f]);
+      filtered = filtered.filter((f) => !mapA[f] !== !mapB[f]);
     }
 
     $.textContent = `${filtered.length} permission${filtered.length === 1 ? "" : "s"}`;
@@ -12405,46 +12935,108 @@ function hp(o, t) {
       tbody.appendChild(tr);
     });
 
+    const exportHeaders = [
+      "System Permission",
+      `Enabled in ${be(P)}`,
+      `Enabled in ${be(ee)}`,
+      "Differs?",
+      `Where Granted in ${be(P)}`,
+      `Where Granted in ${be(ee)}`,
+    ];
+    const exportRows = filtered.map((f) => {
+      const valA = !!mapA[f];
+      const valB = !!mapB[f];
+      const differs = valA !== valB;
+      return [
+        f.replace(/^Permissions/, ""),
+        valA ? "TRUE" : "FALSE",
+        valB ? "TRUE" : "FALSE",
+        differs ? "YES" : "NO",
+        getGrantSources(srcA.get(f)),
+        getGrantSources(srcB.get(f)),
+      ];
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_system_permissions.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+
     q(table, filtered.length, "No system permissions match.");
   }
 
   async function compareSetupEntity(P, ee, type, sobjectName, labelSingular) {
-    ge(`Loading ${labelSingular} access...`);
-    const { records: accessRecs, error: err } = await t.runQuery(
-      `SELECT ParentId, SetupEntityId FROM SetupEntityAccess WHERE ParentId IN ('${P}', '${ee}') AND SetupEntityType = '${type}' LIMIT 5000`
-    );
-    if (err) {
-      ge(`Could not load ${labelSingular} access: ` + err);
+    ge(compareMode === "user" ? `Loading effective ${labelSingular} access for users...` : `Loading ${labelSingular} access...`);
+    let idsA = [P];
+    let idsB = [ee];
+    if (compareMode === "user") {
+      if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+        const loaded = await loadUserAssignments(P, ee);
+        if (!loaded) return;
+      }
+      idsA = userPermsCache.a.allPermSetIds;
+      idsB = userPermsCache.b.allPermSetIds;
+    }
+    const allIds = Array.from(new Set([...idsA, ...idsB]));
+    if (allIds.length === 0) {
+      ge("No permission sets found to compare.");
       return;
     }
+    const idChunks = [];
+    for (let idx = 0; idx < allIds.length; idx += 400) {
+      idChunks.push(allIds.slice(idx, idx + 400));
+    }
+    let accessRecs = [];
+    for (const chunk of idChunks) {
+      const inList = chunk.map((id) => `'${id}'`).join(", ");
+      const { records: recs, error: err } = await t.runQuery(
+        `SELECT ParentId, SetupEntityId FROM SetupEntityAccess WHERE ParentId IN (${inList}) AND SetupEntityType = '${type}' LIMIT 5000`,
+      );
+      if (err) {
+        ge(`Could not load ${labelSingular} access: ` + err);
+        return;
+      }
+      accessRecs.push(...(recs || []));
+    }
 
+    const setIdsA = new Set(idsA);
+    const setIdsB = new Set(idsB);
     const setA = new Set();
     const setB = new Set();
-    accessRecs.forEach(r => {
-      if (r.ParentId === P) setA.add(r.SetupEntityId);
-      if (r.ParentId === ee) setB.add(r.SetupEntityId);
+    const srcA = new Map(), srcB = new Map();
+    accessRecs.forEach((r) => {
+      if (setIdsA.has(r.ParentId)) {
+        setA.add(r.SetupEntityId);
+        if (!srcA.has(r.SetupEntityId)) srcA.set(r.SetupEntityId, new Set());
+        srcA.get(r.SetupEntityId).add(r.ParentId);
+      }
+      if (setIdsB.has(r.ParentId)) {
+        setB.add(r.SetupEntityId);
+        if (!srcB.has(r.SetupEntityId)) srcB.set(r.SetupEntityId, new Set());
+        srcB.get(r.SetupEntityId).add(r.ParentId);
+      }
     });
 
-    const allIds = Array.from(new Set([...setA, ...setB]));
+    const allEntityIds = Array.from(new Set([...setA, ...setB]));
     let itemsMap = new Map();
 
-    if (allIds.length > 0) {
-      const idChunks = [];
-      for (let idx = 0; idx < allIds.length; idx += 500) {
-        idChunks.push(allIds.slice(idx, idx + 500));
+    if (allEntityIds.length > 0) {
+      const entityIdChunks = [];
+      for (let idx = 0; idx < allEntityIds.length; idx += 500) {
+        entityIdChunks.push(allEntityIds.slice(idx, idx + 500));
       }
 
-      for (const chunk of idChunks) {
-        const idList = chunk.map(id => `'${id}'`).join(", ");
+      for (const chunk of entityIdChunks) {
+        const idList = chunk.map((id) => `'${id}'`).join(", ");
         const fields = sobjectName === "CustomPermission" ? "Id, DeveloperName, NamespacePrefix" : "Id, Name";
         const { records: items, error: itemErr } = await t.runQuery(
-          `SELECT ${fields} FROM ${sobjectName} WHERE Id IN (${idList})`
+          `SELECT ${fields} FROM ${sobjectName} WHERE Id IN (${idList})`,
         );
         if (itemErr) {
           ge(`Could not load ${labelSingular} names: ` + itemErr);
           return;
         }
-        items.forEach(item => {
+        items.forEach((item) => {
           let name = item.Name;
           if (sobjectName === "CustomPermission") {
             name = item.NamespacePrefix ? `${item.NamespacePrefix}.${item.DeveloperName}` : item.DeveloperName;
@@ -12455,16 +13047,16 @@ function hp(o, t) {
     }
 
     let sortedIds = Array.from(itemsMap.keys()).sort((id1, id2) =>
-      (itemsMap.get(id1) || "").localeCompare(itemsMap.get(id2) || "")
+      (itemsMap.get(id1) || "").localeCompare(itemsMap.get(id2) || ""),
     );
 
-    let filteredIds = sortedIds.filter(id => {
+    let filteredIds = sortedIds.filter((id) => {
       const name = itemsMap.get(id) || "";
       return !x || name.toLowerCase().includes(x);
     });
 
     if (U) {
-      filteredIds = filteredIds.filter(id => setA.has(id) !== setB.has(id));
+      filteredIds = filteredIds.filter((id) => setA.has(id) !== setB.has(id));
     }
 
     $.textContent = `${filteredIds.length} ${labelSingular}${filteredIds.length === 1 ? "" : "s"}`;
@@ -12491,6 +13083,33 @@ function hp(o, t) {
       tbody.appendChild(tr);
     });
 
+    const exportHeaders = [
+      sobjectName === "CustomPermission" ? "Custom Permission" : sobjectName === "ApexClass" ? "Apex Class" : "Visualforce Page",
+      `Access in ${be(P)}`,
+      `Access in ${be(ee)}`,
+      "Differs?",
+      `Where Granted in ${be(P)}`,
+      `Where Granted in ${be(ee)}`,
+    ];
+    const exportRows = filteredIds.map((id) => {
+      const valA = setA.has(id);
+      const valB = setB.has(id);
+      const differs = valA !== valB;
+      return [
+        itemsMap.get(id) || id,
+        valA ? "TRUE" : "FALSE",
+        valB ? "TRUE" : "FALSE",
+        differs ? "YES" : "NO",
+        getGrantSources(srcA.get(id)),
+        getGrantSources(srcB.get(id)),
+      ];
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_${labelSingular}.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+
     q(table, filteredIds.length, `No ${labelSingular}s match.`);
   }
 
@@ -12499,7 +13118,7 @@ function hp(o, t) {
 
     const [{ records: psgs, error: psgErr }, { records: assignments, error: assignErr }] = await Promise.all([
       t.runQuery(`SELECT PermissionSetGroupId, PermissionSetGroup.DeveloperName, PermissionSetGroup.MasterLabel, PermissionSetId FROM PermissionSetGroupComponent WHERE PermissionSetId IN ('${P}', '${ee}') LIMIT 5000`),
-      t.runQuery(`SELECT AssigneeId, Assignee.Name, Assignee.Username, PermissionSetId FROM PermissionSetAssignment WHERE PermissionSetId IN ('${P}', '${ee}') AND Assignee.IsActive = true LIMIT 1000`)
+      t.runQuery(`SELECT AssigneeId, Assignee.Name, Assignee.Username, PermissionSetId FROM PermissionSetAssignment WHERE PermissionSetId IN ('${P}', '${ee}') AND Assignee.IsActive = true LIMIT 1000`),
     ]);
 
     if (psgErr || assignErr) {
@@ -12510,11 +13129,11 @@ function hp(o, t) {
     const psgMap = new Map();
     const psgSetA = new Set();
     const psgSetB = new Set();
-    psgs.forEach(r => {
+    psgs.forEach((r) => {
       if (r.PermissionSetGroup) {
         psgMap.set(r.PermissionSetGroupId, {
           name: r.PermissionSetGroup.DeveloperName,
-          label: r.PermissionSetGroup.MasterLabel
+          label: r.PermissionSetGroup.MasterLabel,
         });
         if (r.PermissionSetId === P) psgSetA.add(r.PermissionSetGroupId);
         if (r.PermissionSetId === ee) psgSetB.add(r.PermissionSetGroupId);
@@ -12524,11 +13143,11 @@ function hp(o, t) {
     const userMap = new Map();
     const userSetA = new Set();
     const userSetB = new Set();
-    assignments.forEach(r => {
+    assignments.forEach((r) => {
       if (r.Assignee) {
         userMap.set(r.AssigneeId, {
           name: r.Assignee.Name,
-          username: r.Assignee.Username
+          username: r.Assignee.Username,
         });
         if (r.PermissionSetId === P) userSetA.add(r.AssigneeId);
         if (r.PermissionSetId === ee) userSetB.add(r.AssigneeId);
@@ -12541,17 +13160,17 @@ function hp(o, t) {
     container.appendChild(psgTitle);
 
     let sortedPsgIds = Array.from(psgMap.keys()).sort((id1, id2) =>
-      (psgMap.get(id1).label || "").localeCompare(psgMap.get(id2).label || "")
+      (psgMap.get(id1).label || "").localeCompare(psgMap.get(id2).label || ""),
     );
 
-    let filteredPsgIds = sortedPsgIds.filter(id => {
+    let filteredPsgIds = sortedPsgIds.filter((id) => {
       const g = psgMap.get(id);
       const searchStr = `${g.label} ${g.name}`.toLowerCase();
       return !x || searchStr.includes(x);
     });
 
     if (U) {
-      filteredPsgIds = filteredPsgIds.filter(id => psgSetA.has(id) !== psgSetB.has(id));
+      filteredPsgIds = filteredPsgIds.filter((id) => psgSetA.has(id) !== setPsgB.has(id));
     }
 
     const psgTable = M(["Group Name (API Name)", be(P), be(ee)]);
@@ -12586,17 +13205,17 @@ function hp(o, t) {
     container.appendChild(userTitle);
 
     let sortedUserIds = Array.from(userMap.keys()).sort((id1, id2) =>
-      (userMap.get(id1).name || "").localeCompare(userMap.get(id2).name || "")
+      (userMap.get(id1).name || "").localeCompare(userMap.get(id2).name || ""),
     );
 
-    let filteredUserIds = sortedUserIds.filter(id => {
+    let filteredUserIds = sortedUserIds.filter((id) => {
       const uInfo = userMap.get(id);
       const searchStr = `${uInfo.name} ${uInfo.username}`.toLowerCase();
       return !x || searchStr.includes(x);
     });
 
     if (U) {
-      filteredUserIds = filteredUserIds.filter(id => userSetA.has(id) !== userSetB.has(id));
+      filteredUserIds = filteredUserIds.filter((id) => userSetA.has(id) !== userSetB.has(id));
     }
 
     const userTable = M(["User Name (Username)", be(P), be(ee)]);
@@ -12627,6 +13246,32 @@ function hp(o, t) {
       container.appendChild(userTable);
     }
 
+    const exportHeaders = [
+      "Category",
+      "Name",
+      `Assigned to ${be(P)}`,
+      `Assigned to ${be(ee)}`,
+      "Differs?",
+    ];
+    const exportRows = [];
+    filteredPsgIds.forEach((id) => {
+      const g = psgMap.get(id);
+      const valA = psgSetA.has(id);
+      const valB = psgSetB.has(id);
+      exportRows.push(["Permission Set Group", `${g.label} (${g.name})`, valA ? "Assigned" : "Not Assigned", valB ? "Assigned" : "Not Assigned", valA !== valB ? "YES" : "NO"]);
+    });
+    filteredUserIds.forEach((id) => {
+      const uInfo = userMap.get(id);
+      const valA = userSetA.has(id);
+      const valB = userSetB.has(id);
+      exportRows.push(["User Assignment", `${uInfo.name} (${uInfo.username})`, valA ? "Assigned" : "Not Assigned", valB ? "Assigned" : "Not Assigned", valA !== valB ? "YES" : "NO"]);
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_dependencies.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+
     $.textContent = `${filteredPsgIds.length} group${filteredPsgIds.length === 1 ? "" : "s"}, ${filteredUserIds.length} user${filteredUserIds.length === 1 ? "" : "s"}`;
 
     se.innerHTML = "";
@@ -12640,14 +13285,17 @@ function hp(o, t) {
     if (
       ((k.style.display = u === "fields" ? "inline-flex" : "none"), !P || !ee)
     ) {
-      (ge("Select a permission set or profile for both A and B to compare."),
+      (ge(compareMode === "user" ? "Select a user for both A and B to compare." : "Select a permission set or profile for both A and B to compare."),
         ($.textContent = ""));
+      currentExportData = null;
       return;
     }
     if (P === ee) {
       (ge("Pick two different entries to compare."), ($.textContent = ""));
+      currentExportData = null;
       return;
     }
+    if (u === "assigned") return compareAssignedSets(P, ee);
     if (u === "objects") return Le(P, ee);
     if (u === "fields") return z(P, ee);
     if (u === "system") return compareSystemPerms(P, ee);
@@ -12656,23 +13304,81 @@ function hp(o, t) {
     if (u === "custom") return compareSetupEntity(P, ee, "CustomPermission", "CustomPermission", "permission");
     if (u === "dependency") return compareDependencies(P, ee);
   }
+
   async function Le(P, ee) {
-    const G = `${P}|${ee}`;
+    const G = `${compareMode}|${P}|${ee}`;
     if (!Be || Be.key !== G) {
-      ge("Loading object permissions…");
-      const S = go.map(([, fe]) => fe).join(", "),
-        { records: Y, error: Se } = await t.runQuery(
-          `SELECT ParentId, SobjectType, ${S} FROM ObjectPermissions WHERE ParentId IN ('${P}','${ee}') LIMIT 5000`,
-        );
-      if (Se) {
-        ge("Could not load object permissions: " + Se);
+      ge(compareMode === "user" ? "Loading effective object permissions for users…" : "Loading object permissions…");
+      let idsA = [P];
+      let idsB = [ee];
+      if (compareMode === "user") {
+        if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+          const loaded = await loadUserAssignments(P, ee);
+          if (!loaded) return;
+        }
+        idsA = userPermsCache.a.allPermSetIds;
+        idsB = userPermsCache.b.allPermSetIds;
+      }
+      const allIds = Array.from(new Set([...idsA, ...idsB]));
+      if (allIds.length === 0) {
+        ge("No permission sets found to compare.");
         return;
       }
+      const idChunks = [];
+      for (let idx = 0; idx < allIds.length; idx += 400) {
+        idChunks.push(allIds.slice(idx, idx + 400));
+      }
+      const S = go.map(([, fe]) => fe).join(", ");
+      let Y = [];
+      for (const chunk of idChunks) {
+        const inList = chunk.map((id) => `'${id}'`).join(", ");
+        const { records: recs, error: Se } = await t.runQuery(
+          `SELECT ParentId, SobjectType, ${S} FROM ObjectPermissions WHERE ParentId IN (${inList}) LIMIT 5000`,
+        );
+        if (Se) {
+          ge("Could not load object permissions: " + Se);
+          return;
+        }
+        Y.push(...(recs || []));
+      }
+
       const oe = new Map(),
-        we = new Map();
-      Y.forEach((fe) => (fe.ParentId === P ? oe : we).set(fe.SobjectType, fe));
+        we = new Map(),
+        srcA = new Map(),
+        srcB = new Map();
+      const setIdsA = new Set(idsA);
+      const setIdsB = new Set(idsB);
+
+      Y.forEach((fe) => {
+        const obj = fe.SobjectType;
+        const hasAnyPerm = go.some(([, col]) => !!fe[col]);
+        if (setIdsA.has(fe.ParentId)) {
+          const prev = oe.get(obj) || {};
+          const merged = { SobjectType: obj };
+          go.forEach(([, permCol]) => {
+            merged[permCol] = prev[permCol] || !!fe[permCol];
+          });
+          oe.set(obj, merged);
+          if (hasAnyPerm) {
+            if (!srcA.has(obj)) srcA.set(obj, new Set());
+            srcA.get(obj).add(fe.ParentId);
+          }
+        }
+        if (setIdsB.has(fe.ParentId)) {
+          const prev = we.get(obj) || {};
+          const merged = { SobjectType: obj };
+          go.forEach(([, permCol]) => {
+            merged[permCol] = prev[permCol] || !!fe[permCol];
+          });
+          we.set(obj, merged);
+          if (hasAnyPerm) {
+            if (!srcB.has(obj)) srcB.set(obj, new Set());
+            srcB.get(obj).add(fe.ParentId);
+          }
+        }
+      });
       const Te = Array.from(new Set([...oe.keys(), ...we.keys()])).sort();
-      Be = { key: G, a: oe, b: we, objects: Te };
+      Be = { key: G, a: oe, b: we, objects: Te, srcA, srcB };
       const Ve = c.value;
       ((c.innerHTML = ""),
         Te.forEach((fe) => {
@@ -12681,7 +13387,7 @@ function hp(o, t) {
         }),
         Ve && Te.includes(Ve) && (c.value = Ve));
     }
-    const { a: T, b: w, objects: H } = Be;
+    const { a: T, b: w, objects: H, srcA, srcB } = Be;
     let p = H.filter((S) => !x || S.toLowerCase().includes(x));
     (U && (p = p.filter((S) => !Me(T.get(S), w.get(S)))),
       ($.textContent = `${p.length} object${p.length === 1 ? "" : "s"}`));
@@ -12699,7 +13405,54 @@ function hp(o, t) {
       (fe.appendChild(ye(oe, go)), Te.appendChild(fe), Q.appendChild(Te));
     }),
       q(A, p.length, "No objects match."));
+
+    const exportHeaders = [
+      "Object",
+      `Create (${be(P)})`,
+      `Create (${be(ee)})`,
+      `Read (${be(P)})`,
+      `Read (${be(ee)})`,
+      `Edit (${be(P)})`,
+      `Edit (${be(ee)})`,
+      `Delete (${be(P)})`,
+      `Delete (${be(ee)})`,
+      `View All (${be(P)})`,
+      `View All (${be(ee)})`,
+      `Modify All (${be(P)})`,
+      `Modify All (${be(ee)})`,
+      "Differs?",
+      `Where Granted in ${be(P)}`,
+      `Where Granted in ${be(ee)}`,
+    ];
+    const exportRows = p.map((S) => {
+      const Se = T.get(S), oe = w.get(S);
+      const differs = !Me(Se, oe);
+      return [
+        S,
+        Se?.PermissionsCreate ? "TRUE" : "FALSE",
+        oe?.PermissionsCreate ? "TRUE" : "FALSE",
+        Se?.PermissionsRead ? "TRUE" : "FALSE",
+        oe?.PermissionsRead ? "TRUE" : "FALSE",
+        Se?.PermissionsEdit ? "TRUE" : "FALSE",
+        oe?.PermissionsEdit ? "TRUE" : "FALSE",
+        Se?.PermissionsDelete ? "TRUE" : "FALSE",
+        oe?.PermissionsDelete ? "TRUE" : "FALSE",
+        Se?.PermissionsViewAllRecords ? "TRUE" : "FALSE",
+        oe?.PermissionsViewAllRecords ? "TRUE" : "FALSE",
+        Se?.PermissionsModifyAllRecords ? "TRUE" : "FALSE",
+        oe?.PermissionsModifyAllRecords ? "TRUE" : "FALSE",
+        differs ? "YES" : "NO",
+        getGrantSources(srcA?.get(S)),
+        getGrantSources(srcB?.get(S)),
+      ];
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_objects.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
   }
+
   async function z(P, ee) {
     const G = c.value || Be?.objects[0];
     if (!G) {
@@ -12709,17 +13462,74 @@ function hp(o, t) {
         ($.textContent = ""));
       return;
     }
-    ge(`Loading field permissions for ${G}…`);
-    const { records: T, error: w } = await t.runQuery(
-      `SELECT ParentId, Field, PermissionsRead, PermissionsEdit FROM FieldPermissions WHERE SobjectType = '${G}' AND ParentId IN ('${P}','${ee}') LIMIT 5000`,
-    );
-    if (w) {
-      ge("Could not load field permissions: " + w);
+    ge(compareMode === "user" ? `Loading effective field permissions for ${G}…` : `Loading field permissions for ${G}…`);
+    let idsA = [P];
+    let idsB = [ee];
+    if (compareMode === "user") {
+      if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+        const loaded = await loadUserAssignments(P, ee);
+        if (!loaded) return;
+      }
+      idsA = userPermsCache.a.allPermSetIds;
+      idsB = userPermsCache.b.allPermSetIds;
+    }
+    const allIds = Array.from(new Set([...idsA, ...idsB]));
+    if (allIds.length === 0) {
+      ge("No permission sets found to compare.");
       return;
     }
+    const idChunks = [];
+    for (let idx = 0; idx < allIds.length; idx += 400) {
+      idChunks.push(allIds.slice(idx, idx + 400));
+    }
+    let T = [];
+    for (const chunk of idChunks) {
+      const inList = chunk.map((id) => `'${id}'`).join(", ");
+      const { records: recs, error: w } = await t.runQuery(
+        `SELECT ParentId, Field, PermissionsRead, PermissionsEdit FROM FieldPermissions WHERE SobjectType = '${G}' AND ParentId IN (${inList}) LIMIT 5000`,
+      );
+      if (w) {
+        ge("Could not load field permissions: " + w);
+        return;
+      }
+      T.push(...(recs || []));
+    }
+
     const H = new Map(),
-      p = new Map();
-    T.forEach((we) => (we.ParentId === P ? H : p).set(we.Field, we));
+      p = new Map(),
+      srcA = new Map(),
+      srcB = new Map();
+    const setIdsA = new Set(idsA);
+    const setIdsB = new Set(idsB);
+
+    T.forEach((we) => {
+      const fld = we.Field;
+      if (setIdsA.has(we.ParentId)) {
+        const prev = H.get(fld) || {};
+        H.set(fld, {
+          Field: fld,
+          PermissionsRead: prev.PermissionsRead || !!we.PermissionsRead,
+          PermissionsEdit: prev.PermissionsEdit || !!we.PermissionsEdit,
+        });
+        if (we.PermissionsRead || we.PermissionsEdit) {
+          if (!srcA.has(fld)) srcA.set(fld, new Set());
+          srcA.get(fld).add(we.ParentId);
+        }
+      }
+      if (setIdsB.has(we.ParentId)) {
+        const prev = p.get(fld) || {};
+        p.set(fld, {
+          Field: fld,
+          PermissionsRead: prev.PermissionsRead || !!we.PermissionsRead,
+          PermissionsEdit: prev.PermissionsEdit || !!we.PermissionsEdit,
+        });
+        if (we.PermissionsRead || we.PermissionsEdit) {
+          if (!srcB.has(fld)) srcB.set(fld, new Set());
+          srcB.get(fld).add(we.ParentId);
+        }
+      }
+    });
+
     const A = [
         ["R", "PermissionsRead"],
         ["E", "PermissionsEdit"],
@@ -12745,6 +13555,305 @@ function hp(o, t) {
       (de.appendChild(ye(fe, A)), Re.appendChild(de), oe.appendChild(Re));
     }),
       q(Se, S.length, "No fields match."));
+
+    const exportHeaders = [
+      "Object",
+      "Field",
+      `Read (${be(P)})`,
+      `Read (${be(ee)})`,
+      `Edit (${be(P)})`,
+      `Edit (${be(ee)})`,
+      "Differs?",
+      `Where Granted in ${be(P)}`,
+      `Where Granted in ${be(ee)}`,
+    ];
+    const exportRows = S.map((we) => {
+      const Ve = H.get(we), fe = p.get(we);
+      const differs = !Q(Ve, fe);
+      return [
+        G,
+        Y(we),
+        Ve?.PermissionsRead ? "TRUE" : "FALSE",
+        fe?.PermissionsRead ? "TRUE" : "FALSE",
+        Ve?.PermissionsEdit ? "TRUE" : "FALSE",
+        fe?.PermissionsEdit ? "TRUE" : "FALSE",
+        differs ? "YES" : "NO",
+        getGrantSources(srcA.get(we)),
+        getGrantSources(srcB.get(we)),
+      ];
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_${G}_fls.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+  }
+
+  async function exportFullDiffReport() {
+    const P = y.value, ee = g.value;
+    if (!P || !ee || P === ee) {
+      if (t.flashToast) t.flashToast("Please select two different entries first.");
+      else alert("Please select two different entries first.");
+      return;
+    }
+    const nameA = be(P);
+    const nameB = be(ee);
+    const oldBtnText = exportFullBtn.textContent;
+    exportFullBtn.textContent = "⏳ Generating…";
+    exportFullBtn.disabled = true;
+
+    try {
+      let idsA = [P];
+      let idsB = [ee];
+      if (compareMode === "user") {
+        if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+          const loaded = await loadUserAssignments(P, ee);
+          if (!loaded) return;
+        }
+        idsA = userPermsCache.a.allPermSetIds;
+        idsB = userPermsCache.b.allPermSetIds;
+      }
+
+      const allIds = Array.from(new Set([...idsA, ...idsB]));
+      if (allIds.length === 0) {
+        if (t.flashToast) t.flashToast("No permission sets found to compare.");
+        return;
+      }
+      const setIdsA = new Set(idsA);
+      const setIdsB = new Set(idsB);
+
+      const diffRows = [];
+
+      // 1. Assigned Sets / Profile (if user mode)
+      if (compareMode === "user" && userPermsCache) {
+        const { a: uA, b: uB } = userPermsCache;
+        if (uA.profileName !== uB.profileName) {
+          diffRows.push(["Profile", "Assigned Profile", uA.profileName, uB.profileName, uA.profileName, uB.profileName]);
+        }
+        const allPsgs = new Map();
+        uA.psgs.forEach((g) => allPsgs.set(g.id, g));
+        uB.psgs.forEach((g) => allPsgs.set(g.id, g));
+        const setPsgA = new Set(uA.psgs.map((g) => g.id));
+        const setPsgB = new Set(uB.psgs.map((g) => g.id));
+        allPsgs.forEach((g, id) => {
+          if (setPsgA.has(id) !== setPsgB.has(id)) {
+            diffRows.push([
+              "Permission Set Group",
+              `${g.label} (${g.name})`,
+              setPsgA.has(id) ? "Assigned" : "Not Assigned",
+              setPsgB.has(id) ? "Assigned" : "Not Assigned",
+              setPsgA.has(id) ? g.label : "None",
+              setPsgB.has(id) ? g.label : "None",
+            ]);
+          }
+        });
+
+        const allPerms = new Map();
+        uA.directPermSets.forEach((ps) => allPerms.set(ps.id, ps));
+        uB.directPermSets.forEach((ps) => allPerms.set(ps.id, ps));
+        const setPermA = new Set(uA.directPermSets.map((ps) => ps.id));
+        const setPermB = new Set(uB.directPermSets.map((ps) => ps.id));
+        allPerms.forEach((ps, id) => {
+          if (setPermA.has(id) !== setPermB.has(id)) {
+            diffRows.push([
+              "Direct Permission Set",
+              `${ps.label} (${ps.name})`,
+              setPermA.has(id) ? "Assigned" : "Not Assigned",
+              setPermB.has(id) ? "Assigned" : "Not Assigned",
+              setPermA.has(id) ? ps.label : "None",
+              setPermB.has(id) ? ps.label : "None",
+            ]);
+          }
+        });
+      }
+
+      // 2. Object Permissions
+      const idChunks = [];
+      for (let idx = 0; idx < allIds.length; idx += 400) {
+        idChunks.push(allIds.slice(idx, idx + 400));
+      }
+      const S = go.map(([, fe]) => fe).join(", ");
+      let objRecs = [];
+      for (const chunk of idChunks) {
+        const inList = chunk.map((id) => `'${id}'`).join(", ");
+        const { records: recs } = await t.runQuery(
+          `SELECT ParentId, SobjectType, ${S} FROM ObjectPermissions WHERE ParentId IN (${inList}) LIMIT 5000`,
+        );
+        objRecs.push(...(recs || []));
+      }
+      const oe = new Map(), we = new Map(), srcObjA = new Map(), srcObjB = new Map();
+      objRecs.forEach((fe) => {
+        const obj = fe.SobjectType;
+        const hasAnyPerm = go.some(([, col]) => !!fe[col]);
+        if (setIdsA.has(fe.ParentId)) {
+          const prev = oe.get(obj) || {};
+          const merged = { SobjectType: obj };
+          go.forEach(([, col]) => { merged[col] = prev[col] || !!fe[col]; });
+          oe.set(obj, merged);
+          if (hasAnyPerm) {
+            if (!srcObjA.has(obj)) srcObjA.set(obj, new Set());
+            srcObjA.get(obj).add(fe.ParentId);
+          }
+        }
+        if (setIdsB.has(fe.ParentId)) {
+          const prev = we.get(obj) || {};
+          const merged = { SobjectType: obj };
+          go.forEach(([, col]) => { merged[col] = prev[col] || !!fe[col]; });
+          we.set(obj, merged);
+          if (hasAnyPerm) {
+            if (!srcObjB.has(obj)) srcObjB.set(obj, new Set());
+            srcObjB.get(obj).add(fe.ParentId);
+          }
+        }
+      });
+      const allObjects = Array.from(new Set([...oe.keys(), ...we.keys()])).sort();
+      allObjects.forEach((obj) => {
+        const recA = oe.get(obj) || {};
+        const recB = we.get(obj) || {};
+        if (!Me(recA, recB)) {
+          const permsStr = (rec) => go.filter(([, col]) => !!rec[col]).map(([c]) => c).join("") || "None";
+          diffRows.push([
+            "Object Permission",
+            obj,
+            permsStr(recA),
+            permsStr(recB),
+            getGrantSources(srcObjA.get(obj)),
+            getGrantSources(srcObjB.get(obj)),
+          ]);
+        }
+      });
+
+      // 3. System Permissions
+      if (!cachedSystemFields) {
+        const creds = await it();
+        if (creds?.instanceUrl && creds?.sessionId) {
+          const fieldsRes = await new Promise((resolve) => {
+            globalThis.chrome.runtime.sendMessage(
+              { type: "GET_OBJECT_FIELDS", objectApiName: "PermissionSet", instanceUrl: creds.instanceUrl, sessionId: creds.sessionId },
+              (res) => resolve(res),
+            );
+          });
+          if (fieldsRes?.success && fieldsRes?.data) {
+            cachedSystemFields = fieldsRes.data.map((f) => f.name).filter((name) => name.startsWith("Permissions")).sort();
+          }
+        }
+      }
+      if (cachedSystemFields && cachedSystemFields.length > 0) {
+        const fieldsToQuery = cachedSystemFields.join(", ");
+        const sysChunks = [];
+        for (let idx = 0; idx < allIds.length; idx += 200) {
+          sysChunks.push(allIds.slice(idx, idx + 200));
+        }
+        let permSets = [];
+        for (const chunk of sysChunks) {
+          const inList = chunk.map((id) => `'${id}'`).join(", ");
+          const { records: recs } = await t.runQuery(
+            `SELECT Id, ${fieldsToQuery} FROM PermissionSet WHERE Id IN (${inList})`,
+          );
+          permSets.push(...(recs || []));
+        }
+        cachedSystemFields.forEach((f) => {
+          const srcSysA = new Set(), srcSysB = new Set();
+          permSets.forEach((r) => {
+            if (!!r[f]) {
+              if (setIdsA.has(r.Id)) srcSysA.add(r.Id);
+              if (setIdsB.has(r.Id)) srcSysB.add(r.Id);
+            }
+          });
+          const valA = srcSysA.size > 0;
+          const valB = srcSysB.size > 0;
+          if (valA !== valB) {
+            diffRows.push([
+              "System Permission",
+              f.replace(/^Permissions/, ""),
+              valA ? "Enabled" : "Disabled",
+              valB ? "Enabled" : "Disabled",
+              getGrantSources(srcSysA),
+              getGrantSources(srcSysB),
+            ]);
+          }
+        });
+      }
+
+      // 4. SetupEntityAccess (ApexClass, ApexPage, CustomPermission)
+      const entityTypes = [
+        { type: "ApexClass", sobj: "ApexClass", category: "Apex Class", fields: "Id, Name" },
+        { type: "ApexPage", sobj: "ApexPage", category: "Visualforce Page", fields: "Id, Name" },
+        { type: "CustomPermission", sobj: "CustomPermission", category: "Custom Permission", fields: "Id, DeveloperName, NamespacePrefix" },
+      ];
+
+      for (const ent of entityTypes) {
+        let accessRecs = [];
+        for (const chunk of idChunks) {
+          const inList = chunk.map((id) => `'${id}'`).join(", ");
+          const { records: recs } = await t.runQuery(
+            `SELECT ParentId, SetupEntityId FROM SetupEntityAccess WHERE ParentId IN (${inList}) AND SetupEntityType = '${ent.type}' LIMIT 5000`,
+          );
+          accessRecs.push(...(recs || []));
+        }
+        const setA = new Set(), setB = new Set(), srcEntA = new Map(), srcEntB = new Map();
+        accessRecs.forEach((r) => {
+          if (setIdsA.has(r.ParentId)) {
+            setA.add(r.SetupEntityId);
+            if (!srcEntA.has(r.SetupEntityId)) srcEntA.set(r.SetupEntityId, new Set());
+            srcEntA.get(r.SetupEntityId).add(r.ParentId);
+          }
+          if (setIdsB.has(r.ParentId)) {
+            setB.add(r.SetupEntityId);
+            if (!srcEntB.has(r.SetupEntityId)) srcEntB.set(r.SetupEntityId, new Set());
+            srcEntB.get(r.SetupEntityId).add(r.ParentId);
+          }
+        });
+        const diffEntityIds = Array.from(new Set([...setA, ...setB])).filter((id) => setA.has(id) !== setB.has(id));
+        if (diffEntityIds.length > 0) {
+          const entNameMap = new Map();
+          for (let idx = 0; idx < diffEntityIds.length; idx += 500) {
+            const chunk = diffEntityIds.slice(idx, idx + 500);
+            const inList = chunk.map((id) => `'${id}'`).join(", ");
+            const { records: items } = await t.runQuery(
+              `SELECT ${ent.fields} FROM ${ent.sobj} WHERE Id IN (${inList})`,
+            );
+            (items || []).forEach((item) => {
+              let name = item.Name;
+              if (ent.sobj === "CustomPermission") {
+                name = item.NamespacePrefix ? `${item.NamespacePrefix}.${item.DeveloperName}` : item.DeveloperName;
+              }
+              entNameMap.set(item.Id, name);
+            });
+          }
+          diffEntityIds.forEach((id) => {
+            const valA = setA.has(id);
+            const valB = setB.has(id);
+            diffRows.push([
+              ent.category,
+              entNameMap.get(id) || id,
+              valA ? "Granted" : "Not Granted",
+              valB ? "Granted" : "Not Granted",
+              getGrantSources(srcEntA.get(id)),
+              getGrantSources(srcEntB.get(id)),
+            ]);
+          });
+        }
+      }
+
+      const diffHeaders = [
+        "Category",
+        "Item / Permission Name",
+        `Access in ${nameA}`,
+        `Access in ${nameB}`,
+        `Where Granted in ${nameA}`,
+        `Where Granted in ${nameB}`,
+      ];
+
+      downloadCSV(`${sanitizeFilename(nameA)}_vs_${sanitizeFilename(nameB)}_full_diff_audit.csv`, diffHeaders, diffRows);
+      if (t.flashToast) t.flashToast(`Full Diff CSV Exported! (${diffRows.length} differences found)`);
+    } catch (err) {
+      console.error("CSV export error", err);
+      if (t.flashToast) t.flashToast("Export failed: " + err.message);
+    } finally {
+      exportFullBtn.textContent = oldBtnText;
+      exportFullBtn.disabled = false;
+    }
   }
   function M(P) {
     const ee = rt("table", {
@@ -12905,6 +14014,7 @@ const vs = {
     nicknames: {},
     pinnedTools: ["sfhome", "export", "sampledata", "whereused"],
     ctrlShiftRReload: !0,
+    geminiApiKey: "",
   },
   xi = { soql: 0, debugLogs: 0, rulesUpdated: 0, apexTests: 0 };
 let Es = Promise.resolve();
@@ -25759,8 +26869,44 @@ function uu(o, t) {
           { fontSize: "12.5px", color: n.muted, marginTop: "12px" },
           "ℹ  This version is used for new Salesforce API requests made by the extension.",
         ),
-      ),
-      T(w));
+      ));
+    const aiCard = x();
+    aiCard.appendChild(
+      D(
+        "AI Assistant",
+        "Gemini API Configuration",
+        "Enter your Google Gemini API key to enable AI-powered code generation, optimization, and explanation features.",
+      )
+    );
+    aiCard.appendChild(L());
+    aiCard.appendChild(X("Google Gemini API Key"));
+    const apiKeyInput = Fe("input", {
+      width: "100%",
+      boxSizing: "border-box",
+      padding: "9px 12px",
+      fontSize: "13.5px",
+      borderRadius: "9px",
+      border: `1px solid ${n.border}`,
+      background: n.inputBg,
+      color: n.text,
+      fontFamily: "monospace",
+      outline: "none",
+    });
+    apiKeyInput.type = "password";
+    apiKeyInput.placeholder = "Enter API Key (AI Studio)...";
+    apiKeyInput.value = l.geminiApiKey || "";
+    apiKeyInput.addEventListener("change", () => {
+      N({ geminiApiKey: apiKeyInput.value.trim() });
+    });
+    aiCard.appendChild(apiKeyInput);
+    aiCard.appendChild(
+      Fe(
+        "div",
+        { fontSize: "12.5px", color: n.muted, marginTop: "12px" },
+        "ℹ Get a free API Key from Google AI Studio. The key is stored locally in your browser."
+      )
+    );
+    T(w, aiCard);
   }
   function K(T) {
     const w = x();
@@ -30666,6 +31812,525 @@ function renderObjectDetails(container, isDark, onBack) {
   }
 }
 
+
+function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyzer, flashToast) {
+  container.innerHTML = "";
+  const e = kt(isDark);
+
+  const mainDiv = $e("div", {
+    height: "100%",
+    minHeight: "0",
+    display: "flex",
+    flexDirection: "column",
+    background: e.bg,
+    color: e.text
+  });
+  container.appendChild(mainDiv);
+
+  const { head: header } = Wo(e, "🤖 AI Code Editor", onBack, "Tools");
+  mainDiv.appendChild(header);
+
+  const layout = $e("div", {
+    flex: "1",
+    minHeight: "0",
+    display: "flex",
+    background: e.bg,
+  });
+  mainDiv.appendChild(layout);
+
+  // Left Column: Editor & Console (flex: 1.4)
+  const leftCol = $e("div", {
+    flex: "1.4",
+    display: "flex",
+    flexDirection: "column",
+    borderRight: `1px solid ${e.divider}`,
+    padding: "10px",
+    minWidth: "0"
+  });
+  layout.appendChild(leftCol);
+
+  // Editor toolbar
+  const editorToolbar = $e("div", {
+    display: "flex",
+    gap: "6px",
+    alignItems: "center",
+    marginBottom: "6px",
+    flexShrink: "0"
+  });
+  leftCol.appendChild(editorToolbar);
+
+  // File Selector dropdown
+  const fileSelect = $e("select", {
+    padding: "5px 8px",
+    fontSize: "12px",
+    borderRadius: "6px",
+    border: `1px solid ${e.border}`,
+    background: e.inputBg,
+    color: e.text,
+    fontFamily: "inherit",
+    outline: "none",
+    maxWidth: "180px",
+    cursor: "pointer"
+  });
+  editorToolbar.appendChild(fileSelect);
+
+  const executeBtn = $e("button", {
+    background: e.accent,
+    color: "#fff",
+    border: "none",
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer"
+  }, "▶ Execute");
+  editorToolbar.appendChild(executeBtn);
+
+  // Save to Org button
+  const saveBtn = $e("button", {
+    background: "#10b981", // modern green
+    color: "#fff",
+    border: "none",
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+    opacity: "0.5",
+    disabled: true
+  }, "💾 Save to Org");
+  editorToolbar.appendChild(saveBtn);
+
+  const formatBtn = $e("button", {
+    background: "transparent",
+    border: `1px solid ${e.border}`,
+    color: e.text,
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer"
+  }, "✨ Format");
+  editorToolbar.appendChild(formatBtn);
+
+  const clearBtn = $e("button", {
+    background: "transparent",
+    border: `1px solid ${e.border}`,
+    color: e.text,
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer"
+  }, "🗑 Clear");
+  editorToolbar.appendChild(clearBtn);
+
+  // Show/Hide AI Toggle Button
+  const toggleAiBtn = $e("button", {
+    background: "transparent",
+    border: `1px solid ${e.border}`,
+    color: e.text,
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer",
+    marginLeft: "auto"
+  }, "🤖 Show AI");
+  editorToolbar.appendChild(toggleAiBtn);
+
+  let aiVisible = false;
+  toggleAiBtn.addEventListener("click", () => {
+    aiVisible = !aiVisible;
+    rightCol.style.display = aiVisible ? "flex" : "none";
+    toggleAiBtn.textContent = aiVisible ? "🤖 Hide AI" : "🤖 Show AI";
+    if (monacoEditor) {
+      setTimeout(() => monacoEditor.layout(), 50);
+    }
+  });
+
+  // Editor container
+  const editorContainer = $e("div", {
+    flex: "1",
+    minHeight: "200px",
+    border: `1px solid ${e.border}`,
+    borderRadius: "8px",
+    overflow: "hidden",
+    position: "relative",
+    background: isDark ? "#1e1e1e" : "#ffffff"
+  });
+  leftCol.appendChild(editorContainer);
+
+  // Output container for execution logs
+  const outputContainer = $e("div", {
+    height: "110px",
+    marginTop: "6px",
+    border: `1px solid ${e.border}`,
+    borderRadius: "8px",
+    background: isDark ? "#0f172a" : "#f8fafc",
+    overflowY: "auto",
+    padding: "8px",
+    fontSize: "12px",
+    fontFamily: "monospace",
+    flexShrink: "0"
+  });
+  outputContainer.textContent = "Results and debug logs will be displayed here.";
+  leftCol.appendChild(outputContainer);
+
+  // Right Column: AI Assistant (flex: 1)
+  const rightCol = $e("div", {
+    flex: "1",
+    display: "none",
+    flexDirection: "column",
+    background: e.side || e.surface,
+    padding: "10px",
+    minWidth: "0"
+  });
+  layout.appendChild(rightCol);
+
+  // AI Title
+  rightCol.appendChild($e("div", {
+    fontSize: "12px",
+    fontWeight: "800",
+    marginBottom: "6px",
+    color: e.text
+  }, "AI CODE ASSISTANT"));
+
+  // AI Actions Grid
+  const aiActionsGrid = $e("div", {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "4px",
+    marginBottom: "6px",
+    flexShrink: "0"
+  });
+  rightCol.appendChild(aiActionsGrid);
+
+  const createAiBtn = (label, promptPrefix) => {
+    const btn = $e("button", {
+      background: e.surface,
+      border: `1px solid ${e.border}`,
+      color: e.text,
+      borderRadius: "6px",
+      padding: "5px",
+      fontSize: "11px",
+      fontWeight: "600",
+      cursor: "pointer",
+      textAlign: "center"
+    }, label);
+    btn.addEventListener("click", () => triggerAiAction(promptPrefix));
+    return btn;
+  };
+
+  aiActionsGrid.appendChild(createAiBtn("Explain Code", "Explain the following Apex code concisely:"));
+  aiActionsGrid.appendChild(createAiBtn("Optimize", "Optimize the following Apex code for CPU usage, heap limits, and DML bulkification:"));
+  aiActionsGrid.appendChild(createAiBtn("Fix Errors", "Find any compile errors, bugs, or exceptions in this Apex code and write the corrected code:"));
+  aiActionsGrid.appendChild(createAiBtn("Generate Test", "Write a complete Salesforce Apex Test Class for the following code:"));
+
+  // Chat/Response box
+  const chatBox = $e("div", {
+    flex: "1",
+    border: `1px solid ${e.border}`,
+    borderRadius: "8px",
+    background: isDark ? "#0f172a" : "#fff",
+    overflowY: "auto",
+    padding: "8px",
+    fontSize: "12px",
+    lineHeight: "1.4",
+    marginBottom: "6px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px"
+  });
+  rightCol.appendChild(chatBox);
+
+  // Chat Input Row
+  const chatInputRow = $e("div", {
+    display: "flex",
+    gap: "8px",
+    flexShrink: "0"
+  });
+  rightCol.appendChild(chatInputRow);
+
+  const chatInput = $e("textarea", {
+    flex: "1",
+    padding: "8px 12px",
+    fontSize: "12.5px",
+    borderRadius: "8px",
+    border: `1px solid ${e.border}`,
+    background: e.inputBg,
+    color: e.text,
+    outline: "none",
+    resize: "none",
+    height: "38px",
+    fontFamily: "inherit"
+  });
+  chatInput.placeholder = "Ask AI to generate or modify code...";
+  chatInputRow.appendChild(chatInput);
+
+  const sendBtn = $e("button", {
+    background: e.accent,
+    color: "#fff",
+    border: "none",
+    borderRadius: "8px",
+    padding: "0 14px",
+    fontSize: "12.5px",
+    fontWeight: "700",
+    cursor: "pointer"
+  }, "Send");
+  chatInputRow.appendChild(sendBtn);
+
+  // Editor setup variables
+  let monacoEditor = null;
+  let fallbackTextarea = null;
+  let selectedFile = null;
+  let filesList = [];
+
+  // Load Monaco or Textarea
+  function loadMonaco(onSuccess, onError) {
+    if (window.monaco) {
+      onSuccess();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js";
+    script.onload = () => {
+      try {
+        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
+        require(['vs/editor/editor.main'], () => {
+          onSuccess();
+        });
+      } catch (errMonaco) {
+        onError();
+      }
+    };
+    script.onerror = () => {
+      onError();
+    };
+    document.head.appendChild(script);
+  }
+
+  loadMonaco(() => {
+    editorContainer.innerHTML = "";
+    monacoEditor = monaco.editor.create(editorContainer, {
+      value: `// Write your Apex code here\npublic class TempCode {\n    public static void run() {\n        System.debug('Hello World');\n    }\n}`,
+      language: "apex",
+      theme: isDark ? "vs-dark" : "vs",
+      automaticLayout: true,
+      minimap: { enabled: false },
+      fontSize: 12.5
+    });
+  }, () => {
+    editorContainer.innerHTML = "";
+    fallbackTextarea = $e("textarea", {
+      width: "100%",
+      height: "100%",
+      boxSizing: "border-box",
+      border: "none",
+      background: "transparent",
+      color: e.text,
+      fontFamily: "monospace",
+      fontSize: "12.5px",
+      padding: "12px",
+      outline: "none",
+      resize: "none"
+    });
+    fallbackTextarea.value = `// Write your Apex code here\npublic class TempCode {\n    public static void run() {\n        System.debug('Hello World');\n    }\n}`;
+    editorContainer.appendChild(fallbackTextarea);
+  });
+
+  const getCodeValue = () => {
+    if (monacoEditor) return monacoEditor.getValue();
+    if (fallbackTextarea) return fallbackTextarea.value;
+    return "";
+  };
+
+  const setCodeValue = (val) => {
+    if (monacoEditor) monacoEditor.setValue(val);
+    else if (fallbackTextarea) fallbackTextarea.value = val;
+  };
+
+  // Populate Apex Classes List
+  async function loadOrgFiles() {
+    fileSelect.innerHTML = "<option>Loading files...</option>";
+    try {
+      const session = await it();
+      if (!session?.instanceUrl || !session?.sessionId) {
+        fileSelect.innerHTML = "<option>Session error</option>";
+        return;
+      }
+      const response = await fetch(`${session.instanceUrl}/services/data/v60.0/tooling/query/?q=SELECT+Id,+Name,+Body+FROM+ApexClass+ORDER+BY+Name+LIMIT+1000`, {
+        headers: { Authorization: `Bearer ${session.sessionId}` }
+      });
+      const data = await response.json();
+      filesList = data.records || [];
+      
+      fileSelect.innerHTML = '<option value="">-- Execute Anonymous / New --</option>';
+      filesList.forEach(file => {
+        const opt = $e("option", {}, file.Name);
+        opt.value = file.Id;
+        fileSelect.appendChild(opt);
+      });
+    } catch (err) {
+      fileSelect.innerHTML = "<option>Failed to load files</option>";
+    }
+  }
+
+  loadOrgFiles();
+
+  fileSelect.addEventListener("change", () => {
+    const fileId = fileSelect.value;
+    if (!fileId) {
+      selectedFile = null;
+      setCodeValue(`// Write your Apex code here\npublic class TempCode {\n    public static void run() {\n        System.debug('Hello World');\n    }\n}`);
+      saveBtn.disabled = true;
+      saveBtn.style.opacity = "0.5";
+      return;
+    }
+    const file = filesList.find(f => f.Id === fileId);
+    if (file) {
+      selectedFile = file;
+      setCodeValue(file.Body || "");
+      saveBtn.disabled = false;
+      saveBtn.style.opacity = "1";
+    }
+  });
+
+  clearBtn.addEventListener("click", () => setCodeValue(""));
+
+  formatBtn.addEventListener("click", () => {
+    if (monacoEditor) {
+      monacoEditor.getAction('editor.action.formatDocument').run();
+    } else {
+      flashToast("Formatting only supported in Monaco Editor mode.");
+    }
+  });
+
+  executeBtn.addEventListener("click", async () => {
+    const code = getCodeValue();
+    if (!code.trim()) {
+      flashToast("Nothing to execute");
+      return;
+    }
+    executeBtn.textContent = "Running...";
+    executeBtn.disabled = true;
+    outputContainer.textContent = "Executing Apex anonymously...";
+    try {
+      const res = await executeApex(code, "standard");
+      executeBtn.textContent = "▶ Execute";
+      executeBtn.disabled = false;
+      outputContainer.innerHTML = "";
+      renderAnalyzer(outputContainer, res, "AICodeEditor.log", onBack);
+    } catch (err) {
+      executeBtn.textContent = "▶ Execute";
+      executeBtn.disabled = false;
+      outputContainer.textContent = "Error: " + err.message;
+    }
+  });
+
+  // Save/Deploy Apex Class to Org
+  saveBtn.addEventListener("click", async () => {
+    if (!selectedFile) return;
+    saveBtn.textContent = "Saving...";
+    saveBtn.disabled = true;
+    outputContainer.textContent = "Deploying code updates to Salesforce...";
+    try {
+      const session = await it();
+      const res = await fetch(`${session.instanceUrl}/services/data/v60.0/tooling/sobjects/ApexClass/${selectedFile.Id}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.sessionId}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ Body: getCodeValue() })
+      });
+      saveBtn.textContent = "💾 Save to Org";
+      saveBtn.disabled = false;
+      if (res.ok) {
+        outputContainer.textContent = "Saved successfully! Compiled in org.";
+        flashToast("Saved successfully!");
+        selectedFile.Body = getCodeValue();
+      } else {
+        const errData = await res.json();
+        if (Array.isArray(errData) && errData[0]) {
+          outputContainer.innerHTML = `<span style="color:${e.danger}"><b>Compilation Error:</b> ${errData[0].message}</span>`;
+        } else {
+          outputContainer.innerHTML = `<span style="color:${e.danger}"><b>Deployment Error:</b> ${JSON.stringify(errData)}</span>`;
+        }
+      }
+    } catch (err) {
+      saveBtn.textContent = "💾 Save to Org";
+      saveBtn.disabled = false;
+      outputContainer.textContent = "Save failed: " + err.message;
+    }
+  });
+
+  async function triggerAiAction(prefix) {
+    const code = getCodeValue();
+    const fullPrompt = `${prefix}\n\n\`\`\`apex\n${code}\n\`\`\``;
+    await callGemini(fullPrompt);
+  }
+
+  sendBtn.addEventListener("click", async () => {
+    const text = chatInput.value.trim();
+    if (!text) return;
+    chatInput.value = "";
+    const code = getCodeValue();
+    const fullPrompt = `${text}\n\nCode context:\n\`\`\`apex\n${code}\n\`\`\``;
+    await callGemini(fullPrompt);
+  });
+
+  async function callGemini(promptText) {
+    const apiKey = globalPrefs.geminiApiKey;
+    if (!apiKey) {
+      chatBox.innerHTML = `<div style="color:${e.danger};font-weight:700">Gemini API Key is not configured. Please go to Settings (☁️ Salesforce) and add your key first!</div>`;
+      return;
+    }
+
+    const messageDiv = $e("div", {
+      padding: "8px",
+      borderRadius: "6px",
+      background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+      marginBottom: "8px",
+      color: e.text
+    });
+    messageDiv.innerHTML = `<b>Thinking...</b>`;
+    chatBox.appendChild(messageDiv);
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: promptText }] }]
+        })
+      });
+
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error(data.error?.message || "No response received");
+      }
+
+      messageDiv.innerHTML = text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\`\`\`(\w*)\n([\s\S]*?)\`\`\`/g, '<pre style="background:rgba(0,0,0,0.05);padding:8px;border-radius:6px;overflow-x:auto">$2</pre>')
+        .replace(/\`([^\`]+)\`/g, '<code>$1</code>')
+        .replace(/\n/g, "<br>");
+        
+      chatBox.scrollTop = chatBox.scrollHeight;
+    } catch (err) {
+      messageDiv.innerHTML = `<span style="color:${e.danger}">Error: ${err.message}</span>`;
+    }
+  }
+}
+
+
 const Lo = "sf_soql_saved",
   Ao = "sf_soql_history";
 let cn = [],
@@ -34352,6 +36017,15 @@ function Wa(o) {
         },
       },
       {
+        id: "aicodeeditor",
+        icon: "🤖",
+        label: "AI Code Editor",
+        desc: "Write Apex, generate tests and ask AI with Monaco Editor",
+        run: () => {
+          ((u.value = ""), (x = "aicodeeditor"), oe());
+        },
+      },
+      {
         id: "permcompare",
         icon: "🔐",
         label: "Permission Comparison",
@@ -37215,6 +38889,39 @@ ${at.error}`),
             });
             return;
           }
+          if (x === "aicodeeditor") {
+            const Ce = (ce) =>
+              new Promise((pe) => {
+                it().then((Ee) => {
+                  if (!Ee?.instanceUrl || !Ee?.sessionId) {
+                    pe({
+                      success: !1,
+                      error: "Salesforce session not detected",
+                    });
+                    return;
+                  }
+                  globalThis.chrome.runtime.sendMessage(
+                    {
+                      instanceUrl: Ee.instanceUrl,
+                      sessionId: Ee.sessionId,
+                      ...ce,
+                    },
+                    (Ye) =>
+                      pe(
+                        Ye ?? {
+                          success: !1,
+                          error: "No response from extension",
+                        },
+                      ),
+                  );
+                });
+              });
+            renderAICodeEditor(C, he, Pe, (ce, pe) => Ce({ type: "EXECUTE_ANONYMOUS", apexBody: ce, logLevel: pe }), (ce, pe, Ee, Ye) => {
+              ((ce.innerHTML = ""),
+                ts(ce, pe, { isDark: he, logName: Ee, onBack: Ye }));
+            }, ot);
+            return;
+          }
           if (x === "automationmap") {
             const Ce = (ce) =>
               new Promise((pe) => {
@@ -38548,7 +40255,11 @@ function Ju() {
                 ((Pn = r.target || null), $n());
               }
             }),
-          window.addEventListener("message", (r) => {
+          window.addEventListener("message", function handleMsg(r) {
+            if (!globalThis.chrome?.runtime?.id) {
+              window.removeEventListener("message", handleMsg);
+              return;
+            }
             r.data.type === "SF_LOG_ANALYZER_TOGGLE"
               ? ((t = r.data.isOpen), to(e, a, o, r.data.isOpen))
               : r.data.type === "SF_LOG_ANALYZER_SETTINGS_CHANGED"
@@ -38560,6 +40271,10 @@ function Ju() {
                   : r.data.type === "SF_OPEN_PANEL" && d();
           }));
         const g = (r) => {
+          if (!globalThis.chrome?.runtime?.id) {
+            document.removeEventListener("keydown", g, !0);
+            return;
+          }
           if (
             globalPrefs.ctrlShiftRReload !== !1 &&
             r.ctrlKey &&
@@ -38569,13 +40284,21 @@ function Ju() {
             r.preventDefault();
             r.stopPropagation();
             const he = globalThis.chrome?.runtime;
+            if (!he || !he.id) {
+              window.location.reload();
+              return !1;
+            }
             ot("Clearing cache & reloading…");
-            he?.sendMessage(
-              { type: "CLEAR_SESSION_CACHE", hostname: Vt(en()) },
-              () => {
-                setTimeout(() => window.location.reload(), 300);
-              },
-            );
+            try {
+              he.sendMessage(
+                { type: "CLEAR_SESSION_CACHE", hostname: Vt(en()) },
+                () => {
+                  setTimeout(() => window.location.reload(), 300);
+                },
+              );
+            } catch {
+              window.location.reload();
+            }
             return !1;
           }
           if (
