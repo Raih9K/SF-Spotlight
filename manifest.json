@@ -24,7 +24,8 @@
     "activeTab",
     "storage",
     "cookies",
-    "contextMenus"
+    "contextMenus",
+    "tabGroups"
   ],
   "host_permissions": [
     "https://*.salesforce.com/*",

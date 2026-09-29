@@ -1,3 +1,46 @@
+// When the extension is reloaded/updated, this copy of the script stays on the page
+// but can no longer reach the extension ("Extension context invalidated"). Make every
+// chrome.runtime / chrome.storage call a silent no-op from then on instead of throwing.
+(() => {
+  const c = globalThis.chrome;
+  if (!c?.runtime) return;
+  const alive = () => {
+    try {
+      return !!c.runtime?.id;
+    } catch {
+      return !1;
+    }
+  };
+  const isInvalidated = (e) => /context invalidated/i.test(String(e?.message || e));
+  const guard = (obj, name) => {
+    const orig = obj?.[name];
+    if (typeof orig != "function") return;
+    const wrapped = function (...args) {
+      // No callback → caller expects a promise; a never-settling one is the safe no-op
+      const dead = () =>
+        name === "getURL" ? "" : typeof args[args.length - 1] == "function" ? void 0 : new Promise(() => {});
+      if (!alive()) return dead();
+      try {
+        return orig.apply(this, args);
+      } catch (e) {
+        if (isInvalidated(e)) return dead();
+        throw e;
+      }
+    };
+    try {
+      obj[name] = wrapped;
+    } catch {}
+  };
+  (["sendMessage", "connect", "getURL"].forEach((n) => guard(c.runtime, n)),
+    ["get", "set", "remove"].forEach((n) => guard(c.storage?.local, n)));
+  // Anything that still slips through (e.g. a port posting after disconnect)
+  (globalThis.addEventListener?.("error", (ev) => {
+    isInvalidated(ev.error || ev.message) && ev.preventDefault();
+  }),
+    globalThis.addEventListener?.("unhandledrejection", (ev) => {
+      isInvalidated(ev.reason) && ev.preventDefault();
+    }));
+})();
 const Go = [
     {
       label: "Setup Home",
@@ -9855,6 +9898,8 @@ const Jn = {
     showObjectExplorer: !0,
     uiSkin: "default",
     minimalView: !1,
+    spotlightWidth: 1280,
+    spotlightHeight: 1200,
   },
   Un = "sf_log_analyzer_settings";
 function Ni(o) {
@@ -13989,6 +14034,8 @@ const vs = {
     showObjectExplorer: !0,
     uiSkin: "default",
     minimalView: !1,
+    spotlightWidth: 1280,
+    spotlightHeight: 1200,
   },
   Ss = {
     showFieldApi: !1,
@@ -14078,6 +14125,1637 @@ function ks(o) {
     } catch {}
   window.open(o, "_blank");
 }
+// renderUserClone implementation for SF Spotlight
+function renderUserClone(o, t) {
+  const isDark = t.isDark,
+    n = kt(isDark);
+  o.innerHTML = "";
+
+  const container = rt("div", {
+    height: "100%",
+    minHeight: "0",
+    display: "flex",
+    flexDirection: "column",
+    background: n.bg,
+    color: n.text,
+    fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    position: "relative",
+  });
+  o.appendChild(container);
+
+  // Top header bar
+  const header = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 24px",
+    flexShrink: "0",
+    borderBottom: `1px solid ${n.divider}`,
+    background: n.headerBg || n.panel,
+  });
+
+  const headerLeft = rt("div", { display: "flex", alignItems: "center", gap: "10px" });
+  const backBtn = rt("button", {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    color: n.muted,
+    fontFamily: "inherit",
+    fontSize: "13px",
+    fontWeight: "700",
+  });
+  backBtn.innerHTML = '<span style="font-size:15px">←</span> Tools';
+  backBtn.addEventListener("click", t.onBack);
+  headerLeft.appendChild(backBtn);
+  headerLeft.appendChild(rt("span", { color: n.faint }, "/"));
+  headerLeft.appendChild(
+    rt("div", { fontSize: "15px", fontWeight: "800", color: n.text, display: "flex", alignItems: "center", gap: "8px" }, "👥 User Clone & Onboarding")
+  );
+
+  // Mode badge switcher button (switch over to Profile & Permission Master Clone)
+  const switchPermBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "3px 9px",
+    fontSize: "11px",
+    fontWeight: "700",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    marginLeft: "8px",
+  }, "🧬 Switch to Profile/Perm Clone");
+  switchPermBtn.addEventListener("click", () => renderPermClone(o, t));
+  headerLeft.appendChild(switchPermBtn);
+
+  header.appendChild(headerLeft);
+
+  const headerRight = rt("div", { display: "flex", alignItems: "center", gap: "10px" });
+  const statusBadge = rt("span", {
+    fontSize: "11px",
+    fontWeight: "700",
+    padding: "3px 9px",
+    borderRadius: "12px",
+    background: "rgba(59,130,246,0.15)",
+    color: "#3b82f6",
+  }, "Ready");
+  headerRight.appendChild(statusBadge);
+
+  const guideBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "4px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "ℹ️ Guide");
+  guideBtn.addEventListener("click", showGuideModal);
+  headerRight.appendChild(guideBtn);
+  header.appendChild(headerRight);
+  container.appendChild(header);
+
+  // Main scrollable body
+  const bodyWrap = rt("div", {
+    flex: "1",
+    minHeight: "0",
+    overflow: "auto",
+    padding: "20px 24px 140px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "18px",
+  });
+  container.appendChild(bodyWrap);
+
+  // Guide Modal
+  function showGuideModal() {
+    const overlay = rt("div", {
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "100%",
+      height: "100%",
+      background: "rgba(0,0,0,0.6)",
+      zIndex: "999999",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      backdropFilter: "blur(4px)",
+    });
+    const modal = rt("div", {
+      background: n.panel,
+      border: `1px solid ${n.border}`,
+      borderRadius: "14px",
+      width: "600px",
+      maxWidth: "92vw",
+      maxHeight: "85vh",
+      overflow: "auto",
+      padding: "24px",
+      boxShadow: "0 20px 50px rgba(0,0,0,0.4)",
+    });
+    modal.innerHTML = `
+      <div style="font-size:18px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+        <span>👥</span> User Clone & Onboarding Guide
+      </div>
+      <div style="font-size:13px;line-height:1.6;color:${n.text};display:flex;flex-direction:column;gap:12px">
+        <p><b>1-Click User Replication:</b> Onboard new employees or clone existing users in seconds. Copies Profile, Role, Permission Sets, Permission Set Groups, Package Licenses (e.g. Litify, DocuSign, Financial Services), and Public Group/Queue memberships.</p>
+        <p><b>✨ Smart Request Text Auto-Fill:</b> Paste manager/IT emails or ticketing requests (e.g. <i>"Please assign open Litify license to our new intake manager Jennifer Colwell (jcolwell@krasno.com) who starts 10/1..."</i>) and click <b>Auto-Fill Form</b>. The tool automatically detects First Name, Last Name, Email, generates username/alias, and preselects matching package licenses!</p>
+        <p><b>Target Modes:</b> You can create a <b>Brand New User</b> from scratch or replicate permissions into an <b>Existing Salesforce User</b>.</p>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:20px">
+        <button id="user-guide-close" style="background:#3b82f6;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">Got it</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    modal.querySelector("#user-guide-close").addEventListener("click", () => overlay.remove());
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+  }
+
+  // State
+  let usersList = [];
+  let userLicenses = [];
+  let profilesList = [];
+  let rolesList = [];
+  let packageLicenses = [];
+  let orgInfo = null;
+
+  let selectedSourceUser = null;
+  let sourcePermissions = {
+    permissionSets: [],
+    permissionSetGroups: [],
+    packageLicenses: [],
+    groupMemberships: [],
+    userRecord: null,
+  };
+
+  let targetMode = "new"; // "new" | "existing"
+  let selectedTargetUser = null;
+  let isExecuting = false;
+
+  const cloneDomains = {
+    profile: true,
+    role: true,
+    permSets: true,
+    psg: true,
+    packages: true,
+    groups: true,
+  };
+
+  // Custom Toggle Switch Helper
+  function createToggle(checked, onChange) {
+    const box = rt("div", {
+      width: "36px",
+      height: "20px",
+      borderRadius: "10px",
+      background: checked ? "#3b82f6" : (isDark ? "#334155" : "#cbd5e1"),
+      position: "relative",
+      cursor: "pointer",
+      transition: "background 0.2s ease",
+      flexShrink: "0",
+    });
+    const knob = rt("div", {
+      width: "14px",
+      height: "14px",
+      borderRadius: "50%",
+      background: "#ffffff",
+      position: "absolute",
+      top: "3px",
+      left: checked ? "19px" : "3px",
+      transition: "left 0.2s ease",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+    });
+    box.appendChild(knob);
+    box.addEventListener("click", (e) => {
+      e.stopPropagation();
+      checked = !checked;
+      box.style.background = checked ? "#3b82f6" : (isDark ? "#334155" : "#cbd5e1");
+      knob.style.left = checked ? "19px" : "3px";
+      onChange(checked);
+    });
+    return {
+      element: box,
+      setChecked: (val) => {
+        checked = !!val;
+        box.style.background = checked ? "#3b82f6" : (isDark ? "#334155" : "#cbd5e1");
+        knob.style.left = checked ? "19px" : "3px";
+      },
+      getChecked: () => checked,
+    };
+  }
+
+  // --- SECTION A: Smart Paste & Prompt Parser Card ---
+  const smartCard = rt("div", {
+    background: isDark ? "linear-gradient(135deg, rgba(30,58,138,0.2), rgba(15,23,42,0.6))" : "linear-gradient(135deg, rgba(239,246,255,0.8), rgba(248,250,252,0.9))",
+    border: "1px solid rgba(59,130,246,0.3)",
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  });
+  bodyWrap.appendChild(smartCard);
+
+  const smartHeader = rt("div", { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" });
+  smartCard.appendChild(smartHeader);
+
+  const smartTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    color: "#3b82f6",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  });
+  smartTitle.innerHTML = `<span>✨</span> Smart Onboarding Request Parser (Paste & Auto-Fill)`;
+  smartHeader.appendChild(smartTitle);
+
+  const smartSub = rt("div", { fontSize: "12px", color: n.muted }, "Paste any onboarding email, ticket, or message below. SF Spotlight will extract the name, email, role/profile hint, and requested package licenses.");
+  smartCard.appendChild(smartSub);
+
+  const smartTextarea = rt("textarea", {
+    width: "100%",
+    boxSizing: "border-box",
+    minHeight: "56px",
+    maxHeight: "120px",
+    padding: "8px 12px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#ffffff",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    resize: "vertical",
+  });
+  smartTextarea.placeholder = 'e.g. Please assign one of the open Litify licenses to our new intake manager Jennifer Colwell (jcolwell@krasno.com) who is starting on 10/1.';
+  smartCard.appendChild(smartTextarea);
+
+  const smartActions = rt("div", { display: "flex", alignItems: "center", gap: "10px", justifyContent: "flex-end" });
+  smartCard.appendChild(smartActions);
+
+  const parseBtn = rt("button", {
+    background: "#3b82f6",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "6px",
+    padding: "6px 14px",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    fontFamily: "inherit",
+  }, "⚡ Auto-Fill Form from Text");
+  smartActions.appendChild(parseBtn);
+
+  // --- SECTION B: Two-Column Configuration Grid ---
+  const configGrid = rt("div", {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
+    gap: "16px",
+  });
+  bodyWrap.appendChild(configGrid);
+
+  // 1. Source User Card
+  const sourceCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  configGrid.appendChild(sourceCard);
+
+  const sourceTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: n.text,
+  });
+  sourceTitle.innerHTML = `<span style="font-size:16px">👤</span> 1. Select Source User to Clone From`;
+  sourceCard.appendChild(sourceTitle);
+
+  const sourceSelect = rt("select", {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "13px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+  });
+  sourceSelect.innerHTML = `<option value="">— Loading Active Salesforce Users… —</option>`;
+  sourceCard.appendChild(sourceSelect);
+
+  const sourceDetails = rt("div", {
+    fontSize: "12px",
+    color: n.muted,
+    minHeight: "22px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  });
+  sourceCard.appendChild(sourceDetails);
+
+  // 2. Target User Card
+  const targetCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  configGrid.appendChild(targetCard);
+
+  const targetTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: n.text,
+  });
+  targetTitle.innerHTML = `<span style="font-size:16px">🎯</span> 2. Target User Configuration`;
+  targetCard.appendChild(targetTitle);
+
+  // Target Mode Switcher (New User vs Existing User)
+  const targetModeWrap = rt("div", {
+    display: "flex",
+    gap: "8px",
+    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
+    padding: "3px",
+    borderRadius: "8px",
+    width: "fit-content",
+  });
+  targetCard.appendChild(targetModeWrap);
+
+  const newTargetBtn = rt("button", {
+    padding: "5px 12px",
+    fontSize: "12px",
+    fontWeight: "700",
+    borderRadius: "6px",
+    border: "none",
+    cursor: "pointer",
+    background: "#3b82f6",
+    color: "#fff",
+    fontFamily: "inherit",
+  }, "🆕 Create New User");
+  targetModeWrap.appendChild(newTargetBtn);
+
+  const existTargetBtn = rt("button", {
+    padding: "5px 12px",
+    fontSize: "12px",
+    fontWeight: "700",
+    borderRadius: "6px",
+    border: "none",
+    cursor: "pointer",
+    background: "transparent",
+    color: n.muted,
+    fontFamily: "inherit",
+  }, "🔄 Clone into Existing User");
+  targetModeWrap.appendChild(existTargetBtn);
+
+  // Form Container: New User
+  const newUserForm = rt("div", { display: "flex", flexDirection: "column", gap: "10px" });
+  targetCard.appendChild(newUserForm);
+
+  const nameRow = rt("div", { display: "flex", gap: "10px" });
+  newUserForm.appendChild(nameRow);
+
+  const fnWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  fnWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "First Name"));
+  const fnInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  fnInput.placeholder = "e.g. Jennifer";
+  fnWrap.appendChild(fnInput);
+  nameRow.appendChild(fnWrap);
+
+  const lnWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  lnWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Last Name *"));
+  const lnInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  lnInput.placeholder = "e.g. Colwell";
+  lnWrap.appendChild(lnInput);
+  nameRow.appendChild(lnWrap);
+
+  const emailRow = rt("div", { display: "flex", gap: "10px" });
+  newUserForm.appendChild(emailRow);
+
+  const emailWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  emailWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Email Address *"));
+  const emailInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  emailInput.placeholder = "e.g. jcolwell@krasno.com";
+  emailWrap.appendChild(emailInput);
+  emailRow.appendChild(emailWrap);
+
+  const usernameWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  usernameWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Username (Login) *"));
+  const usernameInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  usernameInput.placeholder = "e.g. jcolwell@krasno.com";
+  usernameWrap.appendChild(usernameInput);
+  emailRow.appendChild(usernameWrap);
+
+  const metaRow = rt("div", { display: "flex", gap: "10px" });
+  newUserForm.appendChild(metaRow);
+
+  const aliasWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  aliasWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Alias (max 8 chars)"));
+  const aliasInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  aliasInput.placeholder = "e.g. jcolw";
+  aliasWrap.appendChild(aliasInput);
+  metaRow.appendChild(aliasWrap);
+
+  const nickWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  nickWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Community Nickname"));
+  const nickInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  nickInput.placeholder = "e.g. jennifer.colwell";
+  nickWrap.appendChild(nickInput);
+  metaRow.appendChild(nickWrap);
+
+  const permRow = rt("div", { display: "flex", gap: "10px" });
+  newUserForm.appendChild(permRow);
+
+  const profWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  profWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Profile *"));
+  const profSelect = rt("select", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  profSelect.innerHTML = `<option value="">— Source User's Profile —</option>`;
+  profWrap.appendChild(profSelect);
+  permRow.appendChild(profWrap);
+
+  const roleWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  roleWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Role (Optional)"));
+  const roleSelect = rt("select", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  roleSelect.innerHTML = `<option value="">— None / Source Role —</option>`;
+  roleWrap.appendChild(roleSelect);
+  permRow.appendChild(roleWrap);
+
+  // Form Container: Existing Target User
+  const existingUserForm = rt("div", { display: "none", flexDirection: "column", gap: "10px" });
+  targetCard.appendChild(existingUserForm);
+
+  existingUserForm.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Select Target Existing User"));
+  const existingUserSelect = rt("select", {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "13px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    boxSizing: "border-box",
+  });
+  existingUserSelect.innerHTML = `<option value="">— Select Target User to Receive Permissions —</option>`;
+  existingUserForm.appendChild(existingUserSelect);
+
+  newTargetBtn.addEventListener("click", () => {
+    targetMode = "new";
+    newTargetBtn.style.background = "#3b82f6";
+    newTargetBtn.style.color = "#fff";
+    existTargetBtn.style.background = "transparent";
+    existTargetBtn.style.color = n.muted;
+    newUserForm.style.display = "flex";
+    existingUserForm.style.display = "none";
+    updateSummary();
+  });
+
+  existTargetBtn.addEventListener("click", () => {
+    targetMode = "existing";
+    existTargetBtn.style.background = "#3b82f6";
+    existTargetBtn.style.color = "#fff";
+    newTargetBtn.style.background = "transparent";
+    newTargetBtn.style.color = n.muted;
+    newUserForm.style.display = "none";
+    existingUserForm.style.display = "flex";
+    updateSummary();
+  });
+
+  // Auto-generate alias, username, nickname on email or name changes
+  function autoPopulateUserMeta() {
+    const fn = fnInput.value.trim();
+    const ln = lnInput.value.trim();
+    const email = emailInput.value.trim();
+
+    if (!usernameInput.value.trim() && email) {
+      usernameInput.value = email;
+    }
+    if (!aliasInput.value.trim() && (fn || ln)) {
+      const alias = ((fn.charAt(0) || "") + ln).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+      aliasInput.value = alias;
+    }
+    if (!nickInput.value.trim() && (fn || ln)) {
+      const nick = `${fn}.${ln}`.toLowerCase().replace(/[^a-z0-9.]/g, "").replace(/^\.|\.$/g, "");
+      nickInput.value = nick;
+    }
+    updateSummary();
+  }
+  fnInput.addEventListener("input", autoPopulateUserMeta);
+  lnInput.addEventListener("input", autoPopulateUserMeta);
+  emailInput.addEventListener("input", autoPopulateUserMeta);
+  usernameInput.addEventListener("input", updateSummary);
+
+  // --- SECTION C: Domains & Package Licenses Grid ---
+  const domainCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  });
+  bodyWrap.appendChild(domainCard);
+
+  const domainHeader = rt("div", { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" });
+  domainCard.appendChild(domainHeader);
+
+  const domainTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    color: n.text,
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  });
+  domainTitle.innerHTML = `<span style="font-size:16px">⚙️</span> 3. Domains to Replicate & Assign`;
+  domainHeader.appendChild(domainTitle);
+
+  const domainTogglesGrid = rt("div", {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: "12px",
+  });
+  domainCard.appendChild(domainTogglesGrid);
+
+  const domainDefinitions = [
+    { key: "profile", icon: "👤", label: "Profile & Role", desc: "User license, base security profile & role" },
+    { key: "permSets", icon: "🔑", label: "Permission Sets", desc: "All direct Permission Sets assigned to source" },
+    { key: "psg", icon: "📦", label: "Permission Set Groups", desc: "All Permission Set Groups bundled for user" },
+    { key: "packages", icon: "💼", label: "Package Licenses", desc: "Installed managed package seats (e.g. Litify)" },
+    { key: "groups", icon: "👥", label: "Public Groups & Queues", desc: "Replicate public group and case/lead queue memberships" },
+  ];
+
+  const domainElements = {};
+  domainDefinitions.forEach((d) => {
+    const item = rt("div", {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "12px 14px",
+      borderRadius: "10px",
+      border: `1px solid ${cloneDomains[d.key] ? "rgba(59,130,246,0.35)" : n.border}`,
+      background: cloneDomains[d.key] ? (isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)") : "transparent",
+      cursor: "pointer",
+      userSelect: "none",
+      transition: "all 0.15s ease",
+      gap: "10px",
+    });
+
+    const info = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "3px" });
+    const topRow = rt("div", { display: "flex", alignItems: "center", gap: "6px" });
+    topRow.innerHTML = `<span style="font-size:13px;font-weight:700;color:${n.text}">${d.icon} ${d.label}</span>`;
+    const countBadge = rt("span", {
+      fontSize: "11px",
+      fontWeight: "700",
+      padding: "1px 7px",
+      borderRadius: "10px",
+      background: "rgba(59,130,246,0.12)",
+      color: "#3b82f6",
+    }, "0");
+    topRow.appendChild(countBadge);
+    info.appendChild(topRow);
+    info.appendChild(rt("span", { fontSize: "11px", color: n.muted }, d.desc));
+    item.appendChild(info);
+
+    const toggle = createToggle(cloneDomains[d.key], (val) => {
+      cloneDomains[d.key] = val;
+      item.style.borderColor = val ? "rgba(59,130,246,0.35)" : n.border;
+      item.style.background = val ? (isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)") : "transparent";
+      updateCloneButton();
+      updateSummary();
+    });
+    item.appendChild(toggle.element);
+
+    item.addEventListener("click", () => {
+      const newVal = !cloneDomains[d.key];
+      cloneDomains[d.key] = newVal;
+      toggle.setChecked(newVal);
+      item.style.borderColor = newVal ? "rgba(59,130,246,0.35)" : n.border;
+      item.style.background = newVal ? (isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)") : "transparent";
+      updateCloneButton();
+      updateSummary();
+    });
+
+    domainElements[d.key] = { item, toggle, countBadge };
+    domainTogglesGrid.appendChild(item);
+  });
+
+  // --- SECTION D: Package License Manual Multi-Select / Overrides ---
+  const pkgCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  bodyWrap.appendChild(pkgCard);
+
+  const pkgTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    color: n.text,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+  });
+  pkgTitle.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><span>💼</span> Package Licenses (Managed App Seats)</div><span style="font-size:11.5px;font-weight:600;color:${n.muted}">Select seats to assign</span>`;
+  pkgCard.appendChild(pkgTitle);
+
+  const pkgListWrap = rt("div", {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+    gap: "10px",
+  });
+  pkgCard.appendChild(pkgListWrap);
+
+  const selectedPackages = new Set();
+
+  function renderPackageLicensesList() {
+    pkgListWrap.innerHTML = "";
+    if (packageLicenses.length === 0) {
+      pkgListWrap.appendChild(
+        rt("div", { color: n.muted, fontSize: "12.5px", padding: "10px" }, "No managed package licenses found or detected in this org.")
+      );
+      return;
+    }
+
+    packageLicenses.forEach((pkg) => {
+      const isSelected = selectedPackages.has(pkg.Id);
+      const isFull = pkg.AllowedLicenses > 0 && pkg.UsedLicenses >= pkg.AllowedLicenses;
+      const card = rt("div", {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "10px 14px",
+        borderRadius: "8px",
+        border: `1px solid ${isSelected ? "#3b82f6" : n.border}`,
+        background: isSelected ? (isDark ? "rgba(59,130,246,0.12)" : "rgba(59,130,246,0.06)") : "transparent",
+        cursor: "pointer",
+        transition: "all 0.15s ease",
+      });
+
+      const left = rt("div", { display: "flex", flexDirection: "column", gap: "2px" });
+      const pName = rt("div", { fontSize: "12.5px", fontWeight: "700", color: n.text }, pkg.NamespacePrefix ? `${pkg.NamespacePrefix} (Package)` : "Package Seat");
+      const seatText = pkg.AllowedLicenses === -1
+        ? "Unlimited seats"
+        : `${pkg.UsedLicenses || 0} / ${pkg.AllowedLicenses} seats used`;
+      const pSeats = rt("div", {
+        fontSize: "11px",
+        color: isFull ? "#ef4444" : n.muted,
+        fontWeight: isFull ? "700" : "400",
+      }, isFull ? `⚠️ Full (${seatText})` : `✓ Open seats available (${seatText})`);
+
+      left.appendChild(pName);
+      left.appendChild(pSeats);
+      card.appendChild(left);
+
+      const checkBadge = rt("span", {
+        fontSize: "16px",
+        color: isSelected ? "#3b82f6" : n.faint,
+      }, isSelected ? "☑" : "☐");
+      card.appendChild(checkBadge);
+
+      card.addEventListener("click", () => {
+        if (selectedPackages.has(pkg.Id)) {
+          selectedPackages.delete(pkg.Id);
+        } else {
+          selectedPackages.add(pkg.Id);
+        }
+        renderPackageLicensesList();
+        updateSummary();
+      });
+
+      pkgListWrap.appendChild(card);
+    });
+  }
+
+  // --- SECTION E: Pre-Clone Inspection & Analysis Tabs ---
+  const inspectCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  bodyWrap.appendChild(inspectCard);
+
+  const inspectTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    color: n.text,
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  });
+  inspectTitle.innerHTML = `<span>🔍</span> 4. Source User Access Breakdown & Preview`;
+  inspectCard.appendChild(inspectTitle);
+
+  const inspectContent = rt("div", {
+    maxHeight: "260px",
+    overflow: "auto",
+    border: `1px solid ${n.divider}`,
+    borderRadius: "8px",
+    padding: "12px 16px",
+    fontSize: "12.5px",
+    color: n.muted,
+    background: isDark ? "#0f172a" : "#ffffff",
+  });
+  inspectContent.textContent = "Select a source user above to inspect their profile, permission sets, package licenses, and public groups.";
+  inspectCard.appendChild(inspectContent);
+
+  function renderInspectionBreakdown() {
+    if (!selectedSourceUser) {
+      inspectContent.textContent = "Select a source user above to inspect their profile, permission sets, package licenses, and public groups.";
+      return;
+    }
+
+    inspectContent.innerHTML = "";
+    const wrap = rt("div", { display: "flex", flexDirection: "column", gap: "14px" });
+
+    // Profile & Role Row
+    const pRow = rt("div", { display: "flex", flexDirection: "column", gap: "4px" });
+    pRow.innerHTML = `
+      <div style="font-weight:700;color:${n.text};font-size:13px">👤 Base Profile & Role:</div>
+      <div style="font-size:12px;color:${n.muted}">Profile: <b style="color:${n.text}">${selectedSourceUser.Profile?.Name || 'None'}</b> · User License: <b style="color:${n.text}">${selectedSourceUser.Profile?.UserLicense?.Name || 'Standard'}</b> · Role: <b style="color:${n.text}">${selectedSourceUser.UserRole?.Name || 'None'}</b></div>
+    `;
+    wrap.appendChild(pRow);
+
+    // Permission Sets
+    if (sourcePermissions.permissionSets.length > 0) {
+      const psRow = rt("div", { display: "flex", flexDirection: "column", gap: "6px" });
+      psRow.innerHTML = `<div style="font-weight:700;color:${n.text};font-size:13px">🔑 Permission Sets (${sourcePermissions.permissionSets.length}):</div>`;
+      const psList = rt("div", { display: "flex", flexWrap: "wrap", gap: "6px" });
+      sourcePermissions.permissionSets.forEach((ps) => {
+        const chip = rt("span", {
+          padding: "3px 9px",
+          borderRadius: "6px",
+          background: isDark ? "rgba(59,130,246,0.15)" : "rgba(59,130,246,0.08)",
+          border: "1px solid rgba(59,130,246,0.3)",
+          color: n.text,
+          fontSize: "11.5px",
+          fontWeight: "600",
+        }, ps.PermissionSet?.Label || ps.PermissionSet?.Name);
+        psList.appendChild(chip);
+      });
+      psRow.appendChild(psList);
+      wrap.appendChild(psRow);
+    }
+
+    // Permission Set Groups
+    if (sourcePermissions.permissionSetGroups.length > 0) {
+      const psgRow = rt("div", { display: "flex", flexDirection: "column", gap: "6px" });
+      psgRow.innerHTML = `<div style="font-weight:700;color:${n.text};font-size:13px">📦 Permission Set Groups (${sourcePermissions.permissionSetGroups.length}):</div>`;
+      const psgList = rt("div", { display: "flex", flexWrap: "wrap", gap: "6px" });
+      sourcePermissions.permissionSetGroups.forEach((psg) => {
+        const chip = rt("span", {
+          padding: "3px 9px",
+          borderRadius: "6px",
+          background: isDark ? "rgba(16,185,129,0.15)" : "rgba(16,185,129,0.08)",
+          border: "1px solid rgba(16,185,129,0.3)",
+          color: n.text,
+          fontSize: "11.5px",
+          fontWeight: "600",
+        }, psg.PermissionSetGroup?.MasterLabel || psg.PermissionSetGroup?.DeveloperName);
+        psgList.appendChild(chip);
+      });
+      psgRow.appendChild(psgList);
+      wrap.appendChild(psgRow);
+    }
+
+    // Package Licenses
+    if (sourcePermissions.packageLicenses.length > 0) {
+      const pkgRow = rt("div", { display: "flex", flexDirection: "column", gap: "6px" });
+      pkgRow.innerHTML = `<div style="font-weight:700;color:${n.text};font-size:13px">💼 Package Licenses (${sourcePermissions.packageLicenses.length}):</div>`;
+      const pkgList = rt("div", { display: "flex", flexWrap: "wrap", gap: "6px" });
+      sourcePermissions.packageLicenses.forEach((pkg) => {
+        const chip = rt("span", {
+          padding: "3px 9px",
+          borderRadius: "6px",
+          background: isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.08)",
+          border: "1px solid rgba(245,158,11,0.3)",
+          color: n.text,
+          fontSize: "11.5px",
+          fontWeight: "600",
+        }, pkg.PackageLicense?.NamespacePrefix || "Managed Package");
+        pkgList.appendChild(chip);
+      });
+      pkgRow.appendChild(pkgList);
+      wrap.appendChild(pkgRow);
+    }
+
+    // Public Groups & Queues
+    if (sourcePermissions.groupMemberships.length > 0) {
+      const grpRow = rt("div", { display: "flex", flexDirection: "column", gap: "6px" });
+      grpRow.innerHTML = `<div style="font-weight:700;color:${n.text};font-size:13px">👥 Public Groups & Queues (${sourcePermissions.groupMemberships.length}):</div>`;
+      const grpList = rt("div", { display: "flex", flexWrap: "wrap", gap: "6px" });
+      sourcePermissions.groupMemberships.forEach((gm) => {
+        const chip = rt("span", {
+          padding: "3px 9px",
+          borderRadius: "6px",
+          background: isDark ? "rgba(168,85,247,0.15)" : "rgba(168,85,247,0.08)",
+          border: "1px solid rgba(168,85,247,0.3)",
+          color: n.text,
+          fontSize: "11.5px",
+          fontWeight: "600",
+        }, `${gm.Group?.Type === 'Queue' ? '📮 Queue' : '👥 Group'}: ${gm.Group?.Name || gm.Group?.DeveloperName}`);
+        grpList.appendChild(chip);
+      });
+      grpRow.appendChild(grpList);
+      wrap.appendChild(grpRow);
+    }
+
+    inspectContent.appendChild(wrap);
+  }
+
+  // --- SECTION F: Sticky Action Bar & Execution Progress ---
+  const stickyActionBar = rt("div", {
+    position: "fixed",
+    bottom: "0",
+    left: "0",
+    right: "0",
+    background: isDark ? "rgba(15,23,42,0.94)" : "rgba(255,255,255,0.96)",
+    backdropFilter: "blur(14px)",
+    WebkitBackdropFilter: "blur(14px)",
+    borderTop: `1px solid ${n.divider}`,
+    boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
+    zIndex: "100",
+    padding: "14px 24px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  });
+  container.appendChild(stickyActionBar);
+
+  const progressBox = rt("div", {
+    display: "none",
+    flexDirection: "column",
+    gap: "8px",
+    background: isDark ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.03)",
+    padding: "10px 14px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+  });
+  stickyActionBar.appendChild(progressBox);
+
+  const progressHeader = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    fontSize: "12px",
+    fontWeight: "700",
+  });
+  const progressStatusLabel = rt("span", { color: n.text }, "Starting clone workflow…");
+  const progressPercentLabel = rt("span", { color: "#3b82f6" }, "0%");
+  progressHeader.appendChild(progressStatusLabel);
+  progressHeader.appendChild(progressPercentLabel);
+  progressBox.appendChild(progressHeader);
+
+  const progressBarTrack = rt("div", {
+    width: "100%",
+    height: "6px",
+    borderRadius: "3px",
+    background: isDark ? "#334155" : "#e2e8f0",
+    overflow: "hidden",
+  });
+  const progressBarFill = rt("div", {
+    width: "0%",
+    height: "100%",
+    borderRadius: "3px",
+    background: "linear-gradient(90deg, #3b82f6, #10b981)",
+    transition: "width 0.2s ease-out",
+  });
+  progressBarTrack.appendChild(progressBarFill);
+  progressBox.appendChild(progressBarTrack);
+
+  const logTerminal = rt("div", {
+    maxHeight: "120px",
+    overflow: "auto",
+    background: isDark ? "#020617" : "#1e293b",
+    color: "#e2e8f0",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: "11px",
+    padding: "8px 10px",
+    borderRadius: "6px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "3px",
+    lineHeight: "1.4",
+  });
+  progressBox.appendChild(logTerminal);
+
+  function logMsg(type, text) {
+    const row = rt("div", { display: "flex", gap: "8px", alignItems: "flex-start" });
+    const time = new Date().toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const timeSpan = rt("span", { color: "#64748b", flexShrink: "0" }, `[${time}]`);
+    let badgeColor = "#38bdf8";
+    if (type === "SUCCESS") badgeColor = "#4ade80";
+    if (type === "WARN") badgeColor = "#facc15";
+    if (type === "ERROR") badgeColor = "#f87171";
+
+    const badge = rt("span", { color: badgeColor, fontWeight: "700", flexShrink: "0" }, `[${type}]`);
+    const msg = rt("span", { color: type === "ERROR" ? "#fca5a5" : "#f1f5f9" }, text);
+    row.appendChild(timeSpan);
+    row.appendChild(badge);
+    row.appendChild(msg);
+    logTerminal.appendChild(row);
+    logTerminal.scrollTop = logTerminal.scrollHeight;
+  }
+
+  const resultCard = rt("div", {
+    display: "none",
+    flexDirection: "column",
+    gap: "10px",
+    background: isDark ? "rgba(16,185,129,0.1)" : "rgba(16,185,129,0.06)",
+    border: "1px solid rgba(16,185,129,0.35)",
+    borderRadius: "10px",
+    padding: "12px 16px",
+  });
+  stickyActionBar.appendChild(resultCard);
+
+  const actionRow = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "12px",
+  });
+  stickyActionBar.appendChild(actionRow);
+
+  const actionSummaryWrap = rt("div", { display: "flex", flexDirection: "column", gap: "2px", minWidth: "0" });
+  const actionMainSummary = rt("div", {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: n.text,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  }, "Select a source user to begin cloning.");
+  const actionSubSummary = rt("div", { fontSize: "11.5px", color: n.muted }, "Configure domains and click Clone & Onboard User.");
+  actionSummaryWrap.appendChild(actionMainSummary);
+  actionSummaryWrap.appendChild(actionSubSummary);
+  actionRow.appendChild(actionSummaryWrap);
+
+  const startCloneBtn = rt("button", {
+    background: "#3b82f6",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "8px",
+    padding: "10px 24px",
+    fontSize: "13.5px",
+    fontWeight: "800",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    boxShadow: "0 4px 14px rgba(59,130,246,0.35)",
+    transition: "all 0.15s ease",
+    flexShrink: "0",
+  });
+  startCloneBtn.innerHTML = `<span>👥</span> Clone & Onboard User`;
+  startCloneBtn.addEventListener("click", executeUserClone);
+  actionRow.appendChild(startCloneBtn);
+
+  function updateSummary() {
+    if (!selectedSourceUser) {
+      actionMainSummary.textContent = "Select a source user to replicate permissions from.";
+      actionSubSummary.textContent = "All permission sets, package seats, and groups will be assigned to target.";
+      return;
+    }
+
+    const targetDesc = targetMode === "new"
+      ? `New User "${fnInput.value.trim()} ${lnInput.value.trim() || 'New User'}" (${usernameInput.value.trim() || 'username'})`
+      : `Existing User "${existingUserSelect.options[existingUserSelect.selectedIndex]?.text || 'Target'}"`;
+
+    const activeDomains = Object.values(cloneDomains).filter(Boolean).length;
+    actionMainSummary.innerHTML = `<span style="color:#3b82f6">${selectedSourceUser.Name}</span> ➔ <span style="color:#10b981">${targetDesc}</span>`;
+    actionSubSummary.textContent = `${activeDomains} domain(s) active · ${sourcePermissions.permissionSets.length} PermSets · ${sourcePermissions.permissionSetGroups.length} PSGs · ${selectedPackages.size} Package Seats · ${sourcePermissions.groupMemberships.length} Groups`;
+  }
+
+  function updateCloneButton() {
+    if (!selectedSourceUser) {
+      startCloneBtn.disabled = true;
+      startCloneBtn.style.opacity = "0.5";
+      startCloneBtn.style.cursor = "not-allowed";
+      return;
+    }
+    startCloneBtn.disabled = false;
+    startCloneBtn.style.opacity = "1";
+    startCloneBtn.style.cursor = "pointer";
+  }
+
+  // Smart Request Parser
+  parseBtn.addEventListener("click", () => {
+    const rawText = smartTextarea.value.trim();
+    if (!rawText) {
+      t.flashToast("Please paste an onboarding request first.");
+      return;
+    }
+
+    // 1. Extract email
+    const emailMatch = rawText.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    if (emailMatch) {
+      emailInput.value = emailMatch[1];
+      usernameInput.value = emailMatch[1];
+    }
+
+    // 2. Extract name
+    // Common patterns: "to our new intake manager Jennifer Colwell", "for Jennifer Colwell", "user Jennifer Colwell"
+    let detectedFirst = "";
+    let detectedLast = "";
+
+    const nameRegex = /(?:manager|user|employee|to|for|onboard|name(?:\s+is)?)\s+([A-Z][a-z]+)\s+([A-Z][a-z]+)/i;
+    const nameMatch = rawText.match(nameRegex);
+    if (nameMatch) {
+      detectedFirst = nameMatch[1];
+      detectedLast = nameMatch[2];
+    } else {
+      // Fallback: look for two capitalized words preceding email
+      const preEmailMatch = rawText.match(/([A-Z][a-z]+)\s+([A-Z][a-z]+)(?:\s*\([^)]*@|\s*<[^>]*@|\s*\[mailto:|\s+who)/);
+      if (preEmailMatch) {
+        detectedFirst = preEmailMatch[1];
+        detectedLast = preEmailMatch[2];
+      }
+    }
+
+    if (detectedFirst) fnInput.value = detectedFirst;
+    if (detectedLast) lnInput.value = detectedLast;
+
+    autoPopulateUserMeta();
+
+    // 3. Detect requested package licenses (e.g. Litify, DocuSign, Financial Services)
+    let matchedPkgCount = 0;
+    packageLicenses.forEach((pkg) => {
+      const ns = (pkg.NamespacePrefix || "").toLowerCase();
+      if (ns && rawText.toLowerCase().includes(ns)) {
+        selectedPackages.add(pkg.Id);
+        matchedPkgCount++;
+      } else if (rawText.toLowerCase().includes("litify") && ns.includes("litify")) {
+        selectedPackages.add(pkg.Id);
+        matchedPkgCount++;
+      }
+    });
+
+    renderPackageLicensesList();
+
+    // 4. Try auto-matching source user if role/title mentioned (e.g. "intake manager")
+    const lowerText = rawText.toLowerCase();
+    const candidateSource = usersList.find((u) => {
+      const title = (u.Title || "").toLowerCase();
+      const role = (u.UserRole?.Name || "").toLowerCase();
+      return (title && lowerText.includes(title)) || (role && lowerText.includes(role));
+    });
+    if (candidateSource && !sourceSelect.value) {
+      sourceSelect.value = candidateSource.Id;
+      sourceSelect.dispatchEvent(new Event("change"));
+    }
+
+    t.flashToast(`Smart Auto-Fill: Detected ${detectedFirst} ${detectedLast} (${matchedPkgCount} package seats matched)`);
+    updateSummary();
+  });
+
+  // Load Initial Data
+  async function loadInitialData() {
+    sourceDetails.textContent = "Loading active Salesforce users, roles, and licenses…";
+    try {
+      const [usersRes, licRes, profRes, roleRes, pkgRes, orgRes] = await Promise.all([
+        t.runQuery("SELECT Id, Name, Username, Email, Title, IsActive, ProfileId, Profile.Name, Profile.UserLicense.Name, UserRoleId, UserRole.Name FROM User WHERE IsActive = true ORDER BY Name LIMIT 1000"),
+        t.runQuery("SELECT Id, Name, TotalLicenses, UsedLicenses, Status FROM UserLicense WHERE Status = 'Active' ORDER BY Name"),
+        t.runQuery("SELECT Id, Name, UserLicense.Name FROM Profile ORDER BY Name LIMIT 1000"),
+        t.runQuery("SELECT Id, Name FROM UserRole ORDER BY Name LIMIT 1000"),
+        t.runQuery("SELECT Id, NamespacePrefix, AllowedLicenses, UsedLicenses, Status FROM PackageLicense WHERE Status = 'Active' ORDER BY NamespacePrefix"),
+        t.runQuery("SELECT Id, Name, DefaultLocaleSidKey, LanguageLocaleKey, TimeZoneSidKey FROM Organization LIMIT 1"),
+      ]);
+
+      usersList = usersRes.records || [];
+      userLicenses = licRes.records || [];
+      profilesList = profRes.records || [];
+      rolesList = roleRes.records || [];
+      packageLicenses = pkgRes.records || [];
+      orgInfo = (orgRes.records || [])[0] || {};
+
+      // Populate Source User Dropdown
+      sourceSelect.innerHTML = `<option value="">— Select Source User to Clone From —</option>`;
+      usersList.forEach((u) => {
+        const opt = rt("option");
+        opt.value = u.Id;
+        opt.textContent = `${u.Name} (${u.Title || u.Profile?.Name || 'User'}) - ${u.Username}`;
+        sourceSelect.appendChild(opt);
+      });
+
+      // Populate Existing Target User Dropdown
+      existingUserSelect.innerHTML = `<option value="">— Select Target User to Receive Permissions —</option>`;
+      usersList.forEach((u) => {
+        const opt = rt("option");
+        opt.value = u.Id;
+        opt.textContent = `${u.Name} (${u.Username})`;
+        existingUserSelect.appendChild(opt);
+      });
+
+      // Populate Profile Dropdown
+      profSelect.innerHTML = `<option value="">— Source User's Profile —</option>`;
+      profilesList.forEach((p) => {
+        const opt = rt("option");
+        opt.value = p.Id;
+        opt.textContent = `${p.Name} (${p.UserLicense?.Name || 'Standard'})`;
+        profSelect.appendChild(opt);
+      });
+
+      // Populate Role Dropdown
+      roleSelect.innerHTML = `<option value="">— None / Source User's Role —</option>`;
+      rolesList.forEach((r) => {
+        const opt = rt("option");
+        opt.value = r.Id;
+        opt.textContent = r.Name;
+        roleSelect.appendChild(opt);
+      });
+
+      renderPackageLicensesList();
+
+      sourceDetails.textContent = `${usersList.length} active users loaded. Select a source user to inspect.`;
+    } catch (err) {
+      sourceDetails.textContent = `Error loading users: ${err?.message || err}`;
+    }
+  }
+
+  // Handle Source User Selection
+  sourceSelect.addEventListener("change", async () => {
+    const sId = sourceSelect.value;
+    if (!sId) {
+      selectedSourceUser = null;
+      sourceDetails.textContent = "";
+      updateCloneButton();
+      updateSummary();
+      renderInspectionBreakdown();
+      return;
+    }
+
+    selectedSourceUser = usersList.find((u) => u.Id === sId);
+    sourceDetails.innerHTML = `<span style="color:#3b82f6;font-weight:700">Loading assignments & permissions for ${selectedSourceUser.Name}…</span>`;
+    statusBadge.textContent = "Analyzing…";
+    statusBadge.style.color = "#f59e0b";
+    statusBadge.style.background = "rgba(245,158,11,0.15)";
+
+    await loadSourceUserPermissions(selectedSourceUser.Id);
+  });
+
+  async function loadSourceUserPermissions(userId) {
+    try {
+      const [psRes, pkgRes, grpRes] = await Promise.all([
+        t.runQuery(`SELECT Id, PermissionSetId, PermissionSet.Label, PermissionSet.Name, PermissionSet.IsOwnedByProfile, PermissionSetGroupId, PermissionSetGroup.DeveloperName, PermissionSetGroup.MasterLabel FROM PermissionSetAssignment WHERE AssigneeId = '${userId}'`),
+        t.runQuery(`SELECT Id, PackageLicenseId, PackageLicense.NamespacePrefix, PackageLicense.AllowedLicenses, PackageLicense.UsedLicenses FROM UserPackageLicense WHERE UserId = '${userId}'`),
+        t.runQuery(`SELECT Id, GroupId, Group.Name, Group.DeveloperName, Group.Type FROM GroupMember WHERE UserOrGroupId = '${userId}' AND Group.Type IN ('Regular', 'Queue')`),
+      ]);
+
+      const rawPs = psRes.records || [];
+      sourcePermissions.permissionSets = rawPs.filter((p) => !p.PermissionSet?.IsOwnedByProfile && !p.PermissionSetGroupId);
+      sourcePermissions.permissionSetGroups = rawPs.filter((p) => p.PermissionSetGroupId);
+      sourcePermissions.packageLicenses = pkgRes.records || [];
+      sourcePermissions.groupMemberships = grpRes.records || [];
+
+      // Pre-select package licenses assigned to source
+      selectedPackages.clear();
+      sourcePermissions.packageLicenses.forEach((pkg) => {
+        if (pkg.PackageLicenseId) selectedPackages.add(pkg.PackageLicenseId);
+      });
+      renderPackageLicensesList();
+
+      // Update counters
+      domainElements.permSets.countBadge.textContent = String(sourcePermissions.permissionSets.length);
+      domainElements.psg.countBadge.textContent = String(sourcePermissions.permissionSetGroups.length);
+      domainElements.packages.countBadge.textContent = String(sourcePermissions.packageLicenses.length);
+      domainElements.groups.countBadge.textContent = String(sourcePermissions.groupMemberships.length);
+      domainElements.profile.countBadge.textContent = "1";
+
+      sourceDetails.innerHTML = `<span style="color:#10b981;font-weight:700">✓ Analyzed:</span> ${sourcePermissions.permissionSets.length} PermSets, ${sourcePermissions.permissionSetGroups.length} PSGs, ${sourcePermissions.packageLicenses.length} Package Seats, ${sourcePermissions.groupMemberships.length} Groups`;
+      statusBadge.textContent = "Ready";
+      statusBadge.style.color = "#3b82f6";
+      statusBadge.style.background = "rgba(59,130,246,0.15)";
+
+      renderInspectionBreakdown();
+      updateCloneButton();
+      updateSummary();
+    } catch (err) {
+      sourceDetails.textContent = `Error loading user permissions: ${err?.message || err}`;
+      statusBadge.textContent = "Error";
+      statusBadge.style.color = "#ef4444";
+      statusBadge.style.background = "rgba(239,68,68,0.15)";
+    }
+  }
+
+  // Execution Engine: User Clone & Onboard
+  async function executeUserClone() {
+    if (isExecuting) return;
+    isExecuting = true;
+
+    startCloneBtn.disabled = true;
+    startCloneBtn.style.opacity = "0.6";
+    startCloneBtn.innerHTML = `<span>⏳</span> Cloning in Progress…`;
+    progressBox.style.display = "flex";
+    resultCard.style.display = "none";
+    logTerminal.innerHTML = "";
+
+    statusBadge.textContent = "Executing…";
+    statusBadge.style.color = "#3b82f6";
+    statusBadge.style.background = "rgba(59,130,246,0.15)";
+
+    const setProgress = (percent, text) => {
+      progressBarFill.style.width = `${percent}%`;
+      progressPercentLabel.textContent = `${percent}%`;
+      progressStatusLabel.textContent = text;
+    };
+
+    setProgress(5, "Starting user onboarding workflow…");
+    logMsg("INFO", `Initiating clone workflow from source user "${selectedSourceUser.Name}"`);
+
+    let targetUserId = null;
+    let targetUserName = "";
+
+    try {
+      // Step 1: Create or Resolve Target User
+      if (targetMode === "new") {
+        const lastName = lnInput.value.trim();
+        const firstName = fnInput.value.trim();
+        const email = emailInput.value.trim();
+        const username = usernameInput.value.trim();
+        const alias = aliasInput.value.trim() || ((firstName.charAt(0) || "") + lastName).toLowerCase().slice(0, 8);
+        const nickname = nickInput.value.trim() || `${firstName}.${lastName}`.toLowerCase();
+        const profileId = profSelect.value || selectedSourceUser.ProfileId;
+        const roleId = roleSelect.value || selectedSourceUser.UserRoleId || null;
+
+        if (!lastName || !email || !username) {
+          throw new Error("Last Name, Email Address, and Username are required to create a new Salesforce user.");
+        }
+
+        setProgress(15, "Creating new User record…");
+        logMsg("INFO", `Creating User record "${firstName} ${lastName}" (${username})…`);
+
+        const userPayload = {
+          FirstName: firstName,
+          LastName: lastName,
+          Email: email,
+          Username: username,
+          Alias: alias,
+          CommunityNickname: nickname,
+          ProfileId: profileId,
+          EmailEncodingKey: "UTF-8",
+          LanguageLocaleKey: orgInfo.LanguageLocaleKey || "en_US",
+          LocaleSidKey: orgInfo.DefaultLocaleSidKey || "en_US",
+          TimeZoneSidKey: orgInfo.TimeZoneSidKey || "America/New_York",
+          IsActive: true,
+        };
+        if (roleId && cloneDomains.role) {
+          userPayload.UserRoleId = roleId;
+        }
+
+        const createRes = await t.apiCall({
+          type: "REST_EXPLORE",
+          endpoint: "/services/data/v60.0/sobjects/User",
+          method: "POST",
+          body: JSON.stringify(userPayload),
+        });
+
+        if (!createRes.success || !createRes.data || !createRes.data.ok) {
+          let errDetail = createRes.error || "";
+          try {
+            const parsed = JSON.parse(createRes.data?.body || "{}");
+            errDetail = parsed[0]?.message || parsed.message || createRes.data?.body || errDetail;
+          } catch {}
+          throw new Error(`Failed to create Salesforce User: ${errDetail}`);
+        }
+
+        const bodyObj = JSON.parse(createRes.data.body);
+        targetUserId = bodyObj.id;
+        targetUserName = `${firstName} ${lastName}`.trim();
+        logMsg("SUCCESS", `Created new Salesforce User ID: ${targetUserId}`);
+      } else {
+        targetUserId = existingUserSelect.value;
+        if (!targetUserId) {
+          throw new Error("Please select a target existing user.");
+        }
+        const found = usersList.find((u) => u.Id === targetUserId);
+        targetUserName = found ? found.Name : targetUserId;
+        logMsg("INFO", `Targeting existing user: ${targetUserName} (${targetUserId})`);
+
+        // If profile / role replication toggle is on, update existing user
+        if (cloneDomains.profile) {
+          const updatePayload = { ProfileId: profSelect.value || selectedSourceUser.ProfileId };
+          if (cloneDomains.role && (roleSelect.value || selectedSourceUser.UserRoleId)) {
+            updatePayload.UserRoleId = roleSelect.value || selectedSourceUser.UserRoleId;
+          }
+          await t.apiCall({
+            type: "REST_EXPLORE",
+            endpoint: `/services/data/v60.0/sobjects/User/${targetUserId}`,
+            method: "PATCH",
+            body: JSON.stringify(updatePayload),
+          });
+          logMsg("SUCCESS", "Updated Profile & Role on existing user.");
+        }
+      }
+
+      // Step 2: Assign Package Licenses (e.g. Litify)
+      let clonedPkgCount = 0;
+      if (cloneDomains.packages && selectedPackages.size > 0) {
+        setProgress(35, "Assigning package licenses (e.g. Litify)…");
+        logMsg("INFO", `Assigning ${selectedPackages.size} package license seats…`);
+
+        for (const pkgId of selectedPackages) {
+          try {
+            const pkgRes = await t.apiCall({
+              type: "REST_EXPLORE",
+              endpoint: "/services/data/v60.0/sobjects/UserPackageLicense",
+              method: "POST",
+              body: JSON.stringify({
+                UserId: targetUserId,
+                PackageLicenseId: pkgId,
+              }),
+            });
+            if (pkgRes.success && pkgRes.data?.ok) {
+              clonedPkgCount++;
+            } else {
+              const parsed = JSON.parse(pkgRes.data?.body || "{}");
+              const msg = parsed[0]?.message || parsed.message || "Failed seat assignment";
+              logMsg("WARN", `Package seat ${pkgId}: ${msg}`);
+            }
+          } catch (e) {
+            logMsg("WARN", `Package seat error: ${e?.message || e}`);
+          }
+        }
+        logMsg("SUCCESS", `Successfully assigned ${clonedPkgCount} package licenses.`);
+      }
+
+      // Step 3: Assign Permission Sets & Permission Set Groups
+      let clonedPermSetCount = 0;
+      let clonedPsgCount = 0;
+
+      const permSetAssignments = [];
+      if (cloneDomains.permSets) {
+        sourcePermissions.permissionSets.forEach((ps) => {
+          permSetAssignments.push({ AssigneeId: targetUserId, PermissionSetId: ps.PermissionSetId });
+        });
+      }
+      if (cloneDomains.psg) {
+        sourcePermissions.permissionSetGroups.forEach((psg) => {
+          permSetAssignments.push({ AssigneeId: targetUserId, PermissionSetGroupId: psg.PermissionSetGroupId });
+        });
+      }
+
+      if (permSetAssignments.length > 0) {
+        setProgress(60, "Assigning Permission Sets & Groups…");
+        logMsg("INFO", `Assigning ${permSetAssignments.length} Permission Sets & Groups…`);
+
+        for (let i = 0; i < permSetAssignments.length; i += 25) {
+          const chunk = permSetAssignments.slice(i, i + 25);
+          const compBody = {
+            allOrNone: false,
+            compositeRequest: chunk.map((item, idx) => ({
+              method: "POST",
+              url: "/services/data/v60.0/sobjects/PermissionSetAssignment",
+              referenceId: `psa_${idx}`,
+              body: item,
+            })),
+          };
+
+          const res = await t.apiCall({
+            type: "REST_EXPLORE",
+            endpoint: "/services/data/v60.0/composite",
+            method: "POST",
+            body: JSON.stringify(compBody),
+          });
+
+          if (res.success && res.data && res.data.ok) {
+            try {
+              const parsed = JSON.parse(res.data.body);
+              (parsed.compositeResponse || []).forEach((c) => {
+                if (c.httpStatusCode >= 200 && c.httpStatusCode < 300) {
+                  clonedPermSetCount++;
+                } else {
+                  const m = c.body?.[0]?.message || c.body?.message || "";
+                  if (!m.includes("duplicate value found") && !m.includes("already assigned")) {
+                    logMsg("WARN", `PermSet assignment error: ${m}`);
+                  }
+                }
+              });
+            } catch {}
+          }
+        }
+        logMsg("SUCCESS", `Successfully processed Permission Set & Group assignments.`);
+      }
+
+      // Step 4: Replicate Public Groups & Queues
+      let clonedGroupCount = 0;
+      if (cloneDomains.groups && sourcePermissions.groupMemberships.length > 0) {
+        setProgress(85, "Assigning Public Groups & Queues…");
+        logMsg("INFO", `Replicating ${sourcePermissions.groupMemberships.length} Public Group & Queue memberships…`);
+
+        for (let i = 0; i < sourcePermissions.groupMemberships.length; i += 25) {
+          const chunk = sourcePermissions.groupMemberships.slice(i, i + 25);
+          const compBody = {
+            allOrNone: false,
+            compositeRequest: chunk.map((gm, idx) => ({
+              method: "POST",
+              url: "/services/data/v60.0/sobjects/GroupMember",
+              referenceId: `gm_${idx}`,
+              body: {
+                GroupId: gm.GroupId,
+                UserOrGroupId: targetUserId,
+              },
+            })),
+          };
+
+          const res = await t.apiCall({
+            type: "REST_EXPLORE",
+            endpoint: "/services/data/v60.0/composite",
+            method: "POST",
+            body: JSON.stringify(compBody),
+          });
+
+          if (res.success && res.data && res.data.ok) {
+            try {
+              const parsed = JSON.parse(res.data.body);
+              (parsed.compositeResponse || []).forEach((c) => {
+                if (c.httpStatusCode >= 200 && c.httpStatusCode < 300) {
+                  clonedGroupCount++;
+                }
+              });
+            } catch {}
+          }
+        }
+        logMsg("SUCCESS", `Successfully assigned ${clonedGroupCount} Group & Queue memberships.`);
+      }
+
+      // Finish & Success Notification
+      setProgress(100, "User Clone & Onboarding Completed!");
+      logMsg("SUCCESS", `🎉 Onboarding completed for ${targetUserName}!`);
+      t.flashToast(`User ${targetUserName} Cloned Successfully!`);
+
+      statusBadge.textContent = "Cloned Successfully";
+      statusBadge.style.color = "#10b981";
+      statusBadge.style.background = "rgba(16,185,129,0.15)";
+
+      const sfUserUrl = `/lightning/setup/ManageUsers/page?address=%2F${targetUserId}`;
+
+      resultCard.style.display = "flex";
+      resultCard.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:15px;font-weight:800;color:#10b981;display:flex;align-items:center;gap:6px">
+              <span>🎉</span> User Onboarding & Clone Completed!
+            </div>
+            <div style="font-size:12.5px;color:${n.text};margin-top:2px">
+              Target User: <b>${targetUserName}</b> (ID: ${targetUserId})
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="open-user-btn" style="background:#10b981;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+              <span>🔗</span> Open User in Salesforce Setup
+            </button>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px;color:${n.muted};padding-top:6px;border-top:1px solid rgba(16,185,129,0.2)">
+          <span>👤 Profile & Role Configured</span> ·
+          <span>🔑 <b>${clonedPermSetCount}</b> Permission Sets / Groups</span> ·
+          <span>💼 <b>${clonedPkgCount}</b> Package Seats</span> ·
+          <span>👥 <b>${clonedGroupCount}</b> Group & Queue Memberships</span>
+        </div>
+      `;
+
+      resultCard.querySelector("#open-user-btn").addEventListener("click", () => {
+        globalThis.chrome?.runtime?.sendMessage({
+          type: "OPEN_TAB",
+          url: sfUserUrl,
+        });
+      });
+    } catch (err) {
+      logMsg("ERROR", `Clone Failed: ${err?.message || err}`);
+      setProgress(100, "Error encountered.");
+      statusBadge.textContent = "Clone Failed";
+      statusBadge.style.color = "#ef4444";
+      statusBadge.style.background = "rgba(239,68,68,0.15)";
+      t.flashToast(`Error: ${err?.message || err}`);
+    } finally {
+      isExecuting = false;
+      startCloneBtn.disabled = false;
+      startCloneBtn.style.opacity = "1";
+      startCloneBtn.innerHTML = `<span>👥</span> Clone & Onboard User`;
+    }
+  }
+
+  // Load initial data immediately
+  loadInitialData();
+}
+
 function renderPermClone(o, t) {
   const isDark = t.isDark,
     n = kt(isDark);
@@ -14126,6 +15804,21 @@ function renderPermClone(o, t) {
   headerLeft.appendChild(
     rt("div", { fontSize: "15px", fontWeight: "800", color: n.text, display: "flex", alignItems: "center", gap: "8px" }, "🧬 Profile & Permission Master Clone")
   );
+
+  const switchUserBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "3px 9px",
+    fontSize: "11px",
+    fontWeight: "700",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    marginLeft: "8px",
+  }, "👥 Switch to User Clone");
+  switchUserBtn.addEventListener("click", () => renderUserClone(o, t));
+  headerLeft.appendChild(switchUserBtn);
   header.appendChild(headerLeft);
 
   const headerRight = rt("div", { display: "flex", alignItems: "center", gap: "10px" });
@@ -26430,6 +28123,25 @@ function uu(o, t) {
         Be("Vertical position", s.verticalPosition, 0, 100, "%", (p) =>
           u({ verticalPosition: p }),
         ),
+      ),
+      w.appendChild(L()),
+      w.appendChild(X("Spotlight size")),
+      w.appendChild(
+        Fe(
+          "div",
+          { fontSize: "12px", color: n.muted, margin: "-2px 0 6px" },
+          "Size of the Spotlight popup. You can also drag its bottom-right corner. Applies the next time it opens.",
+        ),
+      ),
+      w.appendChild(
+        Be("Width", s.spotlightWidth ?? 1280, 600, 1600, "px", (p) =>
+          u({ spotlightWidth: p }),
+        ),
+      ),
+      w.appendChild(
+        Be("Height", s.spotlightHeight ?? 1200, 280, 1200, "px", (p) =>
+          u({ spotlightHeight: p }),
+        ),
       ));
     const H = x();
     (H.appendChild(
@@ -26442,6 +28154,14 @@ function uu(o, t) {
           (p) => u({ minimalView: p }),
           "Minimal view",
           "Show only the universal search strip instead of the full tabbed panel.",
+        ),
+      ),
+      H.appendChild(
+        C(
+          s.orgTabGroups === !0,
+          (p) => u({ orgTabGroups: p }),
+          "Group browser tabs by org",
+          "Put each org's Salesforce tabs into its own Chrome tab group (e.g. \"☁ acme · uat\"). Turning it off ungroups them.",
         ),
       ),
       H.appendChild(
@@ -26468,6 +28188,177 @@ function uu(o, t) {
           "Add an auto-fill button to Lightning new-record modals.",
         ),
       ),
+      H.appendChild(
+        C(
+          a.orgFaviconEnabled !== false,
+          (p) => {
+            b({ orgFaviconEnabled: p });
+            globalThis.chrome?.storage?.local?.set({
+              sf_spotlight_org_brand: { ...(a || {}), orgFaviconEnabled: p },
+            });
+          },
+          "Org Color Favicon",
+          "Color-code the browser tab favicon and display Org initials to easily differentiate orgs.",
+        ),
+      ),
+      H.appendChild(
+        C(
+          a.orgTitleEnabled !== false,
+          (p) => {
+            b({ orgTitleEnabled: p });
+            globalThis.chrome?.storage?.local?.set({
+              sf_spotlight_org_brand: { ...(a || {}), orgTitleEnabled: p },
+            });
+          },
+          "Org Name in Tab Title",
+          "Prepend the Salesforce Org name/label in browser tab titles (e.g. [Acme Corp]).",
+        ),
+      ),
+      (() => {
+        const brandBox = Fe("div", {
+          marginTop: "12px",
+          marginLeft: "30px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "14px",
+          padding: "16px 18px",
+          borderRadius: "12px",
+          background: n.inputBg || "rgba(0,0,0,0.03)",
+          border: `1px solid ${n.border}`,
+        });
+
+        // Custom Tab Title Prefix Input
+        const titleRow = Fe("div", {
+          display: "flex",
+          flexDirection: "column",
+          gap: "5px",
+        });
+        titleRow.appendChild(
+          Fe("div", { fontSize: "12.5px", fontWeight: "700", color: n.text }, "Custom Tab Title Prefix"),
+        );
+        titleRow.appendChild(
+          Fe("div", { fontSize: "11.5px", color: n.muted }, "Override the org tag shown in tab titles (e.g. Acme, DEV, UAT). Leave blank for default."),
+        );
+        const titleInput = Fe("input", {
+          maxWidth: "320px",
+          padding: "8px 12px",
+          borderRadius: "8px",
+          border: `1px solid ${n.border}`,
+          background: n.card,
+          color: n.text,
+          fontSize: "13px",
+          fontFamily: "inherit",
+          outline: "none",
+        });
+        titleInput.placeholder = "e.g. Acme DEV or Production";
+        titleInput.value = a.orgCustomLabel || "";
+        titleInput.addEventListener("input", (e) => {
+          const val = e.target.value.trim();
+          b({ orgCustomLabel: val });
+          globalThis.chrome?.storage?.local?.set({
+            sf_spotlight_org_brand: { ...(a || {}), orgCustomLabel: val },
+          });
+        });
+        titleRow.appendChild(titleInput);
+        brandBox.appendChild(titleRow);
+
+        // Custom Color Picker & Palette
+        const colorRow = Fe("div", {
+          display: "flex",
+          flexDirection: "column",
+          gap: "6px",
+        });
+        colorRow.appendChild(
+          Fe("div", { fontSize: "12.5px", fontWeight: "700", color: n.text }, "Custom Org Color"),
+        );
+        colorRow.appendChild(
+          Fe("div", { fontSize: "11.5px", color: n.muted }, "Choose a custom color for this org's tab favicon badge."),
+        );
+        
+        const paletteContainer = Fe("div", {
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          flexWrap: "wrap",
+          marginTop: "4px",
+        });
+
+        const presetColors = [
+          "#ef4444", "#f97316", "#f59e0b", "#10b981", "#06b6d4",
+          "#3b82f6", "#6366f1", "#8b5cf6", "#ec4899", "#14b8a6", "#475569"
+        ];
+
+        const activeColor = a.orgCustomColor || "";
+
+        presetColors.forEach((hex) => {
+          const isSelected = activeColor.toLowerCase() === hex.toLowerCase();
+          const swatch = Fe("button", {
+            width: "24px",
+            height: "24px",
+            borderRadius: "50%",
+            background: hex,
+            border: isSelected ? "2.5px solid #fff" : "1px solid rgba(0,0,0,0.15)",
+            outline: isSelected ? `2.5px solid ${hex}` : "none",
+            cursor: "pointer",
+            padding: "0",
+            flexShrink: "0",
+            transition: "transform .12s",
+          });
+          swatch.title = hex;
+          swatch.addEventListener("click", () => {
+            b({ orgCustomColor: hex });
+            globalThis.chrome?.storage?.local?.set({
+              sf_spotlight_org_brand: { ...(a || {}), orgCustomColor: hex },
+            });
+          });
+          paletteContainer.appendChild(swatch);
+        });
+
+        const nativeColorPicker = Fe("input", {
+          width: "30px",
+          height: "30px",
+          borderRadius: "7px",
+          border: `1px solid ${n.border}`,
+          cursor: "pointer",
+          padding: "1px 2px",
+          background: "transparent",
+        });
+        nativeColorPicker.type = "color";
+        nativeColorPicker.value = activeColor || "#3b82f6";
+        nativeColorPicker.title = "Pick any custom color";
+        nativeColorPicker.addEventListener("change", (e) => {
+          const hex = e.target.value;
+          b({ orgCustomColor: hex });
+          globalThis.chrome?.storage?.local?.set({
+            sf_spotlight_org_brand: { ...(a || {}), orgCustomColor: hex },
+          });
+        });
+        paletteContainer.appendChild(nativeColorPicker);
+
+        if (activeColor) {
+          const resetColorBtn = Fe("button", {
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "12px",
+            color: n.muted,
+            textDecoration: "underline",
+            marginLeft: "8px",
+          }, "Reset to Auto Color");
+          resetColorBtn.addEventListener("click", () => {
+            b({ orgCustomColor: "" });
+            globalThis.chrome?.storage?.local?.set({
+              sf_spotlight_org_brand: { ...(a || {}), orgCustomColor: "" },
+            });
+          });
+          paletteContainer.appendChild(resetColorBtn);
+        }
+
+        colorRow.appendChild(paletteContainer);
+        brandBox.appendChild(colorRow);
+
+        H.appendChild(brandBox);
+      })(),
       H.appendChild(
         Fe(
           "div",
@@ -26965,14 +28856,6 @@ function uu(o, t) {
           (S) => k({ typoFix: S }),
           "Auto-fix SOQL typos",
           "Correct common keyword typos (e.g. SELCT → SELECT) when a query runs.",
-        ),
-      ),
-      H.appendChild(
-        C(
-          r.sobjectContext,
-          (S) => k({ sobjectContext: S }),
-          "Seed from current record/object",
-          "Pre-fill the first query from the object or record you opened the panel on.",
         ),
       ),
       H.appendChild(
@@ -29488,7 +31371,27 @@ let mt = "light",
   Kn = "default",
   Vi = !1,
   Do = 100,
+  spW = 1280,
+  spH = 1200,
+  spMax = !1,
   zt = !1;
+// Popup box size: maximized fills the viewport, otherwise the saved size
+function spotlightBox(minimal) {
+  return spMax
+    ? { w: "calc(100vw - 48px)", h: minimal ? "calc(88vh - 250px)" : "calc(100vh - 240px)" }
+    : { w: `min(${spW}px, calc(100vw - 32px))`, h: `min(${spH}px, calc(100vh - ${minimal ? "12vh - 250px" : "240px"}))` };
+}
+// Persist the Spotlight popup size into the shared settings object
+function saveSpotlightSize(w, h) {
+  ((spW = w), (spH = h));
+  try {
+    globalThis.chrome?.storage?.local?.get([Un], (o) => {
+      globalThis.chrome.storage.local.set({
+        [Un]: { ...Jn, ...(o?.[Un] || {}), spotlightWidth: w, spotlightHeight: h, spotlightMaximized: spMax },
+      });
+    });
+  } catch {}
+}
 const Si = "sf_spotlight_sidebar_collapsed";
 try {
   globalThis.chrome?.storage?.local?.get([Si], (o) => {
@@ -29709,13 +31612,82 @@ function $u(o) {
     } catch {}
 }
 Fu();
+// Export Data drafts, kept locally per org + object: { "<host>|<object>": { active, tabs } }
+const Dk = "sf_spotlight_soql_drafts";
+let soqlDrafts = {},
+  soqlDraftTimer = null;
+try {
+  globalThis.chrome?.storage?.local?.get([Dk], (o) => {
+    const v = o?.[Dk];
+    soqlDrafts = v && typeof v == "object" ? v : {};
+  });
+} catch {}
+function saveSoqlDraft(key, draft) {
+  ((soqlDrafts[key] = { ...draft, ts: Date.now() }), clearTimeout(soqlDraftTimer));
+  soqlDraftTimer = setTimeout(() => {
+    // Keep the 100 most recent drafts
+    const keys = Object.keys(soqlDrafts).sort((a, b) => (soqlDrafts[b].ts || 0) - (soqlDrafts[a].ts || 0));
+    keys.slice(100).forEach((k) => delete soqlDrafts[k]);
+    try {
+      globalThis.chrome?.storage?.local?.set({ [Dk]: soqlDrafts });
+    } catch {}
+  }, 400);
+}
+// Query Builder templates: [{ id, name, object, soql, state, ts }]
+const QBT_KEY = "sf_spotlight_qb_templates";
+let qbTemplates = [];
+try {
+  globalThis.chrome?.storage?.local?.get([QBT_KEY], (o) => {
+    qbTemplates = Array.isArray(o?.[QBT_KEY]) ? o[QBT_KEY] : [];
+  });
+  // Stay in sync with templates saved from other tabs
+  globalThis.chrome?.storage?.onChanged?.addListener((ch, area) => {
+    area === "local" && Array.isArray(ch[QBT_KEY]?.newValue) && (qbTemplates = ch[QBT_KEY].newValue);
+  });
+} catch {}
+function saveQbTemplates() {
+  try {
+    globalThis.chrome?.storage?.local?.set({ [QBT_KEY]: qbTemplates });
+  } catch {}
+}
+// "Group by category" for the Apps & Tools grid — off by default, remembered per org
+const Gk = "sf_spotlight_tools_grouped";
+let toolsGroupedByOrg = {};
+try {
+  globalThis.chrome?.storage?.local?.get([Gk], (o) => {
+    const v = o?.[Gk];
+    toolsGroupedByOrg = v && typeof v == "object" ? v : {};
+  });
+} catch {}
+function isToolsGrouped() {
+  return toolsGroupedByOrg[Vt(en())] === !0;
+}
+function setToolsGrouped(on) {
+  const k = Vt(en());
+  (on ? (toolsGroupedByOrg[k] = !0) : delete toolsGroupedByOrg[k]);
+  try {
+    globalThis.chrome?.storage?.local?.set({ [Gk]: toolsGroupedByOrg });
+  } catch {}
+}
+const toolCategories = [
+  { label: "Data", ids: ["export", "querybuilder", "dataimport", "sampledata", "magicfill"] },
+  { label: "Schema & Objects", ids: ["objectmanager", "objectdetails", "bulkfieldcreator", "fieldapi", "whereused"] },
+  { label: "Automation", ids: ["automationmap", "flowmanager", "validationrules"] },
+  { label: "Developer", ids: ["executeanonymous", "aicodeeditor", "restexplorer", "eventmonitor", "inspectlwc", "webconsole", "webconsolesetup"] },
+  { label: "Security & Users", ids: ["permcompare", "permclone", "userclone", "accessmap"] },
+  { label: "Org Health", ids: ["orgdetails", "orglimits", "apiusage", "storage", "speedtest", "release"] },
+  { label: "Navigation & Utilities", ids: ["sfhome", "classic", "settings", "shortcuts", "clearsession", "ghost", "whatsnew"] },
+];
 Ni((o) => {
   ((mt = o.spotlightTheme),
     (qi = o.showObjectExplorer !== !1),
     (Kn = o.uiSkin || "default"),
     Pi(Kn),
     (Vi = o.minimalView === !0),
-    (Do = typeof o.opacity == "number" ? o.opacity : 100));
+    (Do = typeof o.opacity == "number" ? o.opacity : 100),
+    typeof o.spotlightWidth == "number" && (spW = o.spotlightWidth),
+    typeof o.spotlightHeight == "number" && (spH = o.spotlightHeight),
+    (spMax = o.spotlightMaximized === !0));
 });
 try {
   globalThis.chrome?.storage?.onChanged?.addListener((o, t) => {
@@ -29727,7 +31699,10 @@ try {
           (Kn = e.uiSkin || "default"),
           Pi(Kn),
           (Vi = e.minimalView === !0),
-          typeof e.opacity == "number" && (Do = e.opacity));
+          typeof e.opacity == "number" && (Do = e.opacity),
+          typeof e.spotlightWidth == "number" && (spW = e.spotlightWidth),
+          typeof e.spotlightHeight == "number" && (spH = e.spotlightHeight),
+          (spMax = e.spotlightMaximized === !0));
       }
       (o[ao]?.newValue && (Yn = wo(o[ao].newValue)),
         o.sf_spotlight_tools_state?.newValue && xa(() => Ea()),
@@ -32403,19 +34378,52 @@ function uo(o) {
         sessionId: t.sessionId,
       },
       (e) => {
-        ((So =
+        const n =
           e?.success && e.data
-            ? e.data.map((n) => ({
-                name: n.QualifiedApiName,
-                label: n.Label || n.QualifiedApiName,
+            ? e.data.map((s) => ({
+                name: s.QualifiedApiName,
+                label: s.Label || s.QualifiedApiName,
               }))
-            : []),
-          o(So || []));
+            : [];
+        // Only cache a successful load so a transient failure can be retried
+        (n.length && (So = n), o(n));
       },
     );
   });
 }
 
+
+// Polymorphic lookups (e.g. OwnerId -> [Group, User]) resolve to User when possible
+function pickRefTarget(f) {
+  const refs = f.referenceTo || [];
+  return refs.includes("User") ? "User" : refs[0];
+}
+
+// Map describe fields to autocomplete items. Lookups yield two entries: the Id
+// field itself, and a "Rel." entry that drills into the parent's fields.
+function toFieldSuggestions(fields, prefix = "") {
+  return fields.flatMap((f) => {
+    const item = {
+      insert: prefix + f.name,
+      label: prefix + f.name,
+      sub: `${f.label} · ${f.type}`,
+      kind: "field",
+    };
+    if (!(f.relationshipName && f.referenceTo && f.referenceTo.length > 0)) return [item];
+    return [
+      item,
+      {
+        insert: prefix + f.relationshipName,
+        label: `${prefix}${f.relationshipName}.`,
+        sub: `${pickRefTarget(f)} fields`,
+        kind: "field",
+        isRelationship: true,
+        relationshipName: f.relationshipName,
+        referenceTo: [pickRefTarget(f)],
+      },
+    ];
+  });
+}
 
 function loadAllFieldsIncludingRelationships(objectName, baseFields, callback, progressCallback) {
   const refFields = baseFields.filter(f => f.relationshipName && f.referenceTo && f.referenceTo.length > 0);
@@ -32428,7 +34436,7 @@ function loadAllFieldsIncludingRelationships(objectName, baseFields, callback, p
   const combinedFields = [...baseFields];
 
   refFields.forEach(f => {
-    const parentObj = f.referenceTo[0];
+    const parentObj = pickRefTarget(f);
     const relName = f.relationshipName;
 
     Ti(parentObj, (parentFields) => {
@@ -32476,10 +34484,10 @@ function resolveRelationshipFields(objectName, pathParts, callback) {
     // Try matching by relationshipName, then by name prefix
     const relField = fields.find(f =>
       (f.relationshipName && f.relationshipName.toLowerCase() === relName) ||
-      (f.name && f.name.toLowerCase().replace('id', '') === relName)
+      (f.name && f.name.toLowerCase().replace(/id$/, '') === relName)
     );
     if (relField && relField.referenceTo && relField.referenceTo.length > 0) {
-      resolveRelationshipFields(relField.referenceTo[0], pathParts.slice(1), callback);
+      resolveRelationshipFields(pickRefTarget(relField), pathParts.slice(1), callback);
     } else {
       // Fallback: treat pathPart as an object name directly
       Ti(pathParts[0], callback);
@@ -32487,6 +34495,104 @@ function resolveRelationshipFields(objectName, pathParts, callback) {
   });
 }
 
+// Full sObject describe (picklist values, child relationships), cached per object
+const describeCache = {};
+function loadDescribe(obj, cb) {
+  if (!obj) return cb(null);
+  const k = obj.toLowerCase();
+  if (describeCache[k]) return cb(describeCache[k]);
+  it().then((n) => {
+    if (!n?.instanceUrl || !n?.sessionId) return cb(null);
+    globalThis.chrome.runtime.sendMessage(
+      {
+        type: "REST_EXPLORE",
+        instanceUrl: n.instanceUrl,
+        sessionId: n.sessionId,
+        endpoint: `/services/data/v60.0/sobjects/${encodeURIComponent(obj)}/describe`,
+        method: "GET",
+      },
+      (res) => {
+        let d = null;
+        try {
+          res?.success && res.data?.ok && (d = describeCache[k] = JSON.parse(res.data.body));
+        } catch {}
+        cb(d);
+      },
+    );
+  });
+}
+// Child relationships of an object (for "(SELECT … FROM Contacts)" subqueries)
+function loadChildRelationships(obj, cb) {
+  loadDescribe(obj, (d) =>
+    cb(
+      (d?.childRelationships || [])
+        .filter((r) => r.relationshipName)
+        .map((r) => ({ relationshipName: r.relationshipName, childSObject: r.childSObject, field: r.field }))
+        .sort((a, b) => a.relationshipName.localeCompare(b.relationshipName)),
+    ),
+  );
+}
+// Object that owns the last field of a path, e.g. (Contact, ["Account","Owner"]) → User
+function resolvePathOwner(obj, parts, cb) {
+  if (!obj) return cb(null);
+  if (!parts.length) return cb(obj);
+  Ti(obj, (fs) => {
+    const rel = parts[0].toLowerCase(),
+      f = fs.find((x) => (x.relationshipName || "").toLowerCase() === rel);
+    f && f.referenceTo?.length ? resolvePathOwner(pickRefTarget(f), parts.slice(1), cb) : cb(null);
+  });
+}
+const SOQL_DATE_LITERALS = [
+  "TODAY", "YESTERDAY", "TOMORROW", "THIS_WEEK", "LAST_WEEK", "NEXT_WEEK",
+  "THIS_MONTH", "LAST_MONTH", "NEXT_MONTH", "LAST_90_DAYS", "THIS_QUARTER",
+  "LAST_QUARTER", "THIS_YEAR", "LAST_YEAR", "LAST_N_DAYS:7", "LAST_N_DAYS:30", "NEXT_N_DAYS:30",
+];
+// Suggested filter values for a field path: picklist values, booleans, date literals, null
+function soqlValueSuggestions(obj, path, cb) {
+  const parts = (path || "").split(".").filter(Boolean);
+  if (!obj || !parts.length) return cb([]);
+  const fieldName = parts.pop().toLowerCase();
+  resolvePathOwner(obj, parts, (owner) =>
+    loadDescribe(owner, (d) => {
+      const f = (d?.fields || []).find((x) => x.name.toLowerCase() === fieldName);
+      if (!f) return cb([{ value: "null" }]);
+      const out =
+        f.type === "picklist" || f.type === "multipicklist"
+          ? (f.picklistValues || []).filter((v) => v.active).map((v) => ({ value: v.value, label: v.label }))
+          : f.type === "boolean"
+            ? [{ value: "true" }, { value: "false" }]
+            : f.type === "date" || f.type === "datetime"
+              ? SOQL_DATE_LITERALS.map((v) => ({ value: v }))
+              : [];
+      cb([...out, { value: "null" }]);
+    }),
+  );
+}
+// Index of the "(" opening the SELECT subquery the cursor is in, or -1
+function soqlSubqueryOpen(text, pos) {
+  let depth = 0;
+  for (let i = pos - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === ")") depth++;
+    else if (ch === "(") {
+      if (depth === 0) return /^\(\s*SELECT\b/i.test(text.slice(i)) ? i : -1;
+      depth--;
+    }
+  }
+  return -1;
+}
+function soqlMatchingClose(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) return i;
+  }
+  return text.length;
+}
+// Blank out "(SELECT …)" bodies (same length) so outer-query parsing ignores them
+function soqlMaskSubqueries(text) {
+  return text.replace(/\(\s*SELECT\b[^()]*(\([^()]*\)[^()]*)*\)/gi, (m) => "(" + " ".repeat(m.length - 2) + ")");
+}
 function Ti(o, t) {
   const e = o.toLowerCase();
   if (si[e]) {
@@ -32507,17 +34613,102 @@ function Ti(o, t) {
       },
       (i) => {
         const s = i?.success && i.data ? i.data : [];
-        ((si[e] = s), t(s));
+        (i?.success && (si[e] = s), t(s));
       },
     );
   });
 }
 function Gu(o) {
-  return o
-    .replace(/,\s*,/g, ",")
-    .replace(/,\s*FROM\s+/gi, " FROM ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return soqlSyntaxFix(o).query;
+}
+// Offline SOQL repair: keyword typos, missing WHERE/BY, stray commas, quotes.
+// Returns the repaired query and a human-readable list of what changed.
+function soqlSyntaxFix(q) {
+  const fixes = [];
+  let s = q;
+  const step = (re, rep, label) => {
+    const n = s.replace(re, rep);
+    n !== s && ((s = n), fixes.push(label));
+  };
+  const has = (kw) => new RegExp(`\\b${kw}\\b`, "i").test(s);
+  step(/\b(SELCT|SLECT|SELET|SEELCT|SELETC|SELEC)\b/gi, "SELECT", "SELECT spelled correctly");
+  has("FROM") || step(/\b(FORM|FRM|FOM|FRMO)\b/gi, "FROM", "FROM spelled correctly");
+  has("WHERE") || step(/\b(WHRE|WERE|WHER|WEHRE|WHEER|WHRERE)\b/gi, "WHERE", "WHERE spelled correctly");
+  step(/\b(ODER|ORDR|OREDR|ORDE)\s+BY\b/gi, "ORDER BY", "ORDER BY spelled correctly");
+  step(/\b(GRUOP|GROPU|GORUP|GRUP)\s+BY\b/gi, "GROUP BY", "GROUP BY spelled correctly");
+  step(/\b(LIMT|LIMTI|LIMMIT|LIMI)\b(?=\s*\d)/gi, "LIMIT", "LIMIT spelled correctly");
+  step(/(?<!\bFROM\s+)\bORDER\s+(?!BY\b)/gi, "ORDER BY ", "Added missing BY after ORDER");
+  step(/(?<!\bFROM\s+)\bGROUP\s+(?!BY\b)/gi, "GROUP BY ", "Added missing BY after GROUP");
+  step(/"([^"']*)"/g, "'$1'", "Text values use single quotes");
+  step(/==/g, "=", "Use = instead of ==");
+  step(/\s*&&\s*/g, " AND ", "Use AND instead of &&");
+  step(/\s*\|\|\s*/g, " OR ", "Use OR instead of ||");
+  step(/,\s*,/g, ",", "Removed duplicate comma");
+  step(/,\s*FROM\b/gi, " FROM", "Removed trailing comma before FROM");
+  step(/\bSELECT\s+FROM\b/gi, "SELECT Id FROM", "Selected at least one field (Id)");
+  // "FROM Account Name = 'x'" → "FROM Account WHERE Name = 'x'"
+  step(
+    /(\bFROM\s+[A-Za-z0-9_]+)\s+(?!(?:WHERE|WITH|USING|GROUP|ORDER|LIMIT|OFFSET|FOR|UPDATE|HAVING|AND|OR|NOT)\b)([A-Za-z_][\w.]*\s*(?:!=|<>|<=|>=|=|<|>|\s(?:LIKE|IN|NOT\s+IN|INCLUDES|EXCLUDES)\b))/i,
+    "$1 WHERE $2",
+    "Added missing WHERE",
+  );
+  step(/\s+(AND|OR)(\s+(?:ORDER BY|GROUP BY|LIMIT|OFFSET)\b)/gi, "$2", "Removed dangling AND/OR");
+  step(/\s+(AND|OR|WHERE)\s*$/i, "", "Removed dangling keyword at the end");
+  return { query: s.replace(/\s+/g, " ").trim(), fixes };
+}
+function soqlLevenshtein(a, b) {
+  ((a = a.toLowerCase()), (b = b.toLowerCase()));
+  const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = d[0];
+    d[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = d[j];
+      ((d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1))), (prev = tmp));
+    }
+  }
+  return d[b.length];
+}
+function soqlClosest(word, candidates) {
+  let best = null,
+    bestD = 1 / 0;
+  candidates.forEach((c) => {
+    const dist = soqlLevenshtein(word, c);
+    dist < bestD && ((bestD = dist), (best = c));
+  });
+  return best && bestD > 0 && bestD <= Math.max(2, Math.floor(word.length / 3)) ? best : null;
+}
+// Uses the Salesforce error to repair unknown fields/objects/relationships.
+// Calls back with { query, fixes } or null when nothing sensible was found.
+function soqlSemanticFix(q, err, cb) {
+  const replaceWord = (word, repl) =>
+    q.replace(new RegExp(`(^|[\\s,.(])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[\\s,)=<>!]|$)`, "i"), `$1${repl}`);
+  let m = err.match(/No such column '([\w]+)' on entity '(\w+)'/i);
+  if (m) {
+    const [, col, entity] = m;
+    return Ti(entity, (fields) => {
+      const hit = soqlClosest(col, fields.map((f) => f.name));
+      cb(hit ? { query: replaceWord(col, hit), fixes: [`${col} → ${hit} (field on ${entity})`] } : null);
+    });
+  }
+  m = err.match(/sObject type '(\w+)' is not supported/i);
+  if (m) {
+    const [, obj] = m;
+    return uo((objs) => {
+      const hit = soqlClosest(obj, objs.map((o) => o.name));
+      cb(hit ? { query: q.replace(new RegExp(`(\\bFROM\\s+)${obj}\\b`, "i"), `$1${hit}`), fixes: [`${obj} → ${hit} (object)`] } : null);
+    });
+  }
+  m = err.match(/Didn't understand relationship '(\w+)'/i);
+  const from = (q.match(/\bFROM\s+(\w+)/i) || [])[1];
+  if (m && from) {
+    const [, rel] = m;
+    return Ti(from, (fields) => {
+      const hit = soqlClosest(rel, fields.map((f) => f.relationshipName).filter(Boolean));
+      cb(hit ? { query: replaceWord(rel, hit), fixes: [`${rel} → ${hit} (relationship on ${from})`] } : null);
+    });
+  }
+  cb(null);
 }
 function Qu(o) {
   if (typeof o == "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(o)) {
@@ -32613,22 +34804,38 @@ function Ku(o, t, e, n) {
   a.appendChild(l);
   const d =
       "SELECT Id, Name, CreatedDate FROM Account ORDER BY CreatedDate DESC LIMIT 50",
-    y = Tt.sobjectContext ? Gi() : null,
+    // Always start from the object of the page the panel was opened on.
+    // Related-list pages (/r/Parent/Id/related/Rel/view) resolve to the child object below.
+    relPage = location.pathname.match(/\/lightning\/r\/(\w+)\/\w+\/related\/(\w+)\/view/),
+    y = relPage ? null : Gi(),
     g = Ei,
     r = ki;
   ((Ei = null), (ki = !1));
-  const u = [
-    {
-      name: "Query 1",
-      query: g || (y ? `SELECT Id, Name FROM ${y} LIMIT 50` : d),
-      cols: [],
-      rows: [],
-      status: "",
-      tooling: Tt.defaultTooling,
-      queryAll: !1,
-    },
-  ];
-  let b = 0;
+  const draftKey = `${Vt(en())}|${(relPage ? `${relPage[1]}.${relPage[2]}` : y || "_").toLowerCase()}`,
+    draft = g ? null : soqlDrafts[draftKey],
+    seedQuery = y ? `SELECT Id, Name FROM ${y} LIMIT 50` : d;
+  const u = draft?.tabs?.length
+    ? draft.tabs.map((t, idx) => ({
+        name: t.name || `Query ${idx + 1}`,
+        query: t.query || seedQuery,
+        cols: [],
+        rows: [],
+        status: "",
+        tooling: !!t.tooling,
+        queryAll: !!t.queryAll,
+      }))
+    : [
+        {
+          name: "Query 1",
+          query: g || seedQuery,
+          cols: [],
+          rows: [],
+          status: "",
+          tooling: Tt.defaultTooling,
+          queryAll: !1,
+        },
+      ];
+  let b = draft ? Math.min(Math.max(0, draft.active | 0), u.length - 1) : 0;
   const N = document.createElement("div");
   (Object.assign(N.style, {
     flexShrink: "0",
@@ -32848,7 +35055,7 @@ function Ku(o, t, e, n) {
   });
   const De = D("Tooling API"),
     Be = D("Query All (deleted)");
-  De.cb.checked = u[b].tooling;
+  ((De.cb.checked = u[b].tooling), (Be.cb.checked = u[b].queryAll));
   const be = document.createElement("input");
   ((be.type = "text"),
     (be.placeholder = "Filter results…"),
@@ -33250,6 +35457,66 @@ function Ku(o, t, e, n) {
       }),
       P.appendChild(v));
   };
+  let fixSeq = 0;
+  // After a failed run, propose a repaired query (offline rules first, then
+  // field/object name matching driven by the Salesforce error message)
+  const offerFix = (q, err) => {
+    const seq = ++fixSeq,
+      norm = q.replace(/\s+/g, " ").trim();
+    const render = (fix) => {
+      if (seq !== fixSeq || !fix || fix.query === norm) return;
+      const box = document.createElement("div");
+      Object.assign(box.style, {
+        margin: "0 24px 14px",
+        padding: "12px 14px",
+        borderRadius: "10px",
+        border: `1px solid ${i.borderStrong}`,
+        background: i.headerBg,
+        fontSize: "12.5px",
+        color: i.textPrimary,
+      });
+      const title = document.createElement("div");
+      ((title.textContent = "💡 Suggested fix"),
+        Object.assign(title.style, { fontWeight: "800", marginBottom: "6px" }),
+        box.appendChild(title));
+      const list = document.createElement("ul");
+      (Object.assign(list.style, { margin: "0 0 8px", paddingLeft: "18px", color: i.textMuted }),
+        fix.fixes.forEach((t) => {
+          const li = document.createElement("li");
+          ((li.textContent = t), list.appendChild(li));
+        }),
+        box.appendChild(list));
+      const code = document.createElement("div");
+      ((code.textContent = fix.query),
+        Object.assign(code.style, {
+          fontFamily: "Fira Code, monospace",
+          fontSize: "12px",
+          padding: "8px 10px",
+          borderRadius: "8px",
+          background: i.inputBg,
+          border: `1px solid ${i.divider}`,
+          wordBreak: "break-word",
+          marginBottom: "10px",
+        }),
+        box.appendChild(code));
+      const run = L("Apply & Run", !0),
+        apply = L("Apply");
+      ((run.style.padding = apply.style.padding = "6px 12px"),
+        (run.style.fontSize = apply.style.fontSize = "12px"),
+        (apply.style.marginLeft = "8px"),
+        run.addEventListener("click", () => {
+          ((c.value = fix.query), Te());
+        }),
+        apply.addEventListener("click", () => {
+          ((c.value = fix.query), box.remove(), c.focus());
+        }),
+        box.appendChild(run),
+        box.appendChild(apply),
+        P.appendChild(box));
+    };
+    const syn = soqlSyntaxFix(q);
+    syn.fixes.length ? render(syn) : soqlSemanticFix(q, err, render);
+  };
   let oe = null;
   const we = () => {
       ((oe = null),
@@ -33263,8 +35530,9 @@ function Ku(o, t, e, n) {
       let h = c.value.trim();
       if (!h) return;
       if ((fo("soql"), Tt.typoFix)) {
-        const ne = Gu(h);
-        ne !== h && ((h = ne), (c.value = h));
+        const ne = soqlSyntaxFix(h);
+        ne.fixes.length &&
+          ((h = ne.query), (c.value = h), ot(`Auto-fixed: ${ne.fixes.join(", ")}`));
       }
       ((u[b].query = h),
         (u[b].tooling = De.cb.checked),
@@ -33300,7 +35568,9 @@ function Ku(o, t, e, n) {
               return;
             }
             if (!B?.success) {
-              ((ge.textContent = ""), Se(B?.error || "Query failed."));
+              ((ge.textContent = ""),
+                Se(B?.error || "Query failed."),
+                offerFix(h, B?.error || ""));
               return;
             }
             Vu(h);
@@ -33678,7 +35948,46 @@ function Ku(o, t, e, n) {
       h.addEventListener("click", fe),
       N.appendChild(h));
   }
-  ((c.value = u[0].query), Re());
+  ((c.value = u[b].query), Re());
+  // Auto-save every tab as a local draft for this org + object
+  const persistDraft = () => {
+    ((u[b].query = c.value),
+      (u[b].tooling = De.cb.checked),
+      (u[b].queryAll = Be.cb.checked),
+      saveSoqlDraft(draftKey, {
+        active: b,
+        tabs: u.map((t) => ({ name: t.name, query: t.query, tooling: t.tooling, queryAll: t.queryAll })),
+      }));
+  };
+  (c.addEventListener("input", persistDraft),
+    De.cb.addEventListener("change", persistDraft),
+    Be.cb.addEventListener("change", persistDraft),
+    N.addEventListener("click", () => setTimeout(persistDraft, 0)),
+    // Run, suggestion picks and "Apply fix" change the text without an input event
+    U.addEventListener("click", persistDraft),
+    c.addEventListener("keyup", persistDraft),
+    c.addEventListener("blur", persistDraft),
+    P.addEventListener("click", () => setTimeout(persistDraft, 0)),
+    g && persistDraft());
+  relPage &&
+    !draft &&
+    !g &&
+    loadChildRelationships(relPage[1], (rels) => {
+      const rel = rels.find((x) => x.relationshipName.toLowerCase() === relPage[2].toLowerCase());
+      rel &&
+        c.value === seedQuery &&
+        ((c.value = u[0].query = `SELECT Id, Name FROM ${rel.childSObject} LIMIT 50`), persistDraft());
+    });
+  // Objects without a Name field: fall back to Id so the seed query runs
+  !draft &&
+    !g &&
+    y &&
+    Ti(y, (fs) => {
+      fs.length &&
+        !fs.some((f) => f.name === "Name") &&
+        c.value === seedQuery &&
+        ((c.value = u[0].query = `SELECT Id FROM ${y} LIMIT 50`), persistDraft());
+    });
   const Ie = [
     { insert: "FIELDS(ALL)", sub: "all fields" },
     { insert: "FIELDS(STANDARD)", sub: "standard fields" },
@@ -33794,7 +36103,7 @@ function Ku(o, t, e, n) {
             textOverflow: "ellipsis",
             background: v === ke ? i.hover : "transparent",
           });
-          const ne = h.kind === "func" ? "ƒ" : h.kind === "object" ? "▦" : h.isRelationship ? "⇢" : "◇",
+          const ne = h.kind === "func" ? "ƒ" : h.kind === "keyword" ? "⌗" : h.kind === "object" ? "▦" : h.isRelationship ? "⇢" : "◇",
             B = Ne?.word || "",
             xe = B ? h.label.toLowerCase().indexOf(B.toLowerCase()) : -1,
             ze =
@@ -33880,11 +36189,12 @@ function Ku(o, t, e, n) {
       if (!h || !Ne) return;
       const v = c.selectionStart,
         R = c.value,
-        ne = h.insert;
+        // Field picked straight after "FROM Obj " — the WHERE was forgotten
+        ne = (Ne.needWhere && h.kind === "field" ? "WHERE " : "") + h.insert;
       let B = "",
         xe = null;
       if (h.kind === "func") ne.endsWith("()") && (xe = ne.length - 1);
-      else if (h.kind === "object") B = " ";
+      else if (h.kind === "object" || h.kind === "keyword") B = " ";
       else if (Ne.clause === "where") B = " ";
       else {
         const He = R.slice(v).replace(/^\s*/, "");
@@ -33910,6 +36220,14 @@ function Ku(o, t, e, n) {
         I();
         return;
       }
+      // Field picked from the page's object with no FROM yet: complete the query
+      if (h.kind === "field" && Ne.inferredFrom && !/\bFROM\b/i.test(R)) {
+        const tail = R.slice(v).replace(/[\s,]+$/, "");
+        c.value = R.slice(0, Ne.wordStart) + ne + tail + ` FROM ${Ne.inferredFrom}`;
+        const pos = Ne.wordStart + ne.length;
+        (c.setSelectionRange(pos, pos), f(), c.focus());
+        return;
+      }
       c.value = R.slice(0, Ne.wordStart) + ne + B + R.slice(v);
       const ze =
         xe != null ? Ne.wordStart + xe : Ne.wordStart + ne.length + B.length;
@@ -33917,8 +36235,80 @@ function Ku(o, t, e, n) {
     },
     I = () => {
       const h = c.selectionStart,
-        v = je(c.value, h),
-        R = { word: v.word, wordStart: v.wordStart, clause: v.clause };
+        text = c.value,
+        open = soqlSubqueryOpen(text, h);
+      if (open < 0) {
+        // Outer query: ignore subquery bodies when finding clause/object
+        suggestFor(je(soqlMaskSubqueries(text), h));
+        return;
+      }
+      // Inside "(SELECT … FROM <ChildRelationship> …)"
+      const close = soqlMatchingClose(text, open),
+        inner = text.slice(open + 1, close),
+        vi = je(inner, h - open - 1),
+        outerObj = (soqlMaskSubqueries(text.slice(0, open) + " " + text.slice(close + 1)).match(/\bFROM\s+(\w+)/i) || [])[1],
+        abs = { ...vi, wordStart: vi.wordStart + open + 1, inSub: !0 };
+      if (!outerObj) {
+        suggestFor({ ...abs, object: "" });
+        return;
+      }
+      loadChildRelationships(outerObj, (rels) => {
+        if (vi.clause === "object") {
+          const w = vi.word.toLowerCase();
+          W(
+            rels
+              .filter((r) => !w || r.relationshipName.toLowerCase().includes(w) || r.childSObject.toLowerCase().includes(w))
+              .slice(0, 20)
+              .map((r) => ({
+                insert: r.relationshipName,
+                label: r.relationshipName,
+                sub: `${r.childSObject} · child of ${outerObj}`,
+                kind: "object",
+              })),
+            { word: vi.word, wordStart: abs.wordStart, clause: "object" },
+          );
+          return;
+        }
+        const rel = rels.find((r) => r.relationshipName.toLowerCase() === (vi.object || "").toLowerCase());
+        suggestFor({ ...abs, object: rel ? rel.childSObject : "" });
+      });
+    },
+    suggestFor = (v) => {
+      const R = { word: v.word, wordStart: v.wordStart, clause: v.clause };
+      // Clause keywords that fit what's been typed so far
+      const before = c.value.slice(0, v.wordStart),
+        afterObj = /\bFROM\s+\w+\s+$/i.test(before),
+        afterCond =
+          v.clause === "where" && /\bWHERE\b/i.test(before) &&
+          // "<field> <op> <value> " — a finished condition
+          /(!=|<>|<=|>=|=|<|>|\bLIKE|\bIN|\bINCLUDES|\bEXCLUDES)\s*('[^']*'|-?\d[\w.:+-]*|true|false|null|[A-Z_]+(:\d+)?|\([^)]*\))\s+$/i.test(before),
+        afterOrderField = v.clause === "orderGroup" && /\bORDER BY\s+[\w.]+\s+$/i.test(before),
+        afterDir = /\b(ASC|DESC|NULLS (FIRST|LAST))\s+$/i.test(before),
+        kwList = afterObj
+          ? ["WHERE", "ORDER BY", "GROUP BY", "LIMIT", "OFFSET", "WITH SECURITY_ENFORCED"]
+          : afterCond
+            ? ["AND", "OR", "ORDER BY", "GROUP BY", "LIMIT"]
+            : afterOrderField
+              ? ["ASC", "DESC", "NULLS FIRST", "NULLS LAST", "LIMIT"]
+              : afterDir
+                ? ["LIMIT", "OFFSET", "NULLS FIRST", "NULLS LAST"]
+                : [],
+        kwItems = kwList
+          .filter((k) => k.toLowerCase().startsWith(v.word.toLowerCase()))
+          .map((k) => ({ insert: k, label: k, sub: "keyword", kind: "keyword" }));
+      afterObj && (R.needWhere = !0);
+      if (kwItems.length && (!v.word || !afterObj)) {
+        W(kwItems, R);
+        return;
+      }
+      if (afterObj && v.object) {
+        // Partial word after the object: matching keywords, then fields (auto-WHERE)
+        Ti(v.object, (ne) => {
+          const B = Tt.includeFormula ? ne : ne.filter((xe) => !xe.calculated);
+          W([...kwItems, ...toFieldSuggestions(Ge(B, v.word))].slice(0, 16), R);
+        });
+        return;
+      }
       if (v.clause === "object")
         uo((ne) =>
           W(
@@ -33933,89 +36323,36 @@ function Ku(o, t, e, n) {
         );
       else if (v.clause === "selectList") {
         const ne = J(v.word);
-        if (!v.object) {
+        // No FROM typed yet — fall back to the object of the record/list page we're on
+        const obj = v.object || (v.inSub ? null : Gi());
+        if (!obj) {
           W(ne, R);
           return;
         }
+        v.object || (R.inferredFrom = obj);
         const parts = v.word.split('.');
         const lastPart = parts[parts.length - 1];
         const pathParts = parts.slice(0, parts.length - 1);
-        if (pathParts.length > 0) {
-          resolveRelationshipFields(v.object, pathParts, (B) => {
-            const xe = Tt.includeFormula ? B : B.filter((He) => !He.calculated);
-            const prefix = pathParts.join('.') + '.';
-            const ze = Ge(xe, lastPart).map((He) => ({
-              insert: prefix + He.name,
-              label: prefix + He.name,
-              sub: `${He.label} · ${He.type}`,
-              kind: "field",
-            }));
-            W([...ne, ...ze].slice(0, 14), R);
-          });
-        } else {
-          Ti(v.object, (B) => {
-            const xe = Tt.includeFormula ? B : B.filter((He) => !He.calculated);
-            const ze = Ge(xe, v.word).map((He) => ({
-              insert: (He.relationshipName && He.referenceTo && He.referenceTo.length > 0)
-                ? He.relationshipName
-                : He.name,
-              label: He.name,
-              sub: He.relationshipName
-                ? `${He.label} · ${He.type} · ↳ ${He.relationshipName}`
-                : `${He.label} · ${He.type}`,
-              kind: "field",
-              isRelationship: !!(He.relationshipName && He.referenceTo && He.referenceTo.length > 0),
-              relationshipName: He.relationshipName || null,
-              referenceTo: He.referenceTo || [],
-            }));
-            W([...ne, ...ze].slice(0, 14), R);
-          });
-        }
+        const prefix = pathParts.length > 0 ? pathParts.join('.') + '.' : '';
+        resolveRelationshipFields(obj, pathParts, (B) => {
+          const xe = Tt.includeFormula ? B : B.filter((He) => !He.calculated);
+          const ze = toFieldSuggestions(Ge(xe, lastPart), prefix);
+          // Fields first; functions still reachable by typing their name
+          W([...ze, ...ne].slice(0, 20), R);
+        });
       } else
         (v.clause === "where" || v.clause === "orderGroup") && v.object
           ? (() => {
               const parts = v.word.split('.');
               const lastPart = parts[parts.length - 1];
               const pathParts = parts.slice(0, parts.length - 1);
-              if (pathParts.length > 0) {
-                resolveRelationshipFields(v.object, pathParts, (ne) => {
-                  const B = Tt.includeFormula
-                    ? ne
-                    : ne.filter((xe) => !xe.calculated);
-                  const prefix = pathParts.join('.') + '.';
-                  W(
-                    Ge(B, lastPart).map((xe) => ({
-                      insert: prefix + xe.name,
-                      label: prefix + xe.name,
-                      sub: `${xe.label} · ${xe.type}`,
-                      kind: "field",
-                    })),
-                    R,
-                  );
-                });
-              } else {
-                Ti(v.object, (ne) => {
-                  const B = Tt.includeFormula
-                    ? ne
-                    : ne.filter((xe) => !xe.calculated);
-                  W(
-                    Ge(B, v.word).map((xe) => ({
-                      insert: (xe.relationshipName && xe.referenceTo && xe.referenceTo.length > 0)
-                        ? xe.relationshipName
-                        : xe.name,
-                      label: xe.name,
-                      sub: xe.relationshipName
-                        ? `${xe.label} · ${xe.type} · ↳ ${xe.relationshipName}`
-                        : `${xe.label} · ${xe.type}`,
-                      kind: "field",
-                      isRelationship: !!(xe.relationshipName && xe.referenceTo && xe.referenceTo.length > 0),
-                      relationshipName: xe.relationshipName || null,
-                      referenceTo: xe.referenceTo || [],
-                    })),
-                    R,
-                  );
-                });
-              }
+              const prefix = pathParts.length > 0 ? pathParts.join('.') + '.' : '';
+              resolveRelationshipFields(v.object, pathParts, (ne) => {
+                const B = Tt.includeFormula
+                  ? ne
+                  : ne.filter((xe) => !xe.calculated);
+                W(toFieldSuggestions(Ge(B, lastPart), prefix).slice(0, 14), R);
+              });
             })()
           : f();
     };
@@ -34125,7 +36462,33 @@ function Xu(o, t, e, n) {
       const de = document.createElement("select");
       return (Object.assign(de.style, { ...l, cursor: "pointer" }), de);
     },
+    // Searchable field box: type to filter the list, or enter any field path by hand
+    yc = (ph) => {
+      const inp = document.createElement("input"),
+        dl = document.createElement("datalist");
+      return (
+        (dl.id = `sf-qb-combo-${Math.random().toString(36).slice(2)}`),
+        inp.setAttribute("list", dl.id),
+        (inp.placeholder = ph),
+        (inp.spellcheck = !1),
+        (inp.autocomplete = "off"),
+        Object.assign(inp.style, { ...l, width: "220px", fontFamily: "Fira Code, monospace", fontSize: "12.5px" }),
+        (inp._dl = dl),
+        a.appendChild(dl),
+        inp.addEventListener("input", () => inp.dispatchEvent(new Event("change"))),
+        inp
+      );
+    },
     g = (de, ke, Ne = !0) => {
+      if (de._dl) {
+        de._dl.innerHTML = "";
+        ke.forEach((Ge) => {
+          if (!Ge.value) return;
+          const J = document.createElement("option");
+          ((J.value = Ge.value), Ge.hint && (J.label = Ge.hint), de._dl.appendChild(J));
+        });
+        return;
+      }
       const je = de.value;
       ((de.innerHTML = ""),
         ke.forEach((Ge) => {
@@ -34176,7 +36539,7 @@ function Xu(o, t, e, n) {
       const filtered = relCheckbox.checked ? E : E.filter(de => !de.name.includes('.'));
       return [
         { value: "", label: "— field —" },
-        ...filtered.map((de) => ({ value: de.name, label: `${de.name}` })),
+        ...filtered.map((de) => ({ value: de.name, label: `${de.name}`, hint: `${de.label || ""} · ${de.type}` })),
       ];
     },
     c = d("Object"),
@@ -34309,6 +36672,158 @@ function Xu(o, t, e, n) {
     });
   };
   U.addEventListener("input", se);
+  // --- Related records: child-relationship subqueries ---
+  const subSec = d("Related records (subqueries)"),
+    subList = document.createElement("div"),
+    subs = [];
+  subSec.appendChild(subList);
+  const subBtn = document.createElement("button");
+  ((subBtn.textContent = "+ Add related list"),
+    Object.assign(subBtn.style, {
+      fontSize: "12px",
+      fontWeight: "700",
+      padding: "7px 12px",
+      borderRadius: "7px",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      border: `1px solid ${i.border}`,
+      background: "transparent",
+      color: i.textPrimary,
+    }));
+  subSec.appendChild(subBtn);
+  const addSub = (preset) => {
+    if (!r) {
+      ot("Pick an object first");
+      return;
+    }
+    const st = { rel: "", fields: new Set(["Id"]), where: "", limit: "", childFields: [] },
+      box = document.createElement("div");
+    Object.assign(box.style, {
+      border: `1px solid ${i.border}`,
+      borderRadius: "8px",
+      padding: "10px",
+      marginBottom: "8px",
+      display: "flex",
+      flexDirection: "column",
+      gap: "8px",
+    });
+    const top = document.createElement("div");
+    Object.assign(top.style, { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" });
+    const relSel = y();
+    (g(relSel, [{ value: "", label: "Loading related lists…" }]), (relSel.style.minWidth = "240px"));
+    const flt = document.createElement("input");
+    ((flt.placeholder = "Filter fields…"), (flt.spellcheck = !1), Object.assign(flt.style, { ...l, width: "150px" }));
+    const del = document.createElement("button");
+    ((del.textContent = "×"),
+      (del.title = "Remove subquery"),
+      Object.assign(del.style, {
+        marginLeft: "auto",
+        fontSize: "16px",
+        fontWeight: "700",
+        padding: "2px 10px",
+        borderRadius: "7px",
+        cursor: "pointer",
+        border: `1px solid ${i.border}`,
+        background: "transparent",
+        color: i.textMuted,
+      }),
+      del.addEventListener("click", () => {
+        (subs.splice(subs.indexOf(st), 1), box.remove(), Re());
+      }));
+    (top.appendChild(relSel), top.appendChild(flt), top.appendChild(del));
+    const grid = document.createElement("div");
+    Object.assign(grid.style, {
+      maxHeight: "140px",
+      overflow: "auto",
+      border: `1px solid ${i.divider}`,
+      borderRadius: "6px",
+      padding: "4px",
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+      gap: "2px",
+    });
+    const drawFields = () => {
+      grid.innerHTML = "";
+      const q = flt.value.trim().toLowerCase();
+      if (!st.rel) {
+        grid.appendChild(Object.assign(document.createElement("div"), { textContent: "Choose a related list." }));
+        return;
+      }
+      st.childFields
+        .filter((f) => !q || f.name.toLowerCase().includes(q) || (f.label || "").toLowerCase().includes(q))
+        .forEach((f) => {
+          const lb = document.createElement("label");
+          Object.assign(lb.style, { display: "flex", alignItems: "center", gap: "6px", padding: "3px 6px", fontSize: "12px", cursor: "pointer", color: i.textPrimary });
+          const cb = document.createElement("input");
+          ((cb.type = "checkbox"),
+            (cb.checked = st.fields.has(f.name)),
+            cb.addEventListener("change", () => {
+              (cb.checked ? st.fields.add(f.name) : st.fields.delete(f.name), Re());
+            }));
+          const sp = document.createElement("span");
+          ((sp.innerHTML = `<span style="font-family:Fira Code,monospace">${f.name}</span> <span style="color:${i.textFaint}">${f.type}</span>`),
+            lb.appendChild(cb),
+            lb.appendChild(sp),
+            grid.appendChild(lb));
+        });
+    };
+    flt.addEventListener("input", drawFields);
+    const bottom = document.createElement("div");
+    Object.assign(bottom.style, { display: "flex", gap: "8px", alignItems: "center" });
+    const wh = document.createElement("input");
+    ((wh.placeholder = "WHERE (optional), e.g. IsClosed = false"),
+      (wh.spellcheck = !1),
+      Object.assign(wh.style, { ...l, flex: "1", fontFamily: "Fira Code, monospace", fontSize: "12px" }),
+      wh.addEventListener("input", () => {
+        ((st.where = wh.value.trim()), Re());
+      }));
+    const lim = document.createElement("input");
+    ((lim.type = "number"),
+      (lim.min = "1"),
+      (lim.placeholder = "LIMIT"),
+      Object.assign(lim.style, { ...l, width: "90px" }),
+      lim.addEventListener("input", () => {
+        ((st.limit = lim.value), Re());
+      }));
+    (bottom.appendChild(wh), bottom.appendChild(lim));
+    (box.appendChild(top), box.appendChild(grid), box.appendChild(bottom), subList.appendChild(box));
+    const pickRel = (relName, fields) => {
+      ((st.rel = relName), (st.fields = new Set(fields || ["Id"])), (st.childFields = []), drawFields(), Re());
+      const rel = (st.rels || []).find((x) => x.relationshipName === st.rel);
+      rel &&
+        Ti(rel.childSObject, (fs) => {
+          st.rel === rel.relationshipName && ((st.childFields = fs), drawFields());
+        });
+    };
+    relSel.addEventListener("change", () => pickRel(relSel.value));
+    (drawFields(),
+      loadChildRelationships(r, (rels) => {
+        ((st.rels = rels),
+          g(relSel, [
+            { value: "", label: rels.length ? "— related list —" : "No related lists" },
+            ...rels.map((x) => ({ value: x.relationshipName, label: `${x.relationshipName} (${x.childSObject})` })),
+          ]));
+        // Restoring from a template
+        preset?.rel &&
+          ((relSel.value = preset.rel),
+          (wh.value = st.where = preset.where || ""),
+          (lim.value = st.limit = preset.limit || ""),
+          pickRel(preset.rel, preset.fields));
+      }),
+      subs.push(st),
+      Re());
+  };
+  subBtn.addEventListener("click", () => addSub());
+  const clearSubs = () => {
+    ((subs.length = 0), (subList.innerHTML = ""));
+  };
+  const subSoql = () =>
+    subs
+      .filter((st) => st.rel)
+      .map(
+        (st) =>
+          `(SELECT ${Array.from(st.fields).join(", ") || "Id"} FROM ${st.rel}${st.where ? ` WHERE ${st.where}` : ""}${st.limit && Number(st.limit) > 0 ? ` LIMIT ${parseInt(st.limit, 10)}` : ""})`,
+      );
   const De = d("Functions (aggregate)"),
     Be = document.createElement("div");
   Object.assign(Be.style, {
@@ -34325,7 +36840,7 @@ function Xu(o, t, e, n) {
       label: de,
     })),
   );
-  const ge = y(),
+  const ge = yc("field (optional)"),
     ue = document.createElement("button");
   ((ue.textContent = "Add"),
     Object.assign(ue.style, {
@@ -34423,7 +36938,7 @@ function Xu(o, t, e, n) {
         alignItems: "center",
         flexWrap: "wrap",
       });
-      const ke = y();
+      const ke = yc("field — pick or type, e.g. CreatedBy.City");
       (g(ke, k()), ke.addEventListener("change", Re));
       const Ne = y();
       (g(
@@ -34431,10 +36946,31 @@ function Xu(o, t, e, n) {
         K.map((J) => ({ value: J, label: J })),
       ),
         Ne.addEventListener("change", Re));
-      const je = document.createElement("input");
-      ((je.placeholder = "value"),
+      const je = document.createElement("input"),
+        vdl = document.createElement("datalist");
+      ((vdl.id = `sf-qb-val-${Math.random().toString(36).slice(2)}`),
+        a.appendChild(vdl),
+        je.setAttribute("list", vdl.id),
+        (je.autocomplete = "off"),
+        (je.placeholder = "value — pick a suggestion or type"),
         Object.assign(je.style, { ...l, flex: "1", minWidth: "120px" }),
         je.addEventListener("input", Re));
+      // Refresh value suggestions whenever the field changes
+      let lastField = null;
+      const refreshVals = () => {
+        const fp = ke.value.trim();
+        if (fp === lastField) return;
+        ((lastField = fp),
+          soqlValueSuggestions(r, fp, (vals) => {
+            fp === ke.value.trim() &&
+              ((vdl.innerHTML = ""),
+              vals.forEach((v) => {
+                const o = document.createElement("option");
+                ((o.value = v.value), v.label && v.label !== v.value && (o.label = v.label), vdl.appendChild(o));
+              }));
+          }));
+      };
+      ke.addEventListener("change", refreshVals);
       const Ge = document.createElement("button");
       ((Ge.textContent = "×"),
         Object.assign(Ge.style, {
@@ -34450,7 +36986,7 @@ function Xu(o, t, e, n) {
         }),
         Ge.addEventListener("click", () => {
           const J = F.findIndex((_e) => _e.field === ke);
-          (J >= 0 && F.splice(J, 1), de.remove(), Re());
+          (J >= 0 && F.splice(J, 1), de.remove(), ke._dl.remove(), vdl.remove(), Re());
         }),
         de.appendChild(ke),
         de.appendChild(Ne),
@@ -34484,7 +37020,7 @@ function Xu(o, t, e, n) {
     flexWrap: "wrap",
     alignItems: "center",
   });
-  const G = y();
+  const G = yc("— field —");
   (g(G, k()), G.addEventListener("change", Re));
   const T = y();
   (g(T, [
@@ -34517,7 +37053,7 @@ function Xu(o, t, e, n) {
         g(G, k()),
         g(ge, [
           { value: "", label: "— field —" },
-          ...filtered.map((de) => ({ value: de.name, label: de.name })),
+          ...filtered.map((de) => ({ value: de.name, label: de.name, hint: `${de.label || ""} · ${de.type}` })),
         ]));
     },
     loadRelationalFields = (baseFields) => {
@@ -34554,24 +37090,32 @@ function Xu(o, t, e, n) {
         }));
     };
   O.addEventListener("change", () => {
-    ((r = O.value.trim()), u.clear(), (b.length = 0), ye(), A());
+    ((r = O.value.trim()), u.clear(), (b.length = 0), clearSubs(), ye(), A());
   });
   const Q = (de, ke) => {
       const Ne = ke.trim();
       if (Ne === "") return "''";
-      const Ge = E.find((J) => J.name === de)?.type || "string";
-      return ["int", "double", "currency", "percent", "long"].includes(Ge)
-        ? Ne
-        : Ge === "boolean"
-          ? Ne.toLowerCase()
-          : /^(null|true|false)$/i.test(Ne) ||
-              /^'.*'$/.test(Ne) ||
-              /^-?\d+(\.\d+)?$/.test(Ne) ||
-              /^[A-Z_]+(:\-?\d+)?$/.test(Ne) ||
-              (["date", "datetime"].includes(Ge) &&
-                /^\d{4}-\d{2}-\d{2}/.test(Ne))
-            ? Ne
-            : `'${Ne.replace(/'/g, "\\'")}'`;
+      const fdef = E.find((J) => J.name === de),
+        Ge = fdef?.type || "string";
+      if (/^null$/i.test(Ne) || /^'.*'$/.test(Ne)) return Ne;
+      // Hand-typed field paths have no known type: keep literals unquoted
+      if (
+        !fdef &&
+        (/^(true|false)$/i.test(Ne) ||
+          SOQL_DATE_LITERALS.includes(Ne.toUpperCase()) ||
+          /^(LAST|NEXT)_N_[A-Z_]+:\d+$/i.test(Ne))
+      )
+        return /^(true|false)$/i.test(Ne) ? Ne.toLowerCase() : Ne.toUpperCase();
+      if (["int", "double", "currency", "percent", "long"].includes(Ge)) return Ne;
+      if (Ge === "boolean") return Ne.toLowerCase();
+      if (Ge === "date" || Ge === "datetime") {
+        // Date literals (TODAY, LAST_N_DAYS:30) and ISO dates stay unquoted
+        if (/^[A-Z_]+(:-?\d+)?$/i.test(Ne)) return Ne.toUpperCase();
+        if (Ge === "datetime" && /^\d{4}-\d{2}-\d{2}$/.test(Ne)) return `${Ne}T00:00:00Z`;
+        if (/^\d{4}-\d{2}-\d{2}/.test(Ne)) return Ne;
+      }
+      // Text, picklist, id, etc. are always quoted — even "123" or "NEW"
+      return `'${Ne.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
     },
     S = (de) => {
       const ke = de.field.value,
@@ -34593,11 +37137,15 @@ function Xu(o, t, e, n) {
       (N !== "fields"
         ? (de = [`FIELDS(${N})`])
         : (de = [...b, ...Array.from(u)]),
-        de.length === 0 && (de = ["Id"]));
+        de.length === 0 && (de = ["Id"]),
+        (de = [...de, ...subSoql()]));
       let ke = `SELECT ${de.join(", ")} FROM ${r || "ObjectName"}`;
       const Ne = F.map(S).filter(Boolean);
+      // Plain fields selected alongside aggregates must be grouped
+      const grouped = N === "fields" && b.length ? Array.from(u) : [];
       return (
         Ne.length && (ke += ` WHERE ${Ne.join(` ${z.value} `)}`),
+        grouped.length && (ke += ` GROUP BY ${grouped.join(", ")}`),
         G.value && (ke += ` ORDER BY ${G.value} ${T.value}`),
         w.value &&
           Number(w.value) > 0 &&
@@ -34701,6 +37249,162 @@ function Xu(o, t, e, n) {
     Ve.appendChild(fe),
     Ve.appendChild(me),
     Se.appendChild(Ve));
+  // --- Templates: save the whole builder setup and reopen it later ---
+  const captureState = () => ({
+    object: r,
+    mode: N,
+    fields: Array.from(u),
+    aggregates: [...b],
+    relational: relCheckbox.checked,
+    logic: z.value,
+    filters: F.map((f) => ({ field: f.field.value, op: f.op.value, val: f.val.value })).filter((f) => f.field.trim()),
+    orderField: G.value,
+    orderDir: T.value,
+    limit: w.value,
+    subs: subs.filter((x) => x.rel).map((x) => ({ rel: x.rel, fields: Array.from(x.fields), where: x.where, limit: x.limit })),
+  });
+  const restoreState = (st) => {
+    ((r = st.object || ""),
+      (O.value = r),
+      u.clear(),
+      (st.fields || []).forEach((f) => u.add(f)),
+      (N = st.mode || "fields"),
+      X(),
+      (b.length = 0),
+      (st.aggregates || []).forEach((x) => b.push(x)),
+      ye(),
+      clearSubs(),
+      (relCheckbox.checked = !!st.relational));
+    // Replace the filter rows
+    (F.forEach((f) => (f.field.parentElement?.remove(), f.field._dl?.remove())), (F.length = 0));
+    ((z.value = st.logic || "AND"),
+      (st.filters?.length ? st.filters : [null]).forEach((f) => {
+        j();
+        const row = F[F.length - 1];
+        f &&
+          ((row.field.value = f.field),
+          (row.op.value = f.op),
+          (row.val.value = f.val),
+          row.field.dispatchEvent(new Event("change")));
+      }),
+      (G.value = st.orderField || ""),
+      (T.value = st.orderDir || "ASC"),
+      (w.value = st.limit ?? "50"),
+      A(),
+      (st.subs || []).forEach((x) => addSub(x)),
+      Re());
+  };
+  const tplHead = document.createElement("div");
+  (Object.assign(tplHead.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    margin: "18px 0 8px",
+  }),
+    (tplHead.innerHTML = `<span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;color:${i.textFaint}">Templates</span>`));
+  const tplSave = document.createElement("button");
+  ((tplSave.textContent = "💾 Save as template"),
+    Object.assign(tplSave.style, {
+      fontSize: "12px",
+      fontWeight: "700",
+      padding: "6px 10px",
+      borderRadius: "7px",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      border: `1px solid ${i.border}`,
+      background: "transparent",
+      color: i.textPrimary,
+    }),
+    tplHead.appendChild(tplSave),
+    Se.appendChild(tplHead));
+  const tplList = document.createElement("div");
+  (Object.assign(tplList.style, {
+    flex: "1",
+    minHeight: "60px",
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  }),
+    Se.appendChild(tplList));
+  const drawTemplates = () => {
+    if (((tplList.innerHTML = ""), !qbTemplates.length)) {
+      const em = document.createElement("div");
+      ((em.textContent = "No templates yet. Build a query and click “Save as template”."),
+        Object.assign(em.style, { fontSize: "12px", color: i.textMuted, padding: "4px 2px" }),
+        tplList.appendChild(em));
+      return;
+    }
+    qbTemplates.forEach((t) => {
+      const row = document.createElement("div");
+      Object.assign(row.style, {
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "6px 8px",
+        borderRadius: "8px",
+        border: `1px solid ${i.divider}`,
+        background: i.inputBg,
+        cursor: "pointer",
+      });
+      row.title = t.soql || "";
+      const txt = document.createElement("div");
+      Object.assign(txt.style, { flex: "1", minWidth: "0" });
+      const nm = document.createElement("div"),
+        sub = document.createElement("div");
+      ((nm.textContent = t.name),
+        Object.assign(nm.style, { fontSize: "12.5px", fontWeight: "700", color: i.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }),
+        (sub.textContent = `${t.object || "—"} · ${new Date(t.ts).toLocaleDateString()}`),
+        Object.assign(sub.style, { fontSize: "11px", color: i.textFaint }),
+        txt.appendChild(nm),
+        txt.appendChild(sub));
+      const del = document.createElement("button");
+      ((del.textContent = "×"),
+        (del.title = "Delete template"),
+        Object.assign(del.style, {
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          fontSize: "16px",
+          color: i.textFaint,
+          padding: "0 4px",
+        }),
+        del.addEventListener("click", (ev) => {
+          (ev.stopPropagation(),
+            confirm(`Delete template “${t.name}”?`) &&
+              ((qbTemplates = qbTemplates.filter((x) => x.id !== t.id)), saveQbTemplates(), drawTemplates()));
+        }),
+        row.addEventListener("click", () => {
+          (restoreState(t.state || {}), ot(`Opened template “${t.name}”`));
+        }),
+        row.appendChild(txt),
+        row.appendChild(del),
+        tplList.appendChild(row));
+    });
+  };
+  (tplSave.addEventListener("click", () => {
+    if (!r) {
+      ot("Pick an object first");
+      return;
+    }
+    const name = window.prompt("Template name:", `${r} query`)?.trim();
+    if (!name) return;
+    const existing = qbTemplates.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    if (existing && !confirm(`Replace the existing template “${existing.name}”?`)) return;
+    const tpl = {
+      id: existing?.id || `t${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      object: r,
+      soql: Y(),
+      state: captureState(),
+      ts: Date.now(),
+    };
+    ((qbTemplates = [tpl, ...qbTemplates.filter((x) => x.id !== tpl.id)]),
+      saveQbTemplates(),
+      drawTemplates(),
+      ot(`Template “${name}” saved`));
+  }),
+    drawTemplates());
   function Re() {
     we.textContent = Y();
   }
@@ -34817,12 +37521,54 @@ function Wa(o) {
       (g.style.flexDirection = "column"),
       (g.style.borderRadius = "0"));
   else {
-    ((g.style.maxWidth = "768px"),
+    ((g.style.maxWidth = spotlightBox(n).w),
       (g.style.borderRadius = "24px"),
       (g.style.boxShadow = "0 25px 50px rgba(0, 0, 0, 0.5)"),
       (g.style.border = `1px solid ${s.modalBorder}`));
     const f = typeof Do == "number" ? Do : 100;
     f < 100 && (g.style.opacity = String(Math.max(0.2, f / 100)));
+    // Bottom-right grip: drag to resize, size is saved to Panel appearance
+    const grip = document.createElement("div");
+    ((grip.title = "Drag to resize"),
+      (grip.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="${s.textMuted}" stroke-width="1.8" stroke-linecap="round"><path d="M13 3L3 13M13 7L7 13M13 11L11 13"/></svg>`),
+      Object.assign(grip.style, {
+        position: "absolute",
+        right: "4px",
+        bottom: "4px",
+        width: "20px",
+        height: "20px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "nwse-resize",
+        zIndex: "5",
+        touchAction: "none",
+      }),
+      grip.addEventListener("pointerdown", (ev) => {
+        (ev.preventDefault(), grip.setPointerCapture(ev.pointerId), (spMax = !1), syncMaxBtn());
+        const x0 = ev.clientX,
+          y0 = ev.clientY,
+          w0 = g.offsetWidth,
+          h0 = C.offsetHeight,
+          // Centered popup grows on both sides, so mirror the drag distance
+          ky = n ? 1 : 2;
+        let w = w0,
+          h = h0;
+        const move = (mv) => {
+            ((w = Math.round(Math.min(Math.max(600, w0 + (mv.clientX - x0) * 2), window.innerWidth - 32))),
+              (h = Math.round(Math.min(Math.max(280, h0 + (mv.clientY - y0) * ky), window.innerHeight - 200))),
+              (g.style.maxWidth = `${w}px`),
+              (C.style.height = `${h}px`));
+          },
+          up = () => {
+            (grip.removeEventListener("pointermove", move),
+              grip.removeEventListener("pointerup", up),
+              saveSpotlightSize(w, h));
+          };
+        (grip.addEventListener("pointermove", move),
+          grip.addEventListener("pointerup", up));
+      }),
+      g.appendChild(grip));
   }
   const r = document.createElement("div");
   ((r.style.display = "flex"),
@@ -34880,6 +37626,40 @@ function Wa(o) {
     N.addEventListener("mouseout", () => {
       N.style.backgroundColor = "transparent";
     }));
+  const maxBtn = document.createElement("button");
+  const maxIcon = (on) =>
+    on
+      ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${s.iconStroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/></svg>`
+      : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${s.iconStroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>`;
+  function syncMaxBtn() {
+    ((maxBtn.innerHTML = maxIcon(spMax)),
+      (maxBtn.title = spMax ? "Restore size" : "Maximize"));
+  }
+  (Object.assign(maxBtn.style, {
+    marginLeft: "8px",
+    padding: "8px",
+    backgroundColor: "transparent",
+    border: "none",
+    cursor: "pointer",
+    borderRadius: "8px",
+    transition: "background-color 0.2s",
+  }),
+    syncMaxBtn(),
+    maxBtn.addEventListener("mouseover", () => {
+      maxBtn.style.backgroundColor = s.closeHover;
+    }),
+    maxBtn.addEventListener("mouseout", () => {
+      maxBtn.style.backgroundColor = "transparent";
+    }),
+    maxBtn.addEventListener("click", () => {
+      spMax = !spMax;
+      const box = spotlightBox(n);
+      ((g.style.maxWidth = box.w),
+        (C.style.height = box.h),
+        syncMaxBtn(),
+        saveSpotlightSize(spW, spH));
+    }),
+    e && (maxBtn.style.display = "none"));
   const F = () => {
     const f = globalThis.chrome?.runtime,
       _ = Vt(en()),
@@ -34893,6 +37673,7 @@ function Wa(o) {
     e && (N.style.display = "none"),
     r.appendChild(E),
     r.appendChild(u),
+    r.appendChild(maxBtn),
     r.appendChild(N),
     n)
   ) {
@@ -34946,7 +37727,7 @@ function Wa(o) {
   const C = document.createElement("div");
   (e
     ? ((C.style.flex = "1"), (C.style.minHeight = "0"))
-    : (C.style.height = "420px"),
+    : (C.style.height = spotlightBox(n).h),
     (C.style.overflowY = "auto"),
     (C.style.scrollbarWidth = "thin"),
     (C.style.scrollbarColor = `${s.scrollThumb} transparent`),
@@ -36044,6 +38825,15 @@ function Wa(o) {
         },
       },
       {
+        id: "userclone",
+        icon: "👥",
+        label: "User Clone & Onboarding",
+        desc: "Clone users, replicate permission sets, packages, public groups & queues with Smart Paste",
+        run: () => {
+          ((u.value = ""), (x = "userclone"), oe());
+        },
+      },
+      {
         id: "accessmap",
         icon: "🗺️",
         label: "Access Explorer",
@@ -36493,6 +39283,12 @@ function Wa(o) {
             icon: "🧬",
             label: "Profile & Permission Clone",
             desc: "Clone, convert & merge Profiles and Permission Sets",
+          },
+          {
+            id: "userclone",
+            icon: "👥",
+            label: "User Clone & Onboarding",
+            desc: "Clone user licenses, permission sets, groups & smart onboarding",
           },
           {
             id: "accessmap",
@@ -38558,6 +41354,35 @@ ${at.error}`),
             });
             return;
           }
+          if (x === "userclone") {
+            renderUserClone(C, {
+              isDark: he,
+              onBack: Pe,
+              flashToast: ot,
+              runQuery: Ue,
+              apiCall: (ce) =>
+                new Promise((pe) => {
+                  it().then((Ee) => {
+                    if (!Ee?.instanceUrl || !Ee?.sessionId) {
+                      pe({
+                        success: false,
+                        error: "Salesforce session not detected",
+                      });
+                      return;
+                    }
+                    globalThis.chrome.runtime.sendMessage(
+                      {
+                        instanceUrl: Ee.instanceUrl,
+                        sessionId: Ee.sessionId,
+                        ...ce,
+                      },
+                      (Ye) => pe(Ye || { success: false, error: "No response" }),
+                    );
+                  });
+                }),
+            });
+            return;
+          }
           if (x === "accessmap") {
             ws(C, { isDark: he, onBack: Pe, flashToast: ot, runQuery: Ue });
             return;
@@ -39207,15 +42032,74 @@ ${at.error}`),
           z("No tools match your search.");
           return;
         }
+        const grouped = isToolsGrouped();
+        // Reordering by drag only makes sense in the flat, unfiltered grid
+        const canDrag = v && !grouped;
+        const groupBar = document.createElement("div");
+        Object.assign(groupBar.style, {
+          display: "flex",
+          justifyContent: "flex-end",
+          padding: "14px 28px 0",
+        });
+        const groupLbl = document.createElement("label");
+        Object.assign(groupLbl.style, {
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "8px",
+          fontSize: "12px",
+          fontWeight: "600",
+          color: s.textMuted,
+          cursor: "pointer",
+          userSelect: "none",
+        });
+        const groupTrack = document.createElement("span");
+        Object.assign(groupTrack.style, {
+          position: "relative",
+          width: "30px",
+          height: "17px",
+          borderRadius: "999px",
+          background: grouped ? s.accent : (mt === "dark" ? "rgba(148,163,184,0.35)" : "rgba(31,41,55,0.2)"),
+          transition: "background 0.15s",
+        });
+        const groupKnob = document.createElement("span");
+        Object.assign(groupKnob.style, {
+          position: "absolute",
+          top: "2px",
+          left: grouped ? "15px" : "2px",
+          width: "13px",
+          height: "13px",
+          borderRadius: "50%",
+          background: "#fff",
+          transition: "left 0.15s",
+        });
+        groupTrack.appendChild(groupKnob);
+        const groupCb = document.createElement("input");
+        ((groupCb.type = "checkbox"),
+          (groupCb.checked = grouped),
+          (groupCb.style.display = "none"),
+          groupCb.addEventListener("change", () => {
+            (setToolsGrouped(groupCb.checked), oe());
+          }),
+          groupLbl.appendChild(groupCb),
+          groupLbl.appendChild(document.createTextNode("Group by category")),
+          groupLbl.appendChild(groupTrack),
+          groupBar.appendChild(groupLbl),
+          C.appendChild(groupBar));
+        const makeGrid = () => {
+          const g = document.createElement("div");
+          return (
+            Object.assign(g.style, {
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+              gap: "12px",
+              padding: "20px 28px 24px",
+            }),
+            g
+          );
+        };
         const ne =
             mt === "dark" ? "rgba(148,163,184,0.35)" : "rgba(31,41,55,0.18)",
-          B = document.createElement("div");
-        Object.assign(B.style, {
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-          gap: "12px",
-          padding: "20px 28px 24px",
-        });
+          B = makeGrid();
         const xe = () => {
           const he = Array.from(B.children)
             .map((Pe) => Pe.dataset.toolId)
@@ -39224,7 +42108,7 @@ ${at.error}`),
         };
         let ze = null;
         const He = new Set(["inspectlwc", "automationmap", "accessmap"]);
-        (R.forEach((he) => {
+        const buildTile = (he, B) => {
           const Pe = !!he.toggleKey,
             Ue = Pe && At[he.toggleKey],
             Ce = document.createElement("button");
@@ -39267,7 +42151,7 @@ ${at.error}`),
           }
 
           let Ee = null;
-          v &&
+          canDrag &&
             ((Ee = document.createElement("span")),
             (Ee.innerHTML =
               '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>'),
@@ -39313,7 +42197,7 @@ ${at.error}`),
                 (Ce.style.background = ce),
                 Ee && (Ee.style.opacity = "0.4"));
             }),
-            v)
+            canDrag)
           ) {
             ((Ce.draggable = !0),
               (Ce.style.cursor = "grab"),
@@ -39371,8 +42255,37 @@ ${at.error}`),
             } else he.run?.();
           }),
             B.appendChild(Ce));
-        }),
-          C.appendChild(B));
+        };
+        if (grouped) {
+          const placed = new Set();
+          const sections = toolCategories.map((cat) => ({
+            label: cat.label,
+            tools: R.filter((t) => cat.ids.includes(t.id) && !placed.has(t.id) && placed.add(t.id)),
+          }));
+          sections.push({ label: "Other", tools: R.filter((t) => !placed.has(t.id)) });
+          sections
+            .filter((sec) => sec.tools.length)
+            .forEach((sec) => {
+              const hdr = document.createElement("div");
+              ((hdr.textContent = `${sec.label} · ${sec.tools.length}`),
+                Object.assign(hdr.style, {
+                  fontSize: "11px",
+                  fontWeight: "800",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  color: s.textFaint,
+                  padding: "16px 28px 0",
+                }),
+                C.appendChild(hdr));
+              const g = makeGrid();
+              ((g.style.paddingTop = "10px"),
+                (g.style.paddingBottom = "4px"),
+                sec.tools.forEach((he) => buildTile(he, g)),
+                C.appendChild(g));
+            });
+        } else {
+          (R.forEach((he) => buildTile(he, B)), C.appendChild(B));
+        }
       }
     },
     we = a.accentSoft,
@@ -40784,10 +43697,220 @@ function Zu() {
         setTimeout(() => Wa(Yn), 50));
     }));
 }
+// Organization Favicon & Tab Title Customizer Module
+function initOrgFaviconAndTitleCustomizer() {
+  if (typeof window === "undefined" || !window.location) return;
+
+  // Palette of vibrant, easily distinguishable org colors
+  const ORG_PALETTE = [
+    "#ef4444", // Red
+    "#f97316", // Orange
+    "#f59e0b", // Amber
+    "#10b981", // Emerald
+    "#06b6d4", // Cyan
+    "#3b82f6", // Blue
+    "#6366f1", // Indigo
+    "#8b5cf6", // Purple
+    "#ec4899", // Pink
+    "#14b8a6", // Teal
+    "#84cc16", // Lime
+    "#e11d48", // Rose
+  ];
+
+  function hashColor(str) {
+    if (!str) return "#3b82f6";
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) - hash + str.charCodeAt(i);
+      hash = hash & hash;
+    }
+    const idx = Math.abs(hash) % ORG_PALETTE.length;
+    return ORG_PALETTE[idx];
+  }
+
+  function getInitials(name) {
+    if (!name) return "SF";
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  // Generate dynamic SVG data URL favicon with colored circle badge or full pill
+  function generateFaviconDataUrl(badgeText, color, isSandbox) {
+    const cleanText = (badgeText || "SF").slice(0, 3).toUpperCase();
+    const bgFill = color || "#3b82f6";
+    const badgeColor = isSandbox ? "#f59e0b" : "#ffffff";
+    const textColor = "#ffffff";
+
+    // Crisp high-resolution SVG favicon (64x64)
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+        <defs>
+          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="${bgFill}" stop-opacity="1" />
+            <stop offset="100%" stop-color="${bgFill}" stop-opacity="0.85" />
+          </linearGradient>
+          <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="rgba(0,0,0,0.3)" />
+          </filter>
+        </defs>
+        <!-- Background rounded squircle / cloud icon -->
+        <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#grad)" filter="url(#shadow)" />
+        <rect x="2" y="2" width="60" height="60" rx="14" fill="none" stroke="${badgeColor}" stroke-width="2.5" opacity="0.9" />
+        
+        <!-- Org label initials -->
+        <text x="32" y="${cleanText.length > 2 ? 37 : 39}" 
+              text-anchor="middle" 
+              fill="${textColor}" 
+              font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" 
+              font-weight="900" 
+              font-size="${cleanText.length > 2 ? 21 : 24}" 
+              letter-spacing="-0.5px">${cleanText}</text>
+
+        <!-- Sandbox indicator dot if applicable -->
+        ${isSandbox ? '<circle cx="52" cy="12" r="5.5" fill="#f59e0b" stroke="#ffffff" stroke-width="1.5" />' : ''}
+      </svg>
+    `.trim();
+
+    return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+  }
+
+  // Update or inject link rel="icon"
+  function setFavicon(dataUrl) {
+    if (!dataUrl) return;
+    try {
+      const existingIcons = document.querySelectorAll("link[rel*='icon']");
+      let iconLink = document.querySelector("link[data-sf-spotlight-favicon='true']");
+      if (!iconLink) {
+        iconLink = document.createElement("link");
+        iconLink.rel = "shortcut icon";
+        iconLink.type = "image/svg+xml";
+        iconLink.setAttribute("data-sf-spotlight-favicon", "true");
+        document.head.appendChild(iconLink);
+      }
+      iconLink.href = dataUrl;
+
+      // Disable default salesforce favicons to prevent browser overriding back
+      existingIcons.forEach((el) => {
+        if (el !== iconLink) {
+          el.remove();
+        }
+      });
+    } catch (e) {
+      console.warn("[SF-Spotlight] Favicon update failed:", e);
+    }
+  }
+
+  // Update tab title with Org Name prefix
+  function setTabTitle(orgLabel) {
+    if (!orgLabel) return;
+    try {
+      const current = document.title || "";
+      const prefix = `[${orgLabel}]`;
+      if (!current.startsWith(prefix)) {
+        // Strip previous bracketed tag if any
+        const clean = current.replace(/^\[[^\]]+\]\s*/, "");
+        document.title = `${prefix} ${clean}`;
+      }
+    } catch {}
+  }
+
+  // Main customizer runner
+  async function applyOrgBrand() {
+    try {
+      const creds = await it();
+      if (!creds || !creds.instanceUrl || !creds.sessionId) return;
+
+      const runtime = globalThis.chrome?.runtime;
+      if (!runtime?.sendMessage) return;
+
+      runtime.sendMessage(
+        {
+          type: "GET_ORG_INFO",
+          instanceUrl: creds.instanceUrl,
+          sessionId: creds.sessionId,
+        },
+        (res) => {
+          if (!res?.success || !res.data) return;
+
+          const orgData = res.data;
+          const orgName = (orgData.Name || "").trim();
+          const isSandbox = !!orgData.IsSandbox;
+          const instanceName = (orgData.InstanceName || "").trim();
+
+          // Check custom overrides saved in settings/prefs
+          const storage = globalThis.chrome?.storage?.local;
+          const applyWithPrefs = (prefs) => {
+            const orgFaviconEnabled = prefs?.orgFaviconEnabled !== false; // default true
+            const orgTitleEnabled = prefs?.orgTitleEnabled !== false; // default true
+            const customColor = prefs?.orgCustomColor || null;
+            const customLabel = prefs?.orgCustomLabel || null;
+
+            const displayLabel = customLabel || (orgName ? getInitials(orgName) : (instanceName || "SF"));
+            const brandColor = customColor || hashColor(orgName || instanceName || creds.instanceUrl);
+
+            if (orgFaviconEnabled) {
+              const faviconUrl = generateFaviconDataUrl(displayLabel, brandColor, isSandbox);
+              setFavicon(faviconUrl);
+
+              // Periodic re-check in case Salesforce SPA dynamically rewrites favicon
+              if (!window._sfFaviconInterval) {
+                window._sfFaviconInterval = setInterval(() => {
+                  const active = document.querySelector("link[data-sf-spotlight-favicon='true']");
+                  if (!active || active.href !== faviconUrl) {
+                    setFavicon(faviconUrl);
+                  }
+                }, 3000);
+              }
+            }
+
+            if (orgTitleEnabled && orgName) {
+              const shortOrgTag = customLabel || orgName.split(/\s+/)[0] || orgName;
+              setTabTitle(shortOrgTag);
+
+              if (!window._sfTitleInterval) {
+                window._sfTitleInterval = setInterval(() => {
+                  const cur = document.title || "";
+                  if (!cur.startsWith(`[${shortOrgTag}]`)) {
+                    setTabTitle(shortOrgTag);
+                  }
+                }, 3000);
+              }
+            }
+          };
+
+          if (storage) {
+            storage.get(["sf_spotlight_org_brand"], (items) => {
+              applyWithPrefs(items?.sf_spotlight_org_brand || {});
+            });
+          } else {
+            applyWithPrefs({});
+          }
+        }
+      );
+    } catch (e) {
+      console.warn("[SF-Spotlight] applyOrgBrand error:", e);
+    }
+  }
+
+  // Execute after short delay when page loads
+    // Live re-apply on storage change
+  try {
+    globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
+      if (area === "local" && changes?.sf_spotlight_org_brand) {
+        applyOrgBrand();
+      }
+    });
+  } catch {}
+
+  setTimeout(applyOrgBrand, 1200);
+}
+
 function zs() {
   pn
     ? Zu()
     : (Ju(),
+      initOrgFaviconAndTitleCustomizer(),
       wc({
         isEnabled: () => qi,
         getTheme: () => mt,
