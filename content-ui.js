@@ -9451,7 +9451,7 @@ function wc(o) {
     const s = document.createElement("li");
     ((s.id = ri),
       (s.className = "slds-global-actions__item slds-grid"),
-      (s.title = "Object Explorer (SF Spotlight)"),
+      (s.title = "Object Explorer (SFPilot)"),
       (s.dataset.obj = i),
       Object.assign(s.style, {
         cursor: "pointer",
@@ -14130,7 +14130,7 @@ function ks(o) {
     } catch {}
   window.open(o, "_blank");
 }
-// renderUserClone implementation for SF Spotlight
+// renderUserClone implementation for SFPilot
 function renderUserClone(o, t) {
   const isDark = t.isDark,
     n = kt(isDark);
@@ -14382,7 +14382,7 @@ function renderUserClone(o, t) {
   smartTitle.innerHTML = `<span>✨</span> Smart Onboarding Request Parser (Paste & Auto-Fill)`;
   smartHeader.appendChild(smartTitle);
 
-  const smartSub = rt("div", { fontSize: "12px", color: n.muted }, "Paste any onboarding email, ticket, or message below. SF Spotlight will extract the name, email, role/profile hint, and requested package licenses.");
+  const smartSub = rt("div", { fontSize: "12px", color: n.muted }, "Paste any onboarding email, ticket, or message below. SFPilot will extract the name, email, role/profile hint, and requested package licenses.");
   smartCard.appendChild(smartSub);
 
   const smartTextarea = rt("textarea", {
@@ -16152,7 +16152,7 @@ function renderPermClone(o, t) {
     width: "100%",
     boxSizing: "border-box",
   });
-  descInput.placeholder = "Cloned via SF Spotlight";
+  descInput.placeholder = "Cloned via SFPilot";
   descWrap.appendChild(descInput);
   licenseRow.appendChild(descWrap);
 
@@ -16960,7 +16960,7 @@ function renderPermClone(o, t) {
       : `${selectedSourcePrincipal.label} Cloned`;
     targetLabelInput.value = cleanLabel;
     targetApiNameInput.value = cleanLabel.replace(/[^a-zA-Z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
-    descInput.value = `Cloned from ${selectedSourcePrincipal.label} via SF Spotlight Master Clone`;
+    descInput.value = `Cloned from ${selectedSourcePrincipal.label} via SFPilot Master Clone`;
 
     updateCloneSummary();
     await loadSourcePermissions(selectedSourcePrincipal);
@@ -24894,7 +24894,7 @@ function Gp(o, t) {
         method: "POST",
         endpoint: `/services/data/${i}/sobjects/Account/`,
         body: `{
-  "Name": "SF Spotlight Test"
+  "Name": "SFPilot Test"
 }`,
       },
     ];
@@ -27246,7 +27246,7 @@ function uu(o, t) {
       (p.alt = ""),
       H.appendChild(p),
       H.appendChild(
-        Fe("span", { fontSize: "15px", fontWeight: "800" }, "SF Spotlight"),
+        Fe("span", { fontSize: "15px", fontWeight: "800" }, "SFPilot"),
       ),
       w.appendChild(H),
       du.forEach((Q) => {
@@ -28629,7 +28629,7 @@ function uu(o, t) {
         D(
           "Privacy & data",
           "Everything stays in your browser",
-          "SF Spotlight has no servers, no accounts, and no analytics. It runs entirely on your machine and talks only to your Salesforce org, using the session you're already logged in with.",
+          "SFPilot has no servers, no accounts, and no analytics. It runs entirely on your machine and talks only to your Salesforce org, using the session you're already logged in with.",
           p,
         ),
       ),
@@ -38045,7 +38045,7 @@ function Wa(o) {
   const De = document.createElement("div");
   ((De.style.fontSize = "13px"),
     (De.style.whiteSpace = "nowrap"),
-    (De.innerHTML = `<span style="font-weight:800;color:${s.textPrimary};letter-spacing:-0.2px;">SF Spotlight</span>`),
+    (De.innerHTML = `<span style="font-weight:800;color:${s.textPrimary};letter-spacing:-0.2px;">SFPilot</span>`),
     re.appendChild(se),
     re.appendChild(De));
   const Be = document.createElement("div");
