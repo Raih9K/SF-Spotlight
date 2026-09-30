@@ -30,6 +30,11 @@
     try {
       obj[name] = wrapped;
     } catch {}
+    // Fall back to defineProperty if plain assignment didn't stick
+    if (obj[name] !== wrapped)
+      try {
+        Object.defineProperty(obj, name, { value: wrapped, configurable: !0, writable: !0 });
+      } catch {}
   };
   (["sendMessage", "connect", "getURL"].forEach((n) => guard(c.runtime, n)),
     ["get", "set", "remove"].forEach((n) => guard(c.storage?.local, n)));
@@ -14264,7 +14269,7 @@ function renderUserClone(o, t) {
       </div>
       <div style="font-size:13px;line-height:1.6;color:${n.text};display:flex;flex-direction:column;gap:12px">
         <p><b>1-Click User Replication:</b> Onboard new employees or clone existing users in seconds. Copies Profile, Role, Permission Sets, Permission Set Groups, Package Licenses (e.g. Litify, DocuSign, Financial Services), and Public Group/Queue memberships.</p>
-        <p><b>✨ Smart Request Text Auto-Fill:</b> Paste manager/IT emails or ticketing requests (e.g. <i>"Please assign open Litify license to our new intake manager Jennifer Colwell (jcolwell@krasno.com) who starts 10/1..."</i>) and click <b>Auto-Fill Form</b>. The tool automatically detects First Name, Last Name, Email, generates username/alias, and preselects matching package licenses!</p>
+        <p><b>✨ Smart Request Text Auto-Fill:</b> Paste manager/IT emails or ticketing requests (e.g. <i>"Please assign open Litify license to our new intake manager Ryan K. (raihan@micronetbd.org) who starts 10/1..."</i>) and click <b>Auto-Fill Form</b>. The tool automatically detects First Name, Last Name, Email, generates username/alias, and preselects matching package licenses!</p>
         <p><b>Target Modes:</b> You can create a <b>Brand New User</b> from scratch or replicate permissions into an <b>Existing Salesforce User</b>.</p>
       </div>
       <div style="display:flex;justify-content:flex-end;margin-top:20px">
@@ -14394,7 +14399,7 @@ function renderUserClone(o, t) {
     fontFamily: "inherit",
     resize: "vertical",
   });
-  smartTextarea.placeholder = 'e.g. Please assign one of the open Litify licenses to our new intake manager Jennifer Colwell (jcolwell@krasno.com) who is starting on 10/1.';
+  smartTextarea.placeholder = 'e.g. Please assign one of the open Litify licenses to our new intake manager Ryan K. (raihan@micronetbd.org) who is starting on 10/1.';
   smartCard.appendChild(smartTextarea);
 
   const smartActions = rt("div", { display: "flex", alignItems: "center", gap: "10px", justifyContent: "flex-end" });
@@ -14551,7 +14556,7 @@ function renderUserClone(o, t) {
     width: "100%",
     boxSizing: "border-box",
   });
-  fnInput.placeholder = "e.g. Jennifer";
+  fnInput.placeholder = "e.g. Ryan";
   fnWrap.appendChild(fnInput);
   nameRow.appendChild(fnWrap);
 
@@ -14568,7 +14573,7 @@ function renderUserClone(o, t) {
     width: "100%",
     boxSizing: "border-box",
   });
-  lnInput.placeholder = "e.g. Colwell";
+  lnInput.placeholder = "e.g. K.";
   lnWrap.appendChild(lnInput);
   nameRow.appendChild(lnWrap);
 
@@ -14588,7 +14593,7 @@ function renderUserClone(o, t) {
     width: "100%",
     boxSizing: "border-box",
   });
-  emailInput.placeholder = "e.g. jcolwell@krasno.com";
+  emailInput.placeholder = "e.g. raihan@micronetbd.org";
   emailWrap.appendChild(emailInput);
   emailRow.appendChild(emailWrap);
 
@@ -14605,7 +14610,7 @@ function renderUserClone(o, t) {
     width: "100%",
     boxSizing: "border-box",
   });
-  usernameInput.placeholder = "e.g. jcolwell@krasno.com";
+  usernameInput.placeholder = "e.g. raihan@micronetbd.org";
   usernameWrap.appendChild(usernameInput);
   emailRow.appendChild(usernameWrap);
 
@@ -14642,7 +14647,7 @@ function renderUserClone(o, t) {
     width: "100%",
     boxSizing: "border-box",
   });
-  nickInput.placeholder = "e.g. jennifer.colwell";
+  nickInput.placeholder = "e.g. ryan.k";
   nickWrap.appendChild(nickInput);
   metaRow.appendChild(nickWrap);
 
@@ -15271,7 +15276,7 @@ function renderUserClone(o, t) {
     }
 
     // 2. Extract name
-    // Common patterns: "to our new intake manager Jennifer Colwell", "for Jennifer Colwell", "user Jennifer Colwell"
+    // Common patterns: "to our new intake manager Ryan K.", "for Ryan K.", "user Ryan K."
     let detectedFirst = "";
     let detectedLast = "";
 
@@ -29896,6 +29901,212 @@ function bu(o, t) {
   );
 }
 const yu = "2147483600";
+// ---------- Inspect Components: "Page info" (page type, layouts, Lightning page…) ----------
+function sfRest(path) {
+  return new Promise((res) =>
+    it().then((n) => {
+      if (!n?.instanceUrl || !n?.sessionId) return res(null);
+      globalThis.chrome.runtime.sendMessage(
+        { type: "REST_EXPLORE", instanceUrl: n.instanceUrl, sessionId: n.sessionId, endpoint: path, method: "GET" },
+        (r) => {
+          try {
+            res(r?.success && r.data?.ok ? JSON.parse(r.data.body) : null);
+          } catch {
+            res(null);
+          }
+        },
+      );
+    }),
+  );
+}
+function sfTooling(query) {
+  return new Promise((res) =>
+    it().then((n) => {
+      if (!n?.instanceUrl || !n?.sessionId) return res(null);
+      globalThis.chrome.runtime.sendMessage(
+        { type: "METADATA_QUERY", tooling: !0, instanceUrl: n.instanceUrl, sessionId: n.sessionId, query },
+        (r) => res(r?.success ? r.data || [] : null),
+      );
+    }),
+  );
+}
+// What kind of Lightning page is this, from the address alone
+function describePageFromUrl(loc = location) {
+  const path = loc.pathname,
+    m = (re) => path.match(re),
+    q = new URLSearchParams(loc.search);
+  let r;
+  if (/\/s\//.test(path) && !/\/lightning\//.test(path)) return { type: "Experience Cloud site page" };
+  if ((r = m(/\/lightning\/r\/(\w+)\/(\w{15,18})\/related\/(\w+)\/view/)))
+    return { type: "Related list", object: r[1], recordId: r[2], relationship: r[3] };
+  if ((r = m(/\/lightning\/r\/(\w+)\/(\w{15,18})\/(\w+)/)))
+    return { type: r[3] === "edit" ? "Record edit" : "Record page", object: r[1], recordId: r[2] };
+  if ((r = m(/\/lightning\/r\/(\w{15,18})\/view/))) return { type: "Record page", recordId: r[1] };
+  if ((r = m(/\/lightning\/o\/(\w+)\/list/)))
+    return { type: "List view", object: r[1], listView: q.get("filterName") || "Recently viewed" };
+  if ((r = m(/\/lightning\/o\/(\w+)\/new/))) return { type: "New record", object: r[1] };
+  if ((r = m(/\/lightning\/o\/(\w+)\/home/))) return { type: "Object home", object: r[1] };
+  if ((r = m(/\/lightning\/n\/(\w+)/))) return { type: "App page / custom tab", tab: r[1] };
+  if ((r = m(/\/lightning\/setup\/(\w+)/))) return { type: "Setup", setupPage: r[1] };
+  if (/\/lightning\/page\/home/.test(path)) return { type: "Home page" };
+  if ((r = m(/\/lightning\/app\/(\w+)/))) return { type: "App home", appId: r[1] };
+  if ((r = m(/\/lightning\/cmp\/([\w:]+)/))) return { type: "Lightning component URL", component: r[1] };
+  if (/\/apex\//.test(path)) return { type: "Visualforce page", vfPage: path.split("/apex/")[1] };
+  return { type: "Other", path };
+}
+async function collectPageInfo() {
+  const page = describePageFromUrl(),
+    base = bt(),
+    rows = [{ label: "Page type", value: page.type }];
+  page.setupPage && rows.push({ label: "Setup page", value: page.setupPage });
+  page.listView && rows.push({ label: "List view", value: page.listView });
+  page.relationship && rows.push({ label: "Related list", value: page.relationship });
+  page.component && rows.push({ label: "Component", value: page.component });
+  page.vfPage && rows.push({ label: "Visualforce page", value: page.vfPage });
+
+  // Current Lightning app
+  const app = await sfRest("/services/data/v60.0/ui-api/apps/selected?formFactor=Large");
+  app?.label && rows.push({ label: "Lightning app", value: `${app.label} (${app.developerName})` });
+
+  let object = page.object;
+  // Record: record type, page layout, compact layout
+  if (page.recordId && page.type !== "Related list") {
+    const ui = await sfRest(
+      `/services/data/v60.0/ui-api/record-ui/${page.recordId}?layoutTypes=Full&modes=View`,
+    );
+    const rec = ui?.records?.[page.recordId];
+    object = object || rec?.apiName;
+    rows.push({ label: "Record", value: `${page.recordId}${object ? ` · ${object}` : ""}` });
+    if (rec) {
+      const rt = rec.recordTypeInfo;
+      rows.push({ label: "Record type", value: rt ? `${rt.name} (${rt.recordTypeId})` : "Master (no record types)" });
+      const rtId = rec.recordTypeId || rt?.recordTypeId || "012000000000000AAA",
+        layout = ui.layouts?.[rec.apiName]?.[rtId]?.Full?.View || Object.values(ui.layouts?.[rec.apiName] || {})[0]?.Full?.View;
+      if (layout?.id) {
+        const nm = (await sfTooling(`SELECT Name FROM Layout WHERE Id = '${layout.id}'`))?.[0]?.Name;
+        rows.push({
+          label: "Page layout",
+          value: nm || layout.id,
+          note: nm ? layout.id : "",
+          href: `${base}/lightning/setup/ObjectManager/${rec.apiName}/PageLayouts/${layout.id}/view`,
+        });
+      }
+      const cl = await sfRest(`/services/data/v60.0/sobjects/${rec.apiName}/describe/compactLayouts`);
+      if (cl) {
+        const map = (cl.recordTypeCompactLayoutMappings || []).find((x) => x.recordTypeId === rtId),
+          id = map?.compactLayoutId || cl.defaultCompactLayoutId,
+          name = map?.compactLayoutName || (cl.compactLayouts || []).find((x) => x.id === id)?.label;
+        rows.push({
+          label: "Compact layout",
+          value: name || (id ? id : "System Default"),
+          href: `${base}/lightning/setup/ObjectManager/${rec.apiName}/CompactLayouts/view`,
+        });
+      }
+    } else rows.push({ label: "Record type / layout", value: "Could not load (no access or not a UI-API object)" });
+  } else if (object) rows.push({ label: "Object", value: object });
+
+  // Lightning page (FlexiPage)
+  const flexiLink = (id) => `${base}/lightning/setup/FlexiPageList/page?address=${encodeURIComponent("/" + id)}`;
+  if (page.tab) {
+    const tab = (await sfTooling(`SELECT Id, DeveloperName, Type FROM CustomTab WHERE DeveloperName = '${page.tab}'`))?.[0];
+    tab?.Type && rows.push({ label: "Tab type", value: tab.Type });
+    const fp = (await sfTooling(`SELECT Id, DeveloperName, MasterLabel, Type FROM FlexiPage WHERE DeveloperName = '${page.tab}'`))?.[0];
+    fp
+      ? rows.push({ label: "Lightning page", value: `${fp.MasterLabel} (${fp.DeveloperName})`, note: fp.Type, href: flexiLink(fp.Id) })
+      : rows.push({ label: "Lightning page", value: "Not a Lightning page tab (LWC, Visualforce or web tab)" });
+  } else if (object && /Record page|Record edit/.test(page.type)) {
+    const ent = (await sfTooling(`SELECT DurableId FROM EntityDefinition WHERE QualifiedApiName = '${object}'`))?.[0];
+    const ids = [object, ent?.DurableId].filter(Boolean).map((x) => `'${x}'`).join(", ");
+    const pages = await sfTooling(
+      `SELECT Id, DeveloperName, MasterLabel FROM FlexiPage WHERE Type = 'RecordPage' AND EntityDefinitionId IN (${ids})`,
+    );
+    pages?.length
+      ? rows.push({
+          label: "Lightning record pages",
+          value: pages.map((x) => x.MasterLabel).join(", "),
+          note: "Candidates for this object — the one shown depends on app, record type and profile assignment.",
+          links: pages.map((x) => ({ text: x.MasterLabel, href: flexiLink(x.Id) })),
+        })
+      : rows.push({ label: "Lightning record page", value: "System default (no custom record pages)" });
+  } else if (page.type === "Home page") {
+    const pages = await sfTooling(`SELECT Id, MasterLabel FROM FlexiPage WHERE Type = 'HomePage'`);
+    pages?.length &&
+      rows.push({
+        label: "Lightning home pages",
+        value: pages.map((x) => x.MasterLabel).join(", "),
+        note: "Candidates — the one shown depends on app and profile assignment.",
+        links: pages.map((x) => ({ text: x.MasterLabel, href: flexiLink(x.Id) })),
+      });
+  }
+  rows.push({ label: "URL path", value: location.pathname });
+  return rows;
+}
+function renderPageInfoPanel(isDark) {
+  const c = {
+    bg: isDark ? "#0e1626" : "#ffffff",
+    text: isDark ? "#e2e8f0" : "#1f2937",
+    muted: isDark ? "#94a3b8" : "#64748b",
+    border: isDark ? "rgba(148,163,184,0.25)" : "rgba(0,0,0,0.12)",
+    accent: "#3b82f6",
+  };
+  const panel = document.createElement("div");
+  Object.assign(panel.style, {
+    position: "fixed",
+    top: "64px",
+    right: "16px",
+    width: "380px",
+    maxHeight: "calc(100vh - 96px)",
+    overflowY: "auto",
+    background: c.bg,
+    color: c.text,
+    border: `1px solid ${c.border}`,
+    borderRadius: "12px",
+    boxShadow: "0 12px 32px rgba(0,0,0,0.28)",
+    padding: "12px 14px",
+    pointerEvents: "auto",
+    fontSize: "12.5px",
+  });
+  panel.innerHTML = `<div style="font-weight:800;font-size:13px;margin-bottom:8px">ℹ Page info</div><div style="color:${c.muted}">Loading…</div>`;
+  collectPageInfo()
+    .then((rows) => {
+      panel.lastChild.remove();
+      rows.forEach((r) => {
+        const row = document.createElement("div");
+        Object.assign(row.style, { padding: "7px 0", borderTop: `1px solid ${c.border}` });
+        const lb = document.createElement("div");
+        ((lb.textContent = r.label),
+          Object.assign(lb.style, { fontSize: "10.5px", fontWeight: "800", textTransform: "uppercase", letterSpacing: "0.05em", color: c.muted }));
+        const val = document.createElement("div");
+        ((val.textContent = r.value),
+          Object.assign(val.style, { fontWeight: "600", wordBreak: "break-word", marginTop: "2px" }));
+        (row.appendChild(lb), row.appendChild(val));
+        const links = r.links || (r.href ? [{ text: "Open in Setup ↗", href: r.href }] : []);
+        if (links.length) {
+          const lw = document.createElement("div");
+          (Object.assign(lw.style, { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "3px" }),
+            links.forEach((x) => {
+              const a = document.createElement("a");
+              ((a.textContent = r.links ? `${x.text} ↗` : x.text),
+                (a.href = x.href),
+                (a.target = "_blank"),
+                (a.rel = "noopener"),
+                Object.assign(a.style, { color: c.accent, fontSize: "12px", textDecoration: "none" }),
+                lw.appendChild(a));
+            }),
+            row.appendChild(lw));
+        }
+        if (r.note) {
+          const nt = document.createElement("div");
+          ((nt.textContent = r.note), Object.assign(nt.style, { fontSize: "11px", color: c.muted, marginTop: "2px" }), row.appendChild(nt));
+        }
+        panel.appendChild(row);
+      });
+    })
+    .catch((e) => {
+      panel.lastChild.textContent = `Could not load page info: ${e?.message || e}`;
+    });
+  return panel;
+}
 function Cu(o, t) {
   const e = "#3b82f6",
     n = t.isDark ? "#94a3b8" : "#64748b",
@@ -29952,6 +30163,29 @@ function Cu(o, t) {
     s.appendChild(d),
     i.appendChild(s),
     l === 0 && s.insertBefore(Os("No editable custom LWCs detected here."), d));
+  // "Page info": page type, app, record type, layouts, Lightning page
+  const infoBtn = document.createElement("button");
+  let infoPanel = null;
+  (Object.assign(infoBtn.style, {
+    background: "transparent",
+    color: "inherit",
+    border: `1px solid ${t.isDark ? "rgba(148,163,184,0.35)" : "rgba(0,0,0,0.18)"}`,
+    borderRadius: "8px",
+    padding: "5px 11px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: "12.5px",
+    fontWeight: "700",
+  }),
+    (infoBtn.textContent = "ℹ Page info"),
+    infoBtn.addEventListener("click", () => {
+      if (infoPanel) {
+        (infoPanel.remove(), (infoPanel = null));
+        return;
+      }
+      ((infoPanel = renderPageInfoPanel(t.isDark)), i.appendChild(infoPanel));
+    }),
+    s.insertBefore(infoBtn, d));
   const y = [];
   o.forEach((F) => {
     F.elements.forEach((k) => {
