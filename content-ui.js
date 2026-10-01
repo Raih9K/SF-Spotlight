@@ -14067,6 +14067,13 @@ const vs = {
     pinnedTools: ["sfhome", "export", "sampledata", "whereused"],
     ctrlShiftRReload: !0,
     geminiApiKey: "",
+    anthropicApiKey: "",
+    openaiApiKey: "",
+    qwenApiKey: "",
+    openrouterApiKey: "",
+    aiProvider: "gemini",
+    aiModel: "",
+    aiCustomModel: "",
   },
   xi = { soql: 0, debugLogs: 0, rulesUpdated: 0, apexTests: 0 };
 let Es = Promise.resolve();
@@ -28770,14 +28777,73 @@ function uu(o, t) {
     aiCard.appendChild(
       D(
         "AI Assistant",
-        "Gemini API Configuration",
-        "Enter your Google Gemini API key to enable AI-powered code generation, optimization, and explanation features.",
+        "AI Provider Configuration",
+        "Choose Claude, OpenAI, Gemini, Qwen or OpenRouter and enter the matching API key to enable AI-powered code generation, optimization, and explanation features.",
       )
     );
     aiCard.appendChild(L());
-    aiCard.appendChild(X("Google Gemini API Key"));
-    const apiKeyInput = Fe("input", {
+    const aiState = {
+      provider: AI_PROVIDERS[l.aiProvider] ? l.aiProvider : "gemini",
+      model: l.aiModel || "",
+      keys: {
+        gemini: l.geminiApiKey || "",
+        anthropic: l.anthropicApiKey || "",
+        openai: l.openaiApiKey || "",
+        qwen: l.qwenApiKey || "",
+        openrouter: l.openrouterApiKey || "",
+      },
+    };
+    const aiSelectStyle = {
+      padding: "9px 12px",
+      fontSize: "13.5px",
+      fontWeight: "600",
+      borderRadius: "9px",
+      border: `1px solid ${n.border}`,
+      background: n.card,
+      color: n.text,
+      fontFamily: "inherit",
+      cursor: "pointer",
+      minWidth: "220px",
+    };
+    aiCard.appendChild(X("Provider"));
+    const providerSel = Fe("select", aiSelectStyle);
+    Object.entries(AI_PROVIDERS).forEach(([id, p]) => {
+      const o = Fe("option", void 0, p.name);
+      ((o.value = id), providerSel.appendChild(o));
+    });
+    providerSel.value = aiState.provider;
+    aiCard.appendChild(providerSel);
+
+    const modelLabel = X("Model");
+    modelLabel.style.marginTop = "14px";
+    aiCard.appendChild(modelLabel);
+    const modelSel = Fe("select", aiSelectStyle);
+    aiCard.appendChild(modelSel);
+    const customModelInput = Fe("input", {
+      display: "block",
+      marginTop: "8px",
       width: "100%",
+      boxSizing: "border-box",
+      padding: "8px 12px",
+      fontSize: "13px",
+      borderRadius: "9px",
+      border: `1px solid ${n.border}`,
+      background: n.inputBg,
+      color: n.text,
+      fontFamily: "monospace",
+      outline: "none",
+    });
+    customModelInput.placeholder = "Custom model ID (optional, overrides the list)";
+    customModelInput.value = l.aiCustomModel || "";
+    customModelInput.addEventListener("change", () => N({ aiCustomModel: customModelInput.value.trim() }));
+    aiCard.appendChild(customModelInput);
+
+    const keyLabel = X("API Key");
+    keyLabel.style.marginTop = "14px";
+    aiCard.appendChild(keyLabel);
+    const keyRow = Fe("div", { display: "flex", gap: "8px", alignItems: "center" });
+    const apiKeyInput = Fe("input", {
+      flex: "1",
       boxSizing: "border-box",
       padding: "9px 12px",
       fontSize: "13.5px",
@@ -28789,19 +28855,86 @@ function uu(o, t) {
       outline: "none",
     });
     apiKeyInput.type = "password";
-    apiKeyInput.placeholder = "Enter API Key (AI Studio)...";
-    apiKeyInput.value = l.geminiApiKey || "";
-    apiKeyInput.addEventListener("change", () => {
-      N({ geminiApiKey: apiKeyInput.value.trim() });
-    });
-    aiCard.appendChild(apiKeyInput);
-    aiCard.appendChild(
-      Fe(
-        "div",
-        { fontSize: "12.5px", color: n.muted, marginTop: "12px" },
-        "ℹ Get a free API Key from Google AI Studio. The key is stored locally in your browser."
-      )
+    const testBtn = Fe(
+      "button",
+      {
+        padding: "9px 14px",
+        fontSize: "13px",
+        fontWeight: "600",
+        borderRadius: "9px",
+        border: `1px solid ${n.border}`,
+        background: n.card,
+        color: n.text,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      },
+      "Test key",
     );
+    keyRow.appendChild(apiKeyInput);
+    keyRow.appendChild(testBtn);
+    aiCard.appendChild(keyRow);
+    const aiHint = Fe("div", { fontSize: "12.5px", color: n.muted, marginTop: "12px" });
+    aiCard.appendChild(aiHint);
+
+    const renderAiFields = () => {
+      const p = AI_PROVIDERS[aiState.provider];
+      const models = aiModelsFor(aiState.provider);
+      modelSel.innerHTML = "";
+      models.forEach((m) => {
+        const o = Fe("option", void 0, m.name);
+        ((o.value = m.id), modelSel.appendChild(o));
+      });
+      if (!models.some((m) => m.id === aiState.model)) {
+        if (p.liveModels && aiState.model && !aiOpenRouterModels) {
+          // Saved live model, catalogue not loaded yet: keep it visible.
+          const o = Fe("option", void 0, aiState.model);
+          ((o.value = aiState.model), modelSel.appendChild(o));
+        } else aiState.model = p.models[0].id;
+      }
+      modelSel.value = aiState.model;
+      if (p.liveModels && !aiOpenRouterModels)
+        loadOpenRouterModels().then((ok) => ok && AI_PROVIDERS[aiState.provider].liveModels && renderAiFields());
+      keyLabel.textContent = `${p.name} API Key`;
+      apiKeyInput.placeholder = `Enter ${p.name} API key...`;
+      apiKeyInput.value = aiState.keys[aiState.provider] || "";
+      aiHint.textContent = `ℹ Get a key at ${p.keyUrl} — keys are stored locally in your browser and sent only to ${p.name}.`;
+    };
+    providerSel.addEventListener("change", () => {
+      aiState.provider = providerSel.value;
+      renderAiFields();
+      customModelInput.value = "";
+      N({ aiProvider: aiState.provider, aiModel: aiState.model, aiCustomModel: "" });
+    });
+    modelSel.addEventListener("change", () => {
+      aiState.model = modelSel.value;
+      N({ aiModel: aiState.model });
+    });
+    apiKeyInput.addEventListener("change", () => {
+      const v = apiKeyInput.value.trim();
+      aiState.keys[aiState.provider] = v;
+      N({ [AI_PROVIDERS[aiState.provider].prefKey]: v });
+    });
+    testBtn.addEventListener("click", async () => {
+      const key = apiKeyInput.value.trim();
+      if (!key) return (aiHint.textContent = "⚠ Enter an API key first.");
+      testBtn.disabled = !0;
+      testBtn.textContent = "Testing…";
+      try {
+        await callAIProvider("Reply with OK.", {
+          provider: aiState.provider,
+          model: customModelInput.value.trim() || aiState.model,
+          apiKey: key,
+          maxTokens: 16,
+        });
+        aiHint.textContent = "✅ Key works.";
+      } catch (err) {
+        aiHint.textContent = `❌ ${err.message}`;
+      } finally {
+        testBtn.disabled = !1;
+        testBtn.textContent = "Test key";
+      }
+    });
+    renderAiFields();
     T(w, aiCard);
   }
   function K(T) {
@@ -31907,7 +32040,7 @@ const toolCategories = [
   { label: "Data", ids: ["export", "querybuilder", "dataimport", "sampledata", "magicfill"] },
   { label: "Schema & Objects", ids: ["objectmanager", "objectdetails", "bulkfieldcreator", "fieldapi", "whereused"] },
   { label: "Automation", ids: ["automationmap", "flowmanager", "validationrules"] },
-  { label: "Developer", ids: ["executeanonymous", "aicodeeditor", "restexplorer", "eventmonitor", "inspectlwc", "webconsole", "webconsolesetup"] },
+  { label: "Developer", ids: ["executeanonymous", "aiagent", "aicodeeditor", "restexplorer", "eventmonitor", "inspectlwc", "webconsole", "webconsolesetup"] },
   { label: "Security & Users", ids: ["permcompare", "permclone", "userclone", "accessmap"] },
   { label: "Org Health", ids: ["orgdetails", "orglimits", "apiusage", "storage", "speedtest", "release"] },
   { label: "Navigation & Utilities", ids: ["sfhome", "classic", "settings", "shortcuts", "clearsession", "ghost", "whatsnew"] },
@@ -34296,27 +34429,11 @@ function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyz
   let filesList = [];
 
   // Load Monaco or Textarea
+  // MV3 forbids remotely hosted code, so Monaco can only be used if it is bundled
+  // and already on the page; otherwise fall back to the plain textarea editor.
   function loadMonaco(onSuccess, onError) {
-    if (window.monaco) {
-      onSuccess();
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js";
-    script.onload = () => {
-      try {
-        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
-        require(['vs/editor/editor.main'], () => {
-          onSuccess();
-        });
-      } catch (errMonaco) {
-        onError();
-      }
-    };
-    script.onerror = () => {
-      onError();
-    };
-    document.head.appendChild(script);
+    if (window.monaco) onSuccess();
+    else onError();
   }
 
   loadMonaco(() => {
@@ -34345,6 +34462,14 @@ function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyz
       resize: "none"
     });
     fallbackTextarea.value = `// Write your Apex code here\npublic class TempCode {\n    public static void run() {\n        System.debug('Hello World');\n    }\n}`;
+    fallbackTextarea.spellcheck = false;
+    fallbackTextarea.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Tab") return;
+      ev.preventDefault();
+      const t = fallbackTextarea, st = t.selectionStart, en = t.selectionEnd;
+      t.value = t.value.slice(0, st) + "    " + t.value.slice(en);
+      t.selectionStart = t.selectionEnd = st + 4;
+    });
     editorContainer.appendChild(fallbackTextarea);
   });
 
@@ -34477,7 +34602,7 @@ function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyz
   async function triggerAiAction(prefix) {
     const code = getCodeValue();
     const fullPrompt = `${prefix}\n\n\`\`\`apex\n${code}\n\`\`\``;
-    await callGemini(fullPrompt);
+    await askAI(fullPrompt);
   }
 
   sendBtn.addEventListener("click", async () => {
@@ -34486,13 +34611,14 @@ function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyz
     chatInput.value = "";
     const code = getCodeValue();
     const fullPrompt = `${text}\n\nCode context:\n\`\`\`apex\n${code}\n\`\`\``;
-    await callGemini(fullPrompt);
+    await askAI(fullPrompt);
   });
 
-  async function callGemini(promptText) {
-    const apiKey = globalPrefs.geminiApiKey;
-    if (!apiKey) {
-      chatBox.innerHTML = `<div style="color:${e.danger};font-weight:700">Gemini API Key is not configured. Please go to Settings (☁️ Salesforce) and add your key first!</div>`;
+  async function askAI(promptText) {
+    const provider = AI_PROVIDERS[globalPrefs.aiProvider] ? globalPrefs.aiProvider : "gemini";
+    const providerName = AI_PROVIDERS[provider].name;
+    if (!globalPrefs[AI_PROVIDERS[provider].prefKey]) {
+      chatBox.innerHTML = `<div style="color:${e.danger};font-weight:700">${providerName} API Key is not configured. Please go to Settings (☁️ Salesforce) and add your key first!</div>`;
       return;
     }
 
@@ -34508,21 +34634,7 @@ function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyz
     chatBox.scrollTop = chatBox.scrollHeight;
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: promptText }] }]
-        })
-      });
-
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        throw new Error(data.error?.message || "No response received");
-      }
+      const text = await callAIProvider(promptText);
 
       messageDiv.innerHTML = text
         .replace(/&/g, "&amp;")
@@ -34539,6 +34651,196 @@ function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyz
   }
 }
 
+
+
+// ---- Shared AI provider layer (Claude / OpenAI / Gemini / Qwen / OpenRouter) ----
+// "compat" providers speak the OpenAI chat-completions format at `url`.
+const AI_PROVIDERS = {
+  anthropic: {
+    name: "Anthropic Claude",
+    prefKey: "anthropicApiKey",
+    keyUrl: "console.anthropic.com/settings/keys",
+    models: [
+      { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+      { id: "claude-opus-5-5", name: "Claude Opus 5.5" },
+      { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5" },
+    ],
+  },
+  openai: {
+    name: "OpenAI",
+    prefKey: "openaiApiKey",
+    keyUrl: "platform.openai.com/api-keys",
+    compat: { url: "https://api.openai.com/v1/chat/completions", tokenParam: "max_completion_tokens" },
+    models: [
+      { id: "gpt-5-mini", name: "GPT-5 mini" },
+      { id: "gpt-5", name: "GPT-5" },
+    ],
+  },
+  gemini: {
+    name: "Google Gemini",
+    prefKey: "geminiApiKey",
+    keyUrl: "aistudio.google.com/apikey",
+    models: [
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    ],
+  },
+  qwen: {
+    name: "Alibaba Qwen",
+    prefKey: "qwenApiKey",
+    keyUrl: "Alibaba Cloud Model Studio → API Keys",
+    compat: { url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", tokenParam: "max_tokens" },
+    models: [
+      { id: "qwen-plus", name: "Qwen Plus" },
+      { id: "qwen-max", name: "Qwen Max" },
+      { id: "qwen-turbo", name: "Qwen Turbo" },
+    ],
+  },
+  openrouter: {
+    name: "OpenRouter",
+    prefKey: "openrouterApiKey",
+    keyUrl: "openrouter.ai/keys (\":free\" models need no credit)",
+    compat: { url: "https://openrouter.ai/api/v1/chat/completions", tokenParam: "max_tokens" },
+    models: [{ id: "openrouter/auto", name: "Auto (OpenRouter picks)" }],
+    liveModels: !0,
+  },
+};
+
+// Model actually used: custom model id wins, then the picked model, then the provider default.
+function resolveAIModel(provider) {
+  const cfg = AI_PROVIDERS[provider];
+  if (provider === globalPrefs.aiProvider) {
+    const custom = String(globalPrefs.aiCustomModel || "").trim();
+    if (custom) return custom;
+    if (globalPrefs.aiModel && (cfg.liveModels || cfg.models.some((m) => m.id === globalPrefs.aiModel)))
+      return globalPrefs.aiModel;
+  }
+  return cfg.models[0].id;
+}
+
+// OpenRouter's public model catalogue (no key needed), loaded once per page. Free models first.
+let aiOpenRouterModels = null;
+let aiOpenRouterLoading = null;
+function loadOpenRouterModels() {
+  if (aiOpenRouterModels) return Promise.resolve(!0);
+  if (aiOpenRouterLoading) return aiOpenRouterLoading;
+  const rt = globalThis.chrome?.runtime;
+  if (!rt?.id) return Promise.resolve(!1);
+  aiOpenRouterLoading = new Promise((resolve) =>
+    rt.sendMessage({ type: "AI_FETCH", method: "GET", url: "https://openrouter.ai/api/v1/models", headers: {} }, (r) => {
+      aiOpenRouterLoading = null;
+      if (globalThis.chrome?.runtime?.lastError || !r?.ok) return resolve(!1);
+      try {
+        const list = (JSON.parse(r.text).data || []).map((m) => ({ id: m.id, name: m.name || m.id }));
+        list.sort((a, b) => b.id.endsWith(":free") - a.id.endsWith(":free") || a.name.localeCompare(b.name));
+        aiOpenRouterModels = list;
+        resolve(!0);
+      } catch {
+        resolve(!1);
+      }
+    }),
+  );
+  return aiOpenRouterLoading;
+}
+
+// Every selectable model for a provider (static list + live catalogue where supported).
+function aiModelsFor(provider) {
+  const cfg = AI_PROVIDERS[provider];
+  const extra = cfg.liveModels ? aiOpenRouterModels || [] : [];
+  const seen = new Set();
+  return [...cfg.models, ...extra].filter((m) => !seen.has(m.id) && seen.add(m.id));
+}
+
+// POST through the background service worker (host_permissions -> no CORS / page CSP issues).
+function aiPost(url, headers, body) {
+  const rt = globalThis.chrome?.runtime;
+  const direct = () =>
+    fetch(url, { method: "POST", headers, body: JSON.stringify(body) }).then(async (r) => ({
+      ok: r.ok,
+      status: r.status,
+      text: await r.text(),
+    }));
+  const send = rt?.id
+    ? new Promise((resolve, reject) =>
+        rt.sendMessage({ type: "AI_FETCH", url, headers, body: JSON.stringify(body) }, (r) => {
+          if (globalThis.chrome?.runtime?.lastError || !r) return direct().then(resolve, reject);
+          r.error ? reject(new Error(r.error)) : resolve(r);
+        }),
+      )
+    : direct();
+  return send.then((r) => {
+    let data = {};
+    try {
+      data = JSON.parse(r.text || "{}");
+    } catch {}
+    if (!r.ok) throw new Error(data.error?.message || data.message || `HTTP ${r.status}: ${String(r.text).slice(0, 200)}`);
+    return data;
+  });
+}
+
+async function callAIProvider(prompt, opts = {}) {
+  const provider = opts.provider || (AI_PROVIDERS[globalPrefs.aiProvider] ? globalPrefs.aiProvider : "gemini");
+  const cfg = AI_PROVIDERS[provider];
+  const model = opts.model || resolveAIModel(provider);
+  const apiKey = opts.apiKey || globalPrefs[cfg.prefKey];
+  const maxTokens = opts.maxTokens || 4096;
+  if (!apiKey) throw new Error(`${cfg.name} API key is not configured.`);
+
+  if (provider === "anthropic") {
+    const data = await aiPost(
+      "https://api.anthropic.com/v1/messages",
+      {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "Content-Type": "application/json",
+      },
+      {
+        model,
+        max_tokens: maxTokens,
+        ...(opts.system ? { system: opts.system } : {}),
+        messages: [{ role: "user", content: prompt }],
+      },
+    );
+    return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+  }
+  if (cfg.compat) {
+    const data = await aiPost(
+      cfg.compat.url,
+      { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      {
+        model,
+        [cfg.compat.tokenParam]: maxTokens,
+        messages: [
+          ...(opts.system ? [{ role: "system", content: opts.system }] : []),
+          { role: "user", content: prompt },
+        ],
+      },
+    );
+    const choice = data.choices?.[0];
+    const text = choice?.message?.content || "";
+    if (!text) {
+      const why =
+        choice?.finish_reason === "length"
+          ? "the model ran out of output tokens (reasoning models often do) — pick a non-reasoning model or retry"
+          : choice?.message?.refusal || data.error?.message || (choice?.finish_reason ? `finish_reason: ${choice.finish_reason}` : "empty reply");
+      throw new Error(`No response from ${model}: ${why}`);
+    }
+    return text;
+  }
+  const data = await aiPost(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: maxTokens },
+      ...(opts.system ? { systemInstruction: { parts: [{ text: opts.system }] } } : {}),
+    },
+  );
+  const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+  if (!text) throw new Error(data.promptFeedback?.blockReason ? `Blocked: ${data.promptFeedback.blockReason}` : "No response received");
+  return text;
+}
 
 const Lo = "sf_soql_saved",
   Ao = "sf_soql_history";
@@ -39032,6 +39334,15 @@ function Wa(o) {
         },
       },
       {
+        id: "aiagent",
+        icon: "🧠",
+        label: "AI Agent",
+        desc: "Ask in plain language — query, create, update, delete records and edit Apex (with approval)",
+        run: () => {
+          ((u.value = ""), (x = "aiagent"), oe());
+        },
+      },
+      {
         id: "aicodeeditor",
         icon: "🤖",
         label: "AI Code Editor",
@@ -41946,6 +42257,14 @@ ${at.error}`),
                   ts(ce, pe, { isDark: he, logName: Ee, onBack: Ye }));
               },
             });
+            return;
+          }
+          if (x === "aiagent") {
+            if (typeof renderAIAgent != "function") {
+              C.textContent = "AI Agent failed to load — reload the extension.";
+              return;
+            }
+            renderAIAgent(C, he, Pe, ot);
             return;
           }
           if (x === "aicodeeditor") {

@@ -41,7 +41,12 @@
     "https://*.visualforce.mil/*",
     "https://*.crmforce.mil/*",
     "https://*.force.com.mcas.ms/*",
-    "https://*.builder.salesforce-experience.com/*"
+    "https://*.builder.salesforce-experience.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.openai.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://dashscope-intl.aliyuncs.com/*",
+    "https://openrouter.ai/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -94,7 +99,7 @@
         "https://*.force.com/*",
         "https://*.builder.salesforce-experience.com/*"
       ],
-      "js": ["content-ui.js"],
+      "js": ["content-ui.js", "ai-agent.js"],
       "run_at": "document_end"
     }
   ],
@@ -124,5 +129,5 @@
       ]
     }
   ],
-  "incognito": "split"
+  "incognito": "spanning"
 }
