@@ -8,7 +8,7 @@
 
   const SETTINGS_KEY = "sf_log_analyzer_settings";
   // Groups we own carry this marker so user-made groups are never touched
-  const MARK = "☁ ";
+  const MARK = "[SF] ";
   const COLORS = ["blue", "green", "purple", "cyan", "orange", "pink", "yellow", "red", "grey"];
   const SF_HOST =
     /\.(salesforce|salesforce-setup|force|cloudforce|visualforce|sfcrmapps|sfcrmproducts|crmforce)\.(com|mil|cn)(\.mcas\.ms)?$|\.salesforce-experience\.com$/i;

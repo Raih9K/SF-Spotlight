@@ -452,6 +452,17 @@ function agentRecordsTable(records, th) {
   );
 }
 
+// Enter sends, Shift+Enter inserts a newline. Ignores IME composition (e.g. Bangla input)
+// and stops propagation so the launcher's own Enter shortcut does not fire.
+function agentEnterToSend(input, send) {
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" || ev.shiftKey || ev.isComposing || ev.keyCode === 229) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    send();
+  });
+}
+
 // ---------- UI ----------
 
 function renderAIAgent(container, isDark, onBack, flashToast) {
@@ -472,7 +483,7 @@ function renderAIAgent(container, isDark, onBack, flashToast) {
   });
   container.appendChild(root);
 
-  const { head, right } = Wo(th, "🧠 AI Agent", onBack, "Tools");
+  const { head, right } = Wo(th, "AI Agent", onBack, "Tools");
   root.appendChild(head);
 
   const providerTag = $e("select", {
@@ -602,7 +613,7 @@ function renderAIAgent(container, isDark, onBack, flashToast) {
     height: "44px",
     fontFamily: "inherit",
   });
-  input.placeholder = "Tell the agent what to do…  (Ctrl/⌘ + Enter to send)";
+  input.placeholder = "Tell the agent what to do…  (Enter to send, Shift+Enter for new line)";
   inputRow.appendChild(input);
   const sendBtn = $e(
     "button",
@@ -890,16 +901,215 @@ function renderAIAgent(container, isDark, onBack, flashToast) {
     runAgent(text);
   };
   sendBtn.addEventListener("click", send);
-  input.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
-      ev.preventDefault();
-      send();
-    }
-  });
+  agentEnterToSend(input, () => !running && send());
   newChatBtn.addEventListener("click", () => {
     if (running) return flashToast?.("Stop the current run first");
     transcript = [];
     welcome();
   });
   setTimeout(() => input.focus(), 50);
+}
+
+// ---------- Log Analyzer: AI tab ----------
+// Called from the Apex Log Analyzer (ts in content-ui.js) with the raw log text.
+
+const LOG_AI_LIMIT = 45000;
+const LOG_AI_KEEP =
+  /\|(EXCEPTION_THROWN|FATAL_ERROR|USER_DEBUG|SOQL_EXECUTE_BEGIN|SOQL_EXECUTE_END|DML_BEGIN|DML_END|CODE_UNIT_STARTED|CODE_UNIT_FINISHED|VALIDATION_FAIL|VALIDATION_ERROR|FLOW_ELEMENT_ERROR|FLOW_ELEMENT_FAULT|FLOW_START_INTERVIEW_BEGIN|CALLOUT_REQUEST|CALLOUT_RESPONSE|LIMIT_USAGE_FOR_NS|CUMULATIVE_LIMIT_USAGE|TESTING_LIMITS|WF_RULE_EVAL_BEGIN|DUPLICATE_DETECTED|HEAP_ALLOCATE_LIMIT)\|/;
+
+// Keeps the log small enough for the model: whole log if it fits, otherwise the
+// diagnostic lines plus limit blocks, with repeated SOQL counted up front.
+function logAICondense(raw) {
+  const text = String(raw || "");
+  const lines = text.split(/\r?\n/);
+  const soqlCounts = new Map();
+  for (const l of lines) {
+    const m = l.match(/\|SOQL_EXECUTE_BEGIN\|\[\d+\]\|Aggregations:\d+\|(.*)$/);
+    if (m) soqlCounts.set(m[1].trim(), (soqlCounts.get(m[1].trim()) || 0) + 1);
+  }
+  const repeated = [...soqlCounts.entries()].filter(([, c]) => c > 1).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  const total = [...soqlCounts.values()].reduce((a, b) => a + b, 0);
+  const stats =
+    `Log size: ${(text.length / 1024).toFixed(0)} KB, ${lines.length} lines, ${total} SOQL statements.` +
+    (repeated.length ? `\nRepeated SOQL (possible N+1):\n${repeated.map(([q, c]) => `  ${c}x ${q}`).join("\n")}` : "");
+  if (text.length <= LOG_AI_LIMIT) return { stats, body: text, trimmed: !1 };
+
+  const keep = lines.slice(0, 5); // header: API version + log levels
+  let inLimits = !1;
+  for (const l of lines.slice(5)) {
+    if (/\|LIMIT_USAGE_FOR_NS\|/.test(l)) inLimits = !0;
+    else if (inLimits && /^\d{2}:\d{2}:\d{2}/.test(l)) inLimits = !1;
+    if (inLimits || LOG_AI_KEEP.test(l)) keep.push(l.length > 600 ? l.slice(0, 600) + "…" : l);
+  }
+  let body = keep.join("\n");
+  if (body.length > LOG_AI_LIMIT) {
+    // Errors usually sit at the end of a transaction: keep head + tail.
+    const half = Math.floor(LOG_AI_LIMIT / 2);
+    body = body.slice(0, half) + "\n…(middle of filtered log omitted)…\n" + body.slice(-half);
+  }
+  return { stats, body, trimmed: !0 };
+}
+
+const LOG_AI_SYSTEM = `You are a senior Salesforce developer analysing an Apex debug log.
+Answer in Markdown, concise and specific. Reference class/method names and line numbers from the log ([N] is the line number).
+When asked for a full analysis, use these sections (skip empty ones):
+**Summary** — what the transaction did and whether it succeeded.
+**Errors** — each exception/fatal error, root cause, and the exact fix (show corrected Apex when useful).
+**Performance** — governor limits near their maximum, repeated SOQL/DML in loops (N+1), slow parts.
+**Recommendations** — prioritised, actionable.
+Never invent details that are not in the log.`;
+
+function renderLogAI(container, rawLog, th) {
+  const danger = "#ef4444";
+  container.innerHTML = "";
+  const condensed = logAICondense(rawLog);
+  const history = [];
+  let busy = !1;
+
+  const wrap = $e("div", {
+    height: "100%",
+    display: "flex",
+    flexDirection: "column",
+    boxSizing: "border-box",
+    padding: "14px 18px",
+    gap: "10px",
+    fontSize: "13px",
+    lineHeight: "1.55",
+    color: th.text,
+  });
+  container.appendChild(wrap);
+
+  const bar = $e("div", { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", flexShrink: "0" });
+  const btn = (label, primary) =>
+    $e(
+      "button",
+      {
+        padding: "7px 12px",
+        fontSize: "12.5px",
+        fontWeight: "700",
+        borderRadius: "8px",
+        border: primary ? "none" : `1px solid ${th.border}`,
+        background: primary ? th.accent : "transparent",
+        color: primary ? "#fff" : th.text,
+        cursor: "pointer",
+        fontFamily: "inherit",
+      },
+      label,
+    );
+  const quick = [
+    ["🔍 Full analysis", "Give a full analysis of this log.", !0],
+    ["🐞 Explain errors", "Explain every exception/error in this log, its root cause, and how to fix it with code."],
+    ["⚡ Performance", "Find performance problems: governor limits close to the max, SOQL/DML inside loops, repeated queries, slow sections. Suggest bulkified fixes."],
+    ["📝 Summarise", "Summarise in 5 bullet points what this transaction did."],
+  ];
+  const quickBtns = quick.map(([label, prompt, primary]) => {
+    const b = btn(label, primary);
+    b.addEventListener("click", () => ask(prompt, label));
+    bar.appendChild(b);
+    return b;
+  });
+  const model = $e("span", { marginLeft: "auto", fontSize: "12px", color: th.muted });
+  bar.appendChild(model);
+  wrap.appendChild(bar);
+
+  const firstStat = condensed.stats.split("\n")[0];
+  wrap.appendChild(
+    $e(
+      "div",
+      { fontSize: "12px", color: th.muted, flexShrink: "0" },
+      condensed.trimmed ? `Large log — the AI receives the key lines only (errors, debug, SOQL/DML, limits). ${firstStat}` : firstStat,
+    ),
+  );
+
+  const out = $e("div", {
+    flex: "1",
+    minHeight: "0",
+    overflowY: "auto",
+    border: `1px solid ${th.border}`,
+    borderRadius: "10px",
+    padding: "12px 14px",
+    background: th.panel,
+  });
+  out.innerHTML = `<span style="color:${th.muted}">Pick an analysis above or ask a question about this log below.</span>`;
+  wrap.appendChild(out);
+
+  const row = $e("div", { display: "flex", gap: "8px", flexShrink: "0" });
+  const input = $e("textarea", {
+    flex: "1",
+    padding: "8px 12px",
+    fontSize: "13px",
+    borderRadius: "8px",
+    border: `1px solid ${th.border}`,
+    background: th.bg,
+    color: th.text,
+    outline: "none",
+    resize: "none",
+    height: "40px",
+    fontFamily: "inherit",
+  });
+  input.placeholder = "Ask about this log…  (Enter to send, Shift+Enter for new line)";
+  const send = btn("Ask", !0);
+  row.appendChild(input);
+  row.appendChild(send);
+  wrap.appendChild(row);
+
+  const refreshModel = () => {
+    const id = AI_PROVIDERS[globalPrefs.aiProvider] ? globalPrefs.aiProvider : "gemini";
+    const m = resolveAIModel(id);
+    model.textContent = `AI: ${AI_PROVIDERS[id].models.find((x) => x.id === m)?.name || m}`;
+  };
+  refreshModel();
+
+  const setBusy = (v) => {
+    busy = v;
+    for (const b of [...quickBtns, send]) {
+      b.disabled = v;
+      b.style.opacity = v ? "0.6" : "1";
+    }
+  };
+
+  async function ask(question, label) {
+    if (busy || !question.trim()) return;
+    refreshModel();
+    const cfg = AI_PROVIDERS[globalPrefs.aiProvider] || AI_PROVIDERS.gemini;
+    if (!globalPrefs[cfg.prefKey]) {
+      out.innerHTML = `<span style="color:${danger};font-weight:700">${cfg.name} API key is not configured. Add it in Settings → AI Assistant.</span>`;
+      return;
+    }
+    setBusy(!0);
+    if (!history.length) out.innerHTML = "";
+    const q = $e("div", { fontWeight: "700", margin: history.length ? "16px 0 6px" : "0 0 6px", color: th.accent }, label || question);
+    const a = $e("div");
+    a.innerHTML = `<span style="color:${th.muted}">Analysing…</span>`;
+    out.appendChild(q);
+    out.appendChild(a);
+    out.scrollTop = out.scrollHeight;
+    const prior = history
+      .slice(-4)
+      .map((h) => `Q: ${h.q}\nA: ${h.a.slice(0, 3000)}`)
+      .join("\n\n");
+    const fence = "```";
+    const prompt =
+      `${condensed.stats}\n\nAPEX DEBUG LOG${condensed.trimmed ? " (filtered to key lines)" : ""}:\n${fence}\n${condensed.body}\n${fence}\n\n` +
+      (prior ? `Earlier in this conversation:\n${prior}\n\n` : "") +
+      `Question: ${question}`;
+    try {
+      const answer = await callAIProvider(prompt, { system: LOG_AI_SYSTEM, maxTokens: 4096 });
+      history.push({ q: question, a: answer });
+      a.innerHTML = agentMarkdown(answer);
+    } catch (err) {
+      a.innerHTML = `<span style="color:${danger}">${agentEscape(err.message)}</span>`;
+    } finally {
+      setBusy(!1);
+    }
+  }
+
+  const submit = () => {
+    const v = input.value.trim();
+    if (!v) return;
+    input.value = "";
+    ask(v);
+  };
+  send.addEventListener("click", submit);
+  agentEnterToSend(input, submit);
 }

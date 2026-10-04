@@ -7270,6 +7270,90 @@ const ia = {
 function Ri(o) {
   return ia[o] || "#64748b";
 }
+
+// ── SOQL Syntax Colorizer ─────────────────────────────────────────────────────
+function colorizeSOQL(query, isDark) {
+  if (!query || typeof query !== "string") return "";
+  // Escape HTML entities first
+  const esc = (s) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Token patterns in priority order
+  const KEYWORDS =
+    /\b(SELECT|FROM|WHERE|LIMIT|OFFSET|ORDER\s+BY|GROUP\s+BY|HAVING|WITH\s+DATA\s+CATEGORY|USING\s+SCOPE|FOR\s+VIEW|FOR\s+REFERENCE|FOR\s+UPDATE|UPDATE\s+TRACKING|UPDATE\s+VIEWSTAT|INCLUDES|EXCLUDES|LIKE|IN|NOT\s+IN|TYPEOF|WHEN|THEN|ELSE|END|DISTANCE|GEOLOCATION)\b/gi;
+  const LOGICAL =
+    /\b(AND|OR|NOT|NULL|TRUE|FALSE)\b/gi;
+  const AGG_FN =
+    /\b(COUNT|COUNT_DISTINCT|SUM|AVG|MIN|MAX|FIELDS|ALL|CUSTOM|STANDARD|toLabel|convertCurrency|FORMAT|CALENDAR_YEAR|CALENDAR_MONTH|CALENDAR_QUARTER|FISCAL_YEAR|FISCAL_QUARTER|FISCAL_MONTH|DAY_ONLY|WEEK_IN_YEAR|WEEK_IN_MONTH|DAY_IN_WEEK|DAY_IN_MONTH|DAY_IN_YEAR|HOUR_IN_DAY|convertTimezone|grouping)\b/gi;
+  const DATE_LIT =
+    /\b(TODAY|YESTERDAY|TOMORROW|LAST_WEEK|THIS_WEEK|NEXT_WEEK|LAST_MONTH|THIS_MONTH|NEXT_MONTH|LAST_QUARTER|THIS_QUARTER|NEXT_QUARTER|LAST_YEAR|THIS_YEAR|NEXT_YEAR|LAST_90_DAYS|NEXT_90_DAYS|LAST_N_DAYS|NEXT_N_DAYS|LAST_N_WEEKS|NEXT_N_WEEKS|LAST_N_MONTHS|NEXT_N_MONTHS|LAST_N_QUARTERS|NEXT_N_QUARTERS|LAST_N_YEARS|NEXT_N_YEARS|LAST_N_FISCAL_QUARTERS|NEXT_N_FISCAL_QUARTERS|LAST_N_FISCAL_YEARS|NEXT_N_FISCAL_YEARS):\d*|\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})?)?\b/gi;
+  // Color palette (works on both dark and light)
+  const C = {
+    kw:   isDark ? "#60a5fa" : "#2563eb",   // blue — SELECT FROM WHERE
+    fn:   isDark ? "#c084fc" : "#7c3aed",   // purple — COUNT SUM etc
+    logic:isDark ? "#fb923c" : "#c2410c",   // orange — AND OR NOT
+    str:  isDark ? "#fbbf24" : "#b45309",   // amber — string literals
+    num:  isDark ? "#4ade80" : "#15803d",   // green — numbers
+    date: isDark ? "#34d399" : "#047857",   // emerald — date literals
+    op:   isDark ? "#94a3b8" : "#475569",   // slate — = != < > ,
+    paren:isDark ? "#e2e8f0" : "#374151",   // near-white/dark — ( )
+  };
+  // Tokenise by splitting on string literals first
+  const parts = [];
+  const strRegex = /'(?:[^'\\]|\\.)*'/g;
+  let last = 0, m;
+  while ((m = strRegex.exec(query)) !== null) {
+    if (m.index > last) parts.push({ type: "code", val: query.slice(last, m.index) });
+    parts.push({ type: "str", val: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < query.length) parts.push({ type: "code", val: query.slice(last) });
+  const highlightCode = (s) => {
+    // Replace in order: date literals → keywords → agg fns → logical → numbers → ops → parens
+    s = esc(s);
+    // date literals (must come before numeric to capture date numbers)
+    s = s.replace(
+      /\b(TODAY|YESTERDAY|TOMORROW|LAST_WEEK|THIS_WEEK|NEXT_WEEK|LAST_MONTH|THIS_MONTH|NEXT_MONTH|LAST_QUARTER|THIS_QUARTER|NEXT_QUARTER|LAST_YEAR|THIS_YEAR|NEXT_YEAR|LAST_\d*_?DAYS|NEXT_\d*_?DAYS|LAST_N_DAYS:\d+|NEXT_N_DAYS:\d+|LAST_N_WEEKS:\d+|NEXT_N_WEEKS:\d+|LAST_N_MONTHS:\d+|NEXT_N_MONTHS:\d+|LAST_N_QUARTERS:\d+|NEXT_N_QUARTERS:\d+|LAST_N_YEARS:\d+|NEXT_N_YEARS:\d+|LAST_N_FISCAL_QUARTERS:\d+|NEXT_N_FISCAL_QUARTERS:\d+|LAST_N_FISCAL_YEARS:\d+|NEXT_N_FISCAL_YEARS:\d+)\b|\b(\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})?)?)\b/gi,
+      (w) => `<span style="color:${C.date}">${w}</span>`,
+    );
+    // keywords
+    s = s.replace(
+      /\b(SELECT|FROM|WHERE|LIMIT|OFFSET|ORDER\s+BY|GROUP\s+BY|HAVING|WITH\s+DATA\s+CATEGORY|USING\s+SCOPE|FOR\s+VIEW|FOR\s+REFERENCE|FOR\s+UPDATE|UPDATE\s+TRACKING|UPDATE\s+VIEWSTAT|INCLUDES|EXCLUDES|LIKE|NOT\s+IN|IN|TYPEOF|WHEN|THEN|ELSE|END|DISTANCE|GEOLOCATION|FIELDS)\b/gi,
+      (w) => `<span style="color:${C.kw};font-weight:600">${w}</span>`,
+    );
+    // aggregate / date functions
+    s = s.replace(
+      /\b(COUNT_DISTINCT|COUNT|SUM|AVG|MIN|MAX|ALL|CUSTOM|STANDARD|toLabel|convertCurrency|FORMAT|CALENDAR_YEAR|CALENDAR_MONTH|CALENDAR_QUARTER|FISCAL_YEAR|FISCAL_QUARTER|FISCAL_MONTH|DAY_ONLY|WEEK_IN_YEAR|WEEK_IN_MONTH|DAY_IN_WEEK|DAY_IN_MONTH|DAY_IN_YEAR|HOUR_IN_DAY|convertTimezone|grouping)\b/gi,
+      (w) => `<span style="color:${C.fn}">${w}</span>`,
+    );
+    // logical
+    s = s.replace(
+      /\b(AND|OR|NOT|NULL|TRUE|FALSE)\b/gi,
+      (w) => `<span style="color:${C.logic}">${w}</span>`,
+    );
+    // numbers (standalone, not inside identifiers)
+    s = s.replace(
+      /(?<![\w.])\b(\d+(?:\.\d+)?)\b(?![\w.])/g,
+      (w) => `<span style="color:${C.num}">${w}</span>`,
+    );
+    // operators
+    s = s.replace(
+      /(!?=|&lt;=?|&gt;=?|!=)/g,
+      (w) => `<span style="color:${C.op}">${w}</span>`,
+    );
+    // commas
+    s = s.replace(/(,)/g, `<span style="color:${C.op}">$1</span>`);
+    // parentheses
+    s = s.replace(/([()])/g, `<span style="color:${C.paren}">$1</span>`);
+    return s;
+  };
+  return parts
+    .map((p) =>
+      p.type === "str"
+        ? `<span style="color:${C.str}">${esc(p.val)}</span>`
+        : highlightCode(p.val),
+    )
+    .join("");
+}
 const hc = new Set([
     "CUMULATIVE_LIMIT_USAGE",
     "LIMIT_USAGE_FOR_NS",
@@ -7339,7 +7423,7 @@ function ts(o, t, e) {
     {
       id: "timeline",
       label: "Timeline",
-      icon: "📊",
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 17v-4"/><path d="M12 17V7"/><path d="M17 17v-7"/></svg>',
       render: () => {
         d = Ec(l, i, n, e.isDark, () => u("calltree"));
       },
@@ -7347,7 +7431,7 @@ function ts(o, t, e) {
     {
       id: "calltree",
       label: "Call Tree",
-      icon: "☰",
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
       render: () => xc(l, i, n),
     },
     {
@@ -7356,14 +7440,23 @@ function ts(o, t, e) {
       icon: "</>",
       render: () => bc(l, i, n),
     },
-    { id: "database", label: "Database", icon: "🗄", render: () => yc(l, i, n) },
+    { id: "database", label: "Database", icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>', render: () => yc(l, i, n) },
     {
       id: "insights",
       label: "Insights",
-      icon: "💡",
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>',
       render: () => Cc(l, t, n),
     },
-    { id: "rawlog", label: "Raw Log", icon: "📄", render: () => Sc(l, t, n) },
+    { id: "rawlog", label: "Raw Log", icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>', render: () => Sc(l, t, n) },
+    {
+      id: "ai",
+      label: "AI",
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><rect x="4" y="8" width="16" height="12" rx="2"/></svg>',
+      render: () =>
+        typeof renderLogAI == "function"
+          ? renderLogAI(l, t, n)
+          : (l.textContent = "AI module not loaded — reload the extension."),
+    },
   ];
   let g = "timeline";
   const r = new Map(),
@@ -8362,20 +8455,18 @@ function yc(o, t, e) {
         L = ve("tr");
       (L.addEventListener("mouseover", () => (L.style.background = e.hover)),
         L.addEventListener("mouseout", () => (L.style.background = "")),
-        L.appendChild(
-          ve(
-            "td",
-            {
-              ...qt(e),
-              maxWidth: "620px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              fontFamily: "monospace",
-              fontSize: "12px",
-            },
-            c.text,
-          ),
-        ));
+        (() => {
+          const soqlTd = ve("td", {
+            ...qt(e),
+            maxWidth: "620px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            fontFamily: "monospace",
+            fontSize: "12px",
+          });
+          soqlTd.innerHTML = colorizeSOQL(c.text, e === e && !!e.bg && e.bg !== "#ffffff");
+          L.appendChild(soqlTd);
+        })());
       const D = ve("td", { ...qt(e), textAlign: "left" });
       ((D.innerHTML =
         x == null
@@ -8636,21 +8727,18 @@ function vc(o, t, e) {
           ss(t.slowestSoql.duration),
         ),
       ),
-      r.appendChild(
-        ve(
-          "div",
-          {
-            fontSize: "11px",
-            color: e.muted,
-            marginTop: "4px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            fontFamily: "monospace",
-          },
-          t.slowestSoql.query,
-        ),
-      ),
+      (() => {
+        const sqDiv = ve("div", {
+          fontSize: "11px",
+          marginTop: "4px",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          fontFamily: "monospace",
+        });
+        sqDiv.innerHTML = colorizeSOQL(t.slowestSoql.query, !!e.bg && e.bg !== "#ffffff");
+        r.appendChild(sqDiv);
+      })(),
       s.appendChild(r));
   }
   if (t.slowestMethod) {
@@ -8736,7 +8824,7 @@ function vc(o, t, e) {
       success: {
         bg: "rgba(34,197,94,0.10)",
         border: "rgba(34,197,94,0.35)",
-        icon: "✅",
+        icon: "",
         col: "#22c55e",
       },
       info: {
@@ -8988,7 +9076,7 @@ const as = [
     {
       id: "ApexClass",
       label: "Apex Classes",
-      icon: "📦",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, ApiVersion, LengthWithoutComments, Status, LastModifiedDate FROM ApexClass ORDER BY Name LIMIT 2000",
@@ -9003,7 +9091,7 @@ const as = [
     {
       id: "ApexTrigger",
       label: "Apex Triggers",
-      icon: "⚡",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, TableEnumOrId, ApiVersion, Status, LastModifiedDate FROM ApexTrigger ORDER BY Name LIMIT 2000",
@@ -9018,7 +9106,7 @@ const as = [
     {
       id: "ApexPage",
       label: "Visualforce Pages",
-      icon: "📄",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, MasterLabel, ApiVersion, LastModifiedDate FROM ApexPage ORDER BY Name LIMIT 2000",
@@ -9032,7 +9120,7 @@ const as = [
     {
       id: "ApexComponent",
       label: "VF Components",
-      icon: "🧱",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, MasterLabel, ApiVersion, LastModifiedDate FROM ApexComponent ORDER BY Name LIMIT 2000",
@@ -9046,7 +9134,7 @@ const as = [
     {
       id: "AuraDefinitionBundle",
       label: "Aura Components",
-      icon: "🟦",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, MasterLabel, ApiVersion, LastModifiedDate FROM AuraDefinitionBundle ORDER BY DeveloperName LIMIT 2000",
@@ -9060,7 +9148,7 @@ const as = [
     {
       id: "LightningComponentBundle",
       label: "Lightning Web Components",
-      icon: "🔆",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, MasterLabel, ApiVersion FROM LightningComponentBundle ORDER BY DeveloperName LIMIT 2000",
@@ -9073,7 +9161,7 @@ const as = [
     {
       id: "CustomObject",
       label: "Custom Objects",
-      icon: "🗃️",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, ManageableState FROM CustomObject ORDER BY DeveloperName LIMIT 2000",
@@ -9085,7 +9173,7 @@ const as = [
     {
       id: "CustomField",
       label: "Custom Fields",
-      icon: "🔤",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, TableEnumOrId FROM CustomField ORDER BY TableEnumOrId LIMIT 2000",
@@ -9097,7 +9185,7 @@ const as = [
     {
       id: "ValidationRule",
       label: "Validation Rules",
-      icon: "✅",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT ValidationName, Active, ErrorMessage FROM ValidationRule ORDER BY ValidationName LIMIT 2000",
@@ -9110,7 +9198,7 @@ const as = [
     {
       id: "FlowDefinitionView",
       label: "Flows",
-      icon: "🌊",
+      icon: "",
       tooling: !1,
       idField: "DurableId",
       namespace: !0,
@@ -9126,7 +9214,7 @@ const as = [
     {
       id: "PermissionSet",
       label: "Permission Sets",
-      icon: "🛡️",
+      icon: "",
       tooling: !1,
       namespace: !0,
       soql: "SELECT Name, Label, IsOwnedByProfile FROM PermissionSet ORDER BY Name LIMIT 2000",
@@ -9139,7 +9227,7 @@ const as = [
     {
       id: "Profile",
       label: "Profiles",
-      icon: "👤",
+      icon: "",
       tooling: !1,
       soql: "SELECT Name, UserType FROM Profile ORDER BY Name LIMIT 2000",
       columns: [
@@ -9150,7 +9238,7 @@ const as = [
     {
       id: "CustomPermission",
       label: "Custom Permissions",
-      icon: "🔑",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, MasterLabel FROM CustomPermission ORDER BY DeveloperName LIMIT 2000",
@@ -9162,7 +9250,7 @@ const as = [
     {
       id: "ExternalString",
       label: "Custom Labels",
-      icon: "🏷️",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, MasterLabel, Category, Language FROM ExternalString ORDER BY Name LIMIT 2000",
@@ -9176,7 +9264,7 @@ const as = [
     {
       id: "StaticResource",
       label: "Static Resources",
-      icon: "📎",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, ContentType, BodyLength, LastModifiedDate FROM StaticResource ORDER BY Name LIMIT 2000",
@@ -9190,7 +9278,7 @@ const as = [
     {
       id: "EmailTemplate",
       label: "Email Templates",
-      icon: "✉️",
+      icon: "",
       tooling: !1,
       namespace: !0,
       soql: "SELECT Name, DeveloperName, FolderName, TemplateType FROM EmailTemplate ORDER BY Name LIMIT 2000",
@@ -9204,7 +9292,7 @@ const as = [
     {
       id: "Report",
       label: "Reports",
-      icon: "📊",
+      icon: "",
       tooling: !1,
       soql: "SELECT Name, FolderName, Format FROM Report ORDER BY Name LIMIT 2000",
       columns: [
@@ -9216,7 +9304,7 @@ const as = [
     {
       id: "Dashboard",
       label: "Dashboards",
-      icon: "📈",
+      icon: "",
       tooling: !1,
       soql: "SELECT Title, FolderName FROM Dashboard ORDER BY Title LIMIT 2000",
       columns: [
@@ -9227,7 +9315,7 @@ const as = [
     {
       id: "CronTrigger",
       label: "Scheduled Jobs",
-      icon: "⏰",
+      icon: "",
       tooling: !1,
       soql: "SELECT CronJobDetail.Name, State, NextFireTime, PreviousFireTime FROM CronTrigger ORDER BY NextFireTime LIMIT 2000",
       columns: [
@@ -9240,7 +9328,7 @@ const as = [
     {
       id: "ApexTestRunResult",
       label: "Test History",
-      icon: "🧪",
+      icon: "",
       tooling: !0,
       soql: "SELECT JobName, Status, StartTime, TestTime, ClassesCompleted, MethodsCompleted, MethodsFailed FROM ApexTestRunResult ORDER BY StartTime DESC LIMIT 1000",
       columns: [
@@ -9921,7 +10009,7 @@ function Ni(o) {
     }
 }
 const pn =
-  typeof location < "u" && location.pathname.endsWith("spotlight.html");
+  typeof location < "u" && location.pathname.endsWith("sfpilot.html");
 let Oo = null;
 if (pn)
   try {
@@ -10407,7 +10495,7 @@ function QcBulk(o, t) {
     Xe(
       "div",
       { fontSize: "16px", fontWeight: "800" },
-      "🧪 Bulk Sample Data Generator",
+      "Sample Data Generator",
     ),
   ),
     l.appendChild(
@@ -11718,22 +11806,25 @@ function bs() {
       if (!s || t.querySelector(".sf-api-chip")) return;
       const a = document.createElement("span");
       ((a.className = "sf-api-chip"),
+        (a.title = `Click to copy "${i}"`),
         Object.assign(a.style, {
           display: "inline-flex",
           alignItems: "center",
-          gap: "6px",
           verticalAlign: "middle",
           maxWidth: "100%",
-          marginLeft: "6px",
-          padding: "0px 4px 0px 8px",
-          borderRadius: "6px",
-          background: "rgba(37,99,235,0.10)",
-          border: "1px solid rgba(37,99,235,0.25)",
-          color: "#2563eb",
-          fontSize: "11px",
+          marginLeft: "4px",
+          padding: "0px 4px",
+          borderRadius: "3px",
+          background: "rgba(79,70,229,0.12)",
+          border: "1px solid rgba(99,102,241,0.35)",
+          color: "#4338ca",
+          fontSize: "9.5px",
           fontWeight: "600",
-          fontFamily: "monospace",
-          lineHeight: "1.7",
+          fontFamily: "Fira Code, monospace",
+          lineHeight: "1.2",
+          cursor: "pointer",
+          userSelect: "none",
+          transition: "all 0.15s ease",
         }));
       const l = document.createElement("span");
       ((l.textContent = i),
@@ -11742,43 +11833,31 @@ function bs() {
           overflow: "hidden",
           textOverflow: "ellipsis",
         }));
-      const d = document.createElement("button");
-      ((d.type = "button"), (d.title = "Copy API name"));
-      const y =
-          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
-        g =
-          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-      ((d.innerHTML = y),
-        Object.assign(d.style, {
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "2px",
-          background: "transparent",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer",
-          color: "#2563eb",
-          appearance: "none",
-          WebkitAppearance: "none",
-          flexShrink: "0",
-        }),
-        d.addEventListener("click", (r) => {
-          (r.preventDefault(),
-            r.stopPropagation(),
-            navigator.clipboard
-              ?.writeText(i)
-              .then(() => {
-                ((d.innerHTML = g),
-                  setTimeout(() => {
-                    d.innerHTML = y;
-                  }, 1100));
-              })
-              .catch(() => {}));
-        }),
-        a.appendChild(l),
-        a.appendChild(d),
-        s.insertAdjacentElement("afterend", a));
+      a.addEventListener("mouseover", () => {
+        ((a.style.background = "rgba(79,70,229,0.22)"), (a.style.borderColor = "rgba(79,70,229,0.5)"), (a.style.color = "#3730a3"));
+      });
+      a.addEventListener("mouseout", () => {
+        ((a.style.background = "rgba(79,70,229,0.12)"), (a.style.borderColor = "rgba(99,102,241,0.35)"), (a.style.color = "#4338ca"));
+      });
+      a.addEventListener("click", (r) => {
+        (r.preventDefault(),
+          r.stopPropagation(),
+          navigator.clipboard
+            ?.writeText(i)
+            .then(() => {
+              const origText = l.textContent;
+              ((l.textContent = "Copied!"),
+                (a.style.color = "#16a34a"),
+                (a.style.borderColor = "#22c55e"),
+                setTimeout(() => {
+                  ((l.textContent = origText),
+                    (a.style.color = "#4338ca"),
+                    (a.style.borderColor = "rgba(99,102,241,0.35)"));
+                }, 900));
+            })
+            .catch(() => {}));
+      });
+      (a.appendChild(l), s.insertAdjacentElement("afterend", a));
     });
 }
 function Wi(o) {
@@ -11994,17 +12073,6 @@ function ka(o, t) {
     padding: "16px 24px",
     borderTop: `1px solid ${n.divider}`,
   });
-  const b = document.createElement("a");
-  ((b.textContent = "View docs ↗"),
-    (b.href = "https://sfspotlight.vercel.app/docs.html"),
-    (b.target = "_blank"),
-    (b.rel = "noopener noreferrer"),
-    Object.assign(b.style, {
-      fontSize: "13px",
-      fontWeight: "600",
-      color: n.textMuted,
-      textDecoration: "none",
-    }));
   const N = document.createElement("button");
   ((N.textContent = "Got it"),
     Object.assign(N.style, {
@@ -12019,7 +12087,7 @@ function ka(o, t) {
       fontFamily: "inherit",
     }),
     N.addEventListener("click", s),
-    u.appendChild(b),
+    (u.style.justifyContent = "flex-end"),
     u.appendChild(N),
     d.appendChild(u),
     (i.style.pointerEvents = "auto"));
@@ -12077,7 +12145,7 @@ function hp(o, t) {
       rt(
         "div",
         { fontSize: "15px", fontWeight: "800", color: n.text },
-        "🔐 Profile & PermissionSet Comparison",
+        "Profile & PermissionSet Comparison",
       ),
     ),
     i.appendChild(s));
@@ -12114,7 +12182,7 @@ function hp(o, t) {
       fontFamily: "inherit",
       transition: "all 0.15s ease",
     },
-    "🔐 Profiles & Perm Sets",
+    "Profiles & Perm Sets",
   );
   const userModeBtn = rt(
     "button",
@@ -12130,7 +12198,7 @@ function hp(o, t) {
       fontFamily: "inherit",
       transition: "all 0.15s ease",
     },
-    "👤 Users",
+    "Users",
   );
   modeSwitchWrap.appendChild(permModeBtn);
   modeSwitchWrap.appendChild(userModeBtn);
@@ -12194,22 +12262,22 @@ function hp(o, t) {
   i.appendChild(E);
   let u = "objects";
   const permTabs = [
-    { id: "system", label: "🛡️ System" },
-    { id: "objects", label: "📦 Objects" },
-    { id: "fields", label: "🔑 FLS" },
-    { id: "apex", label: "☕ Apex" },
-    { id: "vf", label: "📄 VF Pages" },
-    { id: "custom", label: "🔑 Custom" },
-    { id: "dependency", label: "📊 Dependency" },
+    { id: "system", label: "System" },
+    { id: "objects", label: "Objects" },
+    { id: "fields", label: "FLS" },
+    { id: "apex", label: "Apex" },
+    { id: "vf", label: "VF Pages" },
+    { id: "custom", label: "Custom" },
+    { id: "dependency", label: "Dependency" },
   ];
   const userTabs = [
-    { id: "assigned", label: "📋 Assigned Sets" },
-    { id: "objects", label: "📦 Objects" },
-    { id: "fields", label: "🔑 FLS" },
-    { id: "system", label: "🛡️ System" },
-    { id: "apex", label: "☕ Apex" },
-    { id: "vf", label: "📄 VF Pages" },
-    { id: "custom", label: "🔑 Custom" },
+    { id: "assigned", label: "Assigned Sets" },
+    { id: "objects", label: "Objects" },
+    { id: "fields", label: "FLS" },
+    { id: "system", label: "System" },
+    { id: "apex", label: "Apex" },
+    { id: "vf", label: "VF Pages" },
+    { id: "custom", label: "Custom" },
   ];
   const b = rt("div", {
       display: "inline-flex",
@@ -13994,19 +14062,19 @@ const Mt = {
     deleteCheckboxes: !0,
   },
   Ui = [
-    { id: "home", label: "Home", icon: "🏠" },
-    { id: "tools", label: "Tools", icon: "🛠️" },
-    { id: "setup", label: "Setup", icon: "🏠" },
-    { id: "users", label: "Users", icon: "👤" },
-    { id: "flows", label: "Flows", icon: "⚡" },
-    { id: "metadata", label: "Metadata Explorer", icon: "🧩" },
-    { id: "security", label: "Security", icon: "🔑" },
-    { id: "debug", label: "Log Explorer", icon: "🐞" },
-    { id: "objects", label: "Objects", icon: "📦" },
-    { id: "apextests", label: "Apex Tests", icon: "🧪" },
-    { id: "access", label: "Access Explorer", icon: "🗺️" },
-    { id: "recent", label: "Recent", icon: "🕘" },
-    { id: "apps", label: "Apps & Tabs", icon: "🚀" },
+    { id: "home", label: "Home", icon: "" },
+    { id: "tools", label: "Tools", icon: "" },
+    { id: "setup", label: "Setup", icon: "" },
+    { id: "users", label: "Users", icon: "" },
+    { id: "flows", label: "Flows", icon: "" },
+    { id: "metadata", label: "Metadata Explorer", icon: "" },
+    { id: "security", label: "Security", icon: "" },
+    { id: "debug", label: "Log Explorer", icon: "" },
+    { id: "objects", label: "Objects", icon: "" },
+    { id: "apextests", label: "Apex Tests", icon: "" },
+    { id: "access", label: "Access Explorer", icon: "" },
+    { id: "recent", label: "Recent", icon: "" },
+    { id: "apps", label: "Apps & Tabs", icon: "" },
   ],
   mp = ["apps"];
 function mi() {
@@ -14184,7 +14252,7 @@ function renderUserClone(o, t) {
   headerLeft.appendChild(backBtn);
   headerLeft.appendChild(rt("span", { color: n.faint }, "/"));
   headerLeft.appendChild(
-    rt("div", { fontSize: "15px", fontWeight: "800", color: n.text, display: "flex", alignItems: "center", gap: "8px" }, "👥 User Clone & Onboarding")
+    rt("div", { fontSize: "15px", fontWeight: "800", color: n.text, display: "flex", alignItems: "center", gap: "8px" }, "User Clone & Onboarding")
   );
 
   // Mode badge switcher button (switch over to Profile & Permission Master Clone)
@@ -14216,34 +14284,6 @@ function renderUserClone(o, t) {
   }, "Ready");
   headerRight.appendChild(statusBadge);
 
-  const guideBtn = rt("button", {
-    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
-    border: `1px solid ${n.border}`,
-    borderRadius: "6px",
-    padding: "4px 10px",
-    fontSize: "12px",
-    fontWeight: "600",
-    color: n.muted,
-    cursor: "pointer",
-    fontFamily: "inherit",
-  }, "ℹ️ Guide");
-  guideBtn.addEventListener("click", showGuideModal);
-  headerRight.appendChild(guideBtn);
-  header.appendChild(headerRight);
-  container.appendChild(header);
-
-  // Main scrollable body
-  const bodyWrap = rt("div", {
-    flex: "1",
-    minHeight: "0",
-    overflow: "auto",
-    padding: "20px 24px 140px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "18px",
-  });
-  container.appendChild(bodyWrap);
-
   // Guide Modal
   function showGuideModal() {
     const overlay = rt("div", {
@@ -14253,7 +14293,7 @@ function renderUserClone(o, t) {
       width: "100%",
       height: "100%",
       background: "rgba(0,0,0,0.6)",
-      zIndex: "999999",
+      zIndex: "2147483649",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -14276,7 +14316,6 @@ function renderUserClone(o, t) {
       </div>
       <div style="font-size:13px;line-height:1.6;color:${n.text};display:flex;flex-direction:column;gap:12px">
         <p><b>1-Click User Replication:</b> Onboard new employees or clone existing users in seconds. Copies Profile, Role, Permission Sets, Permission Set Groups, Package Licenses (e.g. Litify, DocuSign, Financial Services), and Public Group/Queue memberships.</p>
-        <p><b>✨ Smart Request Text Auto-Fill:</b> Paste manager/IT emails or ticketing requests (e.g. <i>"Please assign open Litify license to our new intake manager Ryan K. (raihan@micronetbd.org) who starts 10/1..."</i>) and click <b>Auto-Fill Form</b>. The tool automatically detects First Name, Last Name, Email, generates username/alias, and preselects matching package licenses!</p>
         <p><b>Target Modes:</b> You can create a <b>Brand New User</b> from scratch or replicate permissions into an <b>Existing Salesforce User</b>.</p>
       </div>
       <div style="display:flex;justify-content:flex-end;margin-top:20px">
@@ -14290,6 +14329,34 @@ function renderUserClone(o, t) {
       if (e.target === overlay) overlay.remove();
     });
   }
+
+  const guideBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "4px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "Guide");
+  guideBtn.addEventListener("click", showGuideModal);
+  headerRight.appendChild(guideBtn);
+  header.appendChild(headerRight);
+  container.appendChild(header);
+
+  // Main scrollable body
+  const bodyWrap = rt("div", {
+    flex: "1",
+    minHeight: "0",
+    overflow: "auto",
+    padding: "20px 24px 140px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "18px",
+  });
+  container.appendChild(bodyWrap);
 
   // State
   let usersList = [];
@@ -14362,71 +14429,6 @@ function renderUserClone(o, t) {
       getChecked: () => checked,
     };
   }
-
-  // --- SECTION A: Smart Paste & Prompt Parser Card ---
-  const smartCard = rt("div", {
-    background: isDark ? "linear-gradient(135deg, rgba(30,58,138,0.2), rgba(15,23,42,0.6))" : "linear-gradient(135deg, rgba(239,246,255,0.8), rgba(248,250,252,0.9))",
-    border: "1px solid rgba(59,130,246,0.3)",
-    borderRadius: "12px",
-    padding: "16px 20px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "10px",
-  });
-  bodyWrap.appendChild(smartCard);
-
-  const smartHeader = rt("div", { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" });
-  smartCard.appendChild(smartHeader);
-
-  const smartTitle = rt("div", {
-    fontSize: "14px",
-    fontWeight: "800",
-    color: "#3b82f6",
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-  });
-  smartTitle.innerHTML = `<span>✨</span> Smart Onboarding Request Parser (Paste & Auto-Fill)`;
-  smartHeader.appendChild(smartTitle);
-
-  const smartSub = rt("div", { fontSize: "12px", color: n.muted }, "Paste any onboarding email, ticket, or message below. SFPilot will extract the name, email, role/profile hint, and requested package licenses.");
-  smartCard.appendChild(smartSub);
-
-  const smartTextarea = rt("textarea", {
-    width: "100%",
-    boxSizing: "border-box",
-    minHeight: "56px",
-    maxHeight: "120px",
-    padding: "8px 12px",
-    borderRadius: "8px",
-    border: `1px solid ${n.border}`,
-    background: isDark ? "#1e293b" : "#ffffff",
-    color: n.text,
-    fontSize: "12.5px",
-    fontFamily: "inherit",
-    resize: "vertical",
-  });
-  smartTextarea.placeholder = 'e.g. Please assign one of the open Litify licenses to our new intake manager Ryan K. (raihan@micronetbd.org) who is starting on 10/1.';
-  smartCard.appendChild(smartTextarea);
-
-  const smartActions = rt("div", { display: "flex", alignItems: "center", gap: "10px", justifyContent: "flex-end" });
-  smartCard.appendChild(smartActions);
-
-  const parseBtn = rt("button", {
-    background: "#3b82f6",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: "6px",
-    padding: "6px 14px",
-    fontSize: "12px",
-    fontWeight: "700",
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px",
-    fontFamily: "inherit",
-  }, "⚡ Auto-Fill Form from Text");
-  smartActions.appendChild(parseBtn);
 
   // --- SECTION B: Two-Column Configuration Grid ---
   const configGrid = rt("div", {
@@ -14797,9 +14799,9 @@ function renderUserClone(o, t) {
   domainCard.appendChild(domainTogglesGrid);
 
   const domainDefinitions = [
-    { key: "profile", icon: "👤", label: "Profile & Role", desc: "User license, base security profile & role" },
-    { key: "permSets", icon: "🔑", label: "Permission Sets", desc: "All direct Permission Sets assigned to source" },
-    { key: "psg", icon: "📦", label: "Permission Set Groups", desc: "All Permission Set Groups bundled for user" },
+    { key: "profile", icon: "", label: "Profile & Role", desc: "User license, base security profile & role" },
+    { key: "permSets", icon: "", label: "Permission Sets", desc: "All direct Permission Sets assigned to source" },
+    { key: "psg", icon: "", label: "Permission Set Groups", desc: "All Permission Set Groups bundled for user" },
     { key: "packages", icon: "💼", label: "Package Licenses", desc: "Installed managed package seats (e.g. Litify)" },
     { key: "groups", icon: "👥", label: "Public Groups & Queues", desc: "Replicate public group and case/lead queue memberships" },
   ];
@@ -15267,75 +15269,7 @@ function renderUserClone(o, t) {
     startCloneBtn.style.cursor = "pointer";
   }
 
-  // Smart Request Parser
-  parseBtn.addEventListener("click", () => {
-    const rawText = smartTextarea.value.trim();
-    if (!rawText) {
-      t.flashToast("Please paste an onboarding request first.");
-      return;
-    }
 
-    // 1. Extract email
-    const emailMatch = rawText.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-    if (emailMatch) {
-      emailInput.value = emailMatch[1];
-      usernameInput.value = emailMatch[1];
-    }
-
-    // 2. Extract name
-    // Common patterns: "to our new intake manager Ryan K.", "for Ryan K.", "user Ryan K."
-    let detectedFirst = "";
-    let detectedLast = "";
-
-    const nameRegex = /(?:manager|user|employee|to|for|onboard|name(?:\s+is)?)\s+([A-Z][a-z]+)\s+([A-Z][a-z]+)/i;
-    const nameMatch = rawText.match(nameRegex);
-    if (nameMatch) {
-      detectedFirst = nameMatch[1];
-      detectedLast = nameMatch[2];
-    } else {
-      // Fallback: look for two capitalized words preceding email
-      const preEmailMatch = rawText.match(/([A-Z][a-z]+)\s+([A-Z][a-z]+)(?:\s*\([^)]*@|\s*<[^>]*@|\s*\[mailto:|\s+who)/);
-      if (preEmailMatch) {
-        detectedFirst = preEmailMatch[1];
-        detectedLast = preEmailMatch[2];
-      }
-    }
-
-    if (detectedFirst) fnInput.value = detectedFirst;
-    if (detectedLast) lnInput.value = detectedLast;
-
-    autoPopulateUserMeta();
-
-    // 3. Detect requested package licenses (e.g. Litify, DocuSign, Financial Services)
-    let matchedPkgCount = 0;
-    packageLicenses.forEach((pkg) => {
-      const ns = (pkg.NamespacePrefix || "").toLowerCase();
-      if (ns && rawText.toLowerCase().includes(ns)) {
-        selectedPackages.add(pkg.Id);
-        matchedPkgCount++;
-      } else if (rawText.toLowerCase().includes("litify") && ns.includes("litify")) {
-        selectedPackages.add(pkg.Id);
-        matchedPkgCount++;
-      }
-    });
-
-    renderPackageLicensesList();
-
-    // 4. Try auto-matching source user if role/title mentioned (e.g. "intake manager")
-    const lowerText = rawText.toLowerCase();
-    const candidateSource = usersList.find((u) => {
-      const title = (u.Title || "").toLowerCase();
-      const role = (u.UserRole?.Name || "").toLowerCase();
-      return (title && lowerText.includes(title)) || (role && lowerText.includes(role));
-    });
-    if (candidateSource && !sourceSelect.value) {
-      sourceSelect.value = candidateSource.Id;
-      sourceSelect.dispatchEvent(new Event("change"));
-    }
-
-    t.flashToast(`Smart Auto-Fill: Detected ${detectedFirst} ${detectedLast} (${matchedPkgCount} package seats matched)`);
-    updateSummary();
-  });
 
   // Load Initial Data
   async function loadInitialData() {
@@ -15413,8 +15347,12 @@ function renderUserClone(o, t) {
       return;
     }
 
-    selectedSourceUser = usersList.find((u) => u.Id === sId);
-    sourceDetails.innerHTML = `<span style="color:#3b82f6;font-weight:700">Loading assignments & permissions for ${selectedSourceUser.Name}…</span>`;
+    selectedSourceUser = (usersList || []).find((u) => u.Id === sId) || null;
+    if (!selectedSourceUser) {
+      sourceDetails.textContent = "";
+      return;
+    }
+    sourceDetails.innerHTML = `<span style="color:#3b82f6;font-weight:700">Loading assignments & permissions for ${selectedSourceUser.Name || sId}…</span>`;
     statusBadge.textContent = "Analyzing…";
     statusBadge.style.color = "#f59e0b";
     statusBadge.style.background = "rgba(245,158,11,0.15)";
@@ -15844,34 +15782,6 @@ function renderPermClone(o, t) {
   }, "Ready");
   headerRight.appendChild(statusBadge);
 
-  const guideBtn = rt("button", {
-    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
-    border: `1px solid ${n.border}`,
-    borderRadius: "6px",
-    padding: "4px 10px",
-    fontSize: "12px",
-    fontWeight: "600",
-    color: n.muted,
-    cursor: "pointer",
-    fontFamily: "inherit",
-  }, "ℹ️ Guide");
-  guideBtn.addEventListener("click", showGuideModal);
-  headerRight.appendChild(guideBtn);
-  header.appendChild(headerRight);
-  container.appendChild(header);
-
-  // Main scrollable body
-  const bodyWrap = rt("div", {
-    flex: "1",
-    minHeight: "0",
-    overflow: "auto",
-    padding: "20px 24px 120px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "18px",
-  });
-  container.appendChild(bodyWrap);
-
   // Guide Modal
   function showGuideModal() {
     const overlay = rt("div", {
@@ -15881,7 +15791,7 @@ function renderPermClone(o, t) {
       width: "100%",
       height: "100%",
       background: "rgba(0,0,0,0.6)",
-      zIndex: "999999",
+      zIndex: "2147483649",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -15900,7 +15810,7 @@ function renderPermClone(o, t) {
     });
     modal.innerHTML = `
       <div style="font-size:18px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:8px">
-        <span>🧬</span> Profile & Permission Master Clone Guide
+        Profile & Permission Master Clone Guide
       </div>
       <div style="font-size:13px;line-height:1.6;color:${n.text};display:flex;flex-direction:column;gap:12px">
         <p><b>Convert Profiles to Permission Sets:</b> Salesforce is transitioning permissions from Profiles to Permission Sets. This tool enables 1-click migration of all Profile CRUDQ, FLS, System Permissions, Apex classes, Visualforce pages, and Custom permissions into a clean, modern Permission Set.</p>
@@ -15918,6 +15828,34 @@ function renderPermClone(o, t) {
       if (e.target === overlay) overlay.remove();
     });
   }
+
+  const guideBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "4px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "Guide");
+  guideBtn.addEventListener("click", showGuideModal);
+  headerRight.appendChild(guideBtn);
+  header.appendChild(headerRight);
+  container.appendChild(header);
+
+  // Main scrollable body
+  const bodyWrap = rt("div", {
+    flex: "1",
+    minHeight: "0",
+    overflow: "auto",
+    padding: "20px 24px 120px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "18px",
+  });
+  container.appendChild(bodyWrap);
 
   // State
   let securityPrincipals = [];
@@ -16314,12 +16252,12 @@ function renderPermClone(o, t) {
   modulesCard.appendChild(modulesGrid);
 
   const moduleDefinitions = [
-    { key: "objects", icon: "📦", label: "Object Permissions", desc: "CRUD, View All, Modify All" },
+    { key: "objects", icon: "", label: "Object Permissions", desc: "CRUD, View All, Modify All" },
     { key: "fields", icon: "🔤", label: "Field Permissions", desc: "Field-Level Security (FLS)" },
-    { key: "system", icon: "⚙️", label: "System Permissions", desc: "User & admin boolean flags" },
-    { key: "apex", icon: "⚡", label: "Apex Classes", desc: "Apex class access permissions" },
+    { key: "system", icon: "", label: "System Permissions", desc: "User & admin boolean flags" },
+    { key: "apex", icon: "", label: "Apex Classes", desc: "Apex class access permissions" },
     { key: "vf", icon: "📄", label: "Visualforce Pages", desc: "Visualforce page accesses" },
-    { key: "customPerms", icon: "🔑", label: "Custom Permissions", desc: "Custom platform permissions" },
+    { key: "customPerms", icon: "", label: "Custom Permissions", desc: "Custom platform permissions" },
   ];
 
   const moduleElements = {};
@@ -22746,19 +22684,19 @@ function Mp(o, t, e) {
       }),
     y = [
       {
-        icon: "🧱",
+        icon: "",
         title: "New Custom Object",
         desc: "Create a custom object with the full set of Setup options — record name, sharing model, optional features, and deployment status. Then add fields in one flow.",
         onClick: l,
       },
       {
-        icon: "🧩",
+        icon: "",
         title: "New Fields",
         desc: "Add fields to any object — every field type from Auto Number to URL, with type-specific settings, a multi-field queue, and one-step field-level security.",
         onClick: () => d(),
       },
       {
-        icon: "✨",
+        icon: "",
         title: "Bulk Field Creator",
         desc: "Create custom fields in bulk from CSV/TSV schema and automatically assign Field-Level Security (FLS) to profiles.",
         onClick: () => renderBulkFieldCreator(o, t.isDark, e),
@@ -22766,9 +22704,9 @@ function Mp(o, t, e) {
     ],
     g = $e("div", {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-      gap: "14px",
-      maxWidth: "720px",
+      gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+      gap: "18px",
+      width: "100%",
     });
   (y.forEach((r) => {
     const E = $e("button", {
@@ -22815,7 +22753,7 @@ function Mp(o, t, e) {
           fontSize: "11.5px",
           color: n.faint,
           lineHeight: "1.5",
-          maxWidth: "720px",
+          width: "100%",
         },
         "Changes deploy straight to this org via the Tooling API — the same result as the Setup wizards. Remember that new fields still need to be added to page layouts in Setup.",
       ),
@@ -23063,7 +23001,7 @@ function Pp(o, t) {
               return Me[ye] === !0;
             })
             .map((Me) => ({
-              icon: "⚙️",
+              icon: "",
               name: Ft(Me.Name),
               detail: ["Insert", "Update", "Delete", "Undelete"]
                 .filter(
@@ -23513,7 +23451,7 @@ function Bp(o, t) {
       Dt(
         "div",
         { fontSize: "16px", fontWeight: "800" },
-        "⚡ Execute Anonymous",
+        "Execute Anonymous",
       ),
     ),
       u.appendChild(
@@ -27111,40 +27049,88 @@ function ru(o, t) {
   }
   (x(), se());
 }
+function highlightSOQL(soql, isDark) {
+  if (!soql) return "";
+  const escapeHtml = (str) =>
+    str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const keywords = new Set([
+    "SELECT", "FROM", "WHERE", "ORDER", "BY", "GROUP", "LIMIT", "OFFSET",
+    "ASC", "DESC", "NULLS", "FIRST", "LAST", "AND", "OR", "NOT", "IN",
+    "LIKE", "INCLUDES", "EXCLUDES", "HAVING", "WITH", "SECURITY_ENFORCED",
+    "USING", "SCOPE", "TYPEOF", "WHEN", "THEN", "ELSE", "END", "FOR", "VIEW",
+    "REFERENCE", "UPDATE", "TRACKING", "VIEWSTAT", "FIELDS", "ALL", "CUSTOM", "STANDARD"
+  ]);
+  const functions = new Set([
+    "AVG", "COUNT", "COUNT_DISTINCT", "MIN", "MAX", "SUM", "FORMAT",
+    "CALENDAR_MONTH", "CALENDAR_QUARTER", "CALENDAR_YEAR", "DAY_IN_MONTH",
+    "DAY_IN_WEEK", "DAY_IN_YEAR", "DAY_ONLY", "FISCAL_MONTH", "FISCAL_QUARTER",
+    "FISCAL_YEAR", "HOUR_IN_DAY", "WEEK_IN_MONTH", "WEEK_IN_YEAR"
+  ]);
+
+  // Color tokens
+  const kwColor = isDark ? "#60a5fa" : "#2563eb";    // Blue (SELECT, FROM, etc.)
+  const fnColor = isDark ? "#c084fc" : "#9333ea";    // Purple (COUNT, SUM, etc.)
+  const strColor = isDark ? "#4ade80" : "#16a34a";   // Green ('Account', 'Contact')
+  const numColor = isDark ? "#f97316" : "#ea580c";   // Orange (50, 100)
+  const boolColor = isDark ? "#f43f5e" : "#e11d48";  // Red/Pink (true, false, null)
+
+  const tokenRegex = /('(?:[^'\\]|\\.)*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_.]*\b|[(),=><!]+|\s+)/g;
+  return escapeHtml(soql).replace(tokenRegex, (match) => {
+    const raw = match;
+    const unescaped = raw.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    if (unescaped.startsWith("'")) {
+      return `<span style="color:${strColor};font-weight:600;">${raw}</span>`;
+    }
+    if (/^\d+(?:\.\d+)?$/.test(unescaped)) {
+      return `<span style="color:${numColor};font-weight:700;">${raw}</span>`;
+    }
+    const upper = unescaped.toUpperCase();
+    if (keywords.has(upper)) {
+      return `<span style="color:${kwColor};font-weight:800;">${raw}</span>`;
+    }
+    if (functions.has(upper)) {
+      return `<span style="color:${fnColor};font-weight:800;">${raw}</span>`;
+    }
+    if (upper === "TRUE" || upper === "FALSE" || upper === "NULL") {
+      return `<span style="color:${boolColor};font-weight:700;">${raw}</span>`;
+    }
+    return raw;
+  });
+}
 function Fe(o, t, e) {
   const n = document.createElement(o);
-  return (t && Object.assign(n.style, t), e != null && (n.textContent = e), n);
+  return (t && Object.assign(n.style, t), e != null && (typeof e === "string" && e.includes("<svg") ? n.innerHTML = e : n.textContent = e), n);
 }
 const du = [
     {
       group: "System",
       items: [
-        { id: "cache", label: "Cache", icon: "🗄️" },
-        { id: "history", label: "History", icon: "🕘" },
-        { id: "tasks", label: "Tasks", icon: "✅" },
+        { id: "cache", label: "Cache", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>' },
+        { id: "history", label: "History", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' },
+        { id: "tasks", label: "Tasks", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' },
       ],
     },
     {
       group: "Experience",
       items: [
-        { id: "appearance", label: "Appearance", icon: "🎨" },
-        { id: "tabs", label: "Tabs", icon: "🧩" },
-        { id: "quickactions", label: "Quick Actions", icon: "⚡" },
-        { id: "notification", label: "Notification", icon: "🔔" },
-        { id: "privacy", label: "Privacy", icon: "🛡️" },
+        { id: "appearance", label: "Appearance", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 1 0 10 10"/></svg>' },
+        { id: "tabs", label: "Tabs", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>' },
+        { id: "quickactions", label: "Quick Actions", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' },
+        { id: "notification", label: "Notification", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>' },
+        { id: "privacy", label: "Privacy", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' },
       ],
     },
     {
       group: "Salesforce",
       items: [
-        { id: "salesforce", label: "Salesforce", icon: "☁️" },
-        { id: "export", label: "Data Export", icon: "📤" },
-        { id: "connection", label: "Connection", icon: "🔗" },
+        { id: "salesforce", label: "Salesforce", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>' },
+        { id: "export", label: "Data Export", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>' },
+        { id: "connection", label: "Connection", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' },
       ],
     },
     {
       group: "Support",
-      items: [{ id: "support", label: "Support", icon: "ℹ️" }],
+      items: [{ id: "support", label: "Support", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' }],
     },
   ],
   cu = ["64.0", "63.0", "62.0", "61.0", "60.0", "59.0", "58.0", "57.0", "56.0"],
@@ -28264,8 +28250,11 @@ function uu(o, t) {
         });
         titleInput.placeholder = "e.g. Acme DEV or Production";
         titleInput.value = a.orgCustomLabel || "";
+        titleInput.addEventListener("keydown", (e) => {
+          e.stopPropagation();
+        });
         titleInput.addEventListener("input", (e) => {
-          const val = e.target.value.trim();
+          const val = e.target.value;
           b({ orgCustomLabel: val });
           globalThis.chrome?.storage?.local?.set({
             sf_spotlight_org_brand: { ...(a || {}), orgCustomLabel: val },
@@ -29385,11 +29374,6 @@ function uu(o, t) {
         ),
       ),
     ),
-      A.appendChild(
-        Z("🐛  Report a bug", "ghost", () =>
-          ks("https://forms.gle/ed2VcwQTJXTDaMUv6"),
-        ),
-      ),
       w.appendChild(A),
       T(w));
   }
@@ -31738,15 +31722,15 @@ let mt = "light",
   Kn = "default",
   Vi = !1,
   Do = 100,
-  spW = 1280,
-  spH = 1200,
+  spW = 960,
+  spH = 640,
   spMax = !1,
   zt = !1;
 // Popup box size: maximized fills the viewport, otherwise the saved size
 function spotlightBox(minimal) {
   return spMax
     ? { w: "calc(100vw - 48px)", h: minimal ? "calc(88vh - 250px)" : "calc(100vh - 240px)" }
-    : { w: `min(${spW}px, calc(100vw - 32px))`, h: `min(${spH}px, calc(100vh - ${minimal ? "12vh - 250px" : "240px"}))` };
+    : { w: `min(${spW}px, calc(100vw - 32px))`, h: `min(${spH}px, calc(100vh - 120px))` };
 }
 // Persist the Spotlight popup size into the shared settings object
 function saveSpotlightSize(w, h) {
@@ -31831,92 +31815,99 @@ function to(o, t, e, n) {
       (t.style.display = "none"));
 }
 const Hn = [
-    { id: "home", label: "Home", placeholder: "", icon: "🏠" },
+    { id: "home", label: "Home", placeholder: "", icon: "" },
     {
       id: "tools",
       label: "Tools",
       placeholder: "Search tools & actions...",
-      icon: "🛠️",
+      icon: "",
     },
     {
       id: "setup",
       label: "Setup",
       placeholder: "Search Salesforce Setup...",
-      icon: "🏠",
+      icon: "",
     },
-    { id: "users", label: "Users", placeholder: "Search Users...", icon: "👤" },
-    { id: "flows", label: "Flows", placeholder: "Search Flows...", icon: "⚡" },
+    {
+      id: "export",
+      label: "Export Data / Query",
+      placeholder: "Search objects & SOQL...",
+      icon: "",
+      isTool: true,
+    },
+    { id: "users", label: "Users", placeholder: "Search Users...", icon: "" },
+    { id: "flows", label: "Flows", placeholder: "Search Flows...", icon: "" },
     {
       id: "metadata",
       label: "Metadata Explorer",
       placeholder: "Search metadata types...",
-      icon: "🧩",
+      icon: "",
     },
     {
       id: "security",
       label: "Security",
       placeholder: "Search Permission Sets, Groups & Profiles...",
-      icon: "🔑",
+      icon: "",
     },
     {
       id: "debug",
       label: "Log Explorer",
       placeholder: "Search your debug logs...",
-      icon: "🐞",
+      icon: "",
     },
     {
       id: "objects",
       label: "Objects",
       placeholder: "Search Objects...",
-      icon: "📦",
+      icon: "",
     },
     {
       id: "apextests",
       label: "Apex Tests",
       placeholder: "Search tests...",
-      icon: "🧪",
+      icon: "",
     },
     {
       id: "access",
       label: "Access Explorer",
       placeholder: "Access map...",
-      icon: "🗺️",
+      icon: "",
     },
     {
       id: "recent",
       label: "Recent",
       placeholder: "Search recently opened...",
-      icon: "🕘",
+      icon: "",
     },
     {
       id: "apps",
       label: "Apps & Tabs",
       placeholder: "Search apps & tabs...",
-      icon: "🚀",
+      icon: "",
     },
 ],
   Fa = ["apps"],
   $s = [
-    { kind: "tab", id: "home", label: "Home", icon: "🏠" },
-    { kind: "tab", id: "tools", label: "Apps & Tools", icon: "🛠️" },
-    { kind: "tab", id: "setup", label: "Quick Access", icon: "🔧" },
-    { kind: "tool", id: "export", label: "Query Editor", icon: "📝" },
-    { kind: "tab", id: "debug", label: "Log Explorer", icon: "🐞" },
-    { kind: "tab", id: "apextests", label: "Apex Tests", icon: "🧪" },
-    { kind: "tab", id: "access", label: "Access Explorer", icon: "🗺️" },
-    { kind: "tool", id: "restexplorer", label: "REST Console", icon: "🔌" },
-    { kind: "tool", id: "eventmonitor", label: "Event Console", icon: "📡" },
-    { kind: "tool", id: "executeanonymous", label: "Code Editor", icon: "⚡" },
-    { kind: "tool", id: "flowmanager", label: "Flow Manager", icon: "🌊" },
+    { kind: "tab", id: "home", label: "Home", icon: "" },
+    { kind: "tab", id: "tools", label: "Apps & Tools", icon: "" },
+    { kind: "tab", id: "setup", label: "Quick Access", icon: "" },
+    { kind: "tool", id: "export", label: "Query Editor", icon: "" },
+    { kind: "tab", id: "debug", label: "Log Explorer", icon: "" },
+    { kind: "tab", id: "apextests", label: "Apex Tests", icon: "" },
+    { kind: "tab", id: "access", label: "Access Explorer", icon: "" },
+    { kind: "tool", id: "restexplorer", label: "REST Console", icon: "" },
+    { kind: "tool", id: "eventmonitor", label: "Event Console", icon: "" },
+    { kind: "tool", id: "executeanonymous", label: "Code Editor", icon: "" },
+    { kind: "tool", id: "flowmanager", label: "Flow Manager", icon: "" },
     {
       kind: "tool",
       id: "validationrules",
       label: "Validation Rules",
-      icon: "✅",
+      icon: "",
     },
-    { kind: "tool", id: "automationmap", label: "Automation Map", icon: "🧭" },
-    { kind: "tool", id: "orglimits", label: "Org Status", icon: "📈" },
-    { kind: "tool", id: "objectdetails", label: "Object Details", icon: "📦" },
+    { kind: "tool", id: "automationmap", label: "Automation Map", icon: "" },
+    { kind: "tool", id: "orglimits", label: "Org Status", icon: "" },
+    { kind: "tool", id: "objectdetails", label: "Object Details", icon: "" },
   ],
   ao = "sf_spotlight_tab_config";
 function $a() {
@@ -32107,6 +32098,7 @@ if (pn) {
   }
   try {
     Mo = new URLSearchParams(location.search).get("tab");
+    if (Mo === "settings") Mo = "__settings";
   } catch {
     Mo = null;
   }
@@ -32141,7 +32133,7 @@ function Ws() {
   const o = globalThis.chrome?.runtime;
   if (!o?.getURL) return;
   const t = Vt(en()),
-    e = `${o.getURL("spotlight.html")}?host=${encodeURIComponent(t)}&tab=__settings`;
+    e = `${o.getURL("sfpilot.html")}?host=${encodeURIComponent(t)}&tab=__settings`;
   o.sendMessage
     ? o.sendMessage({ type: "OPEN_TAB", url: e })
     : window.open(e, "_blank");
@@ -33014,7 +33006,7 @@ function Xn(o, t, e) {
 function Bu(o, t, e) {
   o.innerHTML = "";
   const n = kt(t);
-  o.appendChild(Xn(t, "🏢  Org Details", e));
+  o.appendChild(Xn(t, "Org Details", e));
   const i = document.createElement("div");
   (Object.assign(i.style, { padding: "4px 28px 20px" }), o.appendChild(i));
   const s = (a) => {
@@ -33125,7 +33117,7 @@ function Bu(o, t, e) {
 function Wu(o, t, e) {
   o.innerHTML = "";
   const n = kt(t);
-  o.appendChild(Xn(t, "✨  Magic Fill", e));
+  o.appendChild(Xn(t, "Magic Fill", e));
   const i = document.createElement("div");
   (Object.assign(i.style, { padding: "6px 28px 24px" }), o.appendChild(i));
   const s = document.createElement("div");
@@ -33200,7 +33192,7 @@ function Wu(o, t, e) {
 function Uu(o, t, e) {
   o.innerHTML = "";
   const n = kt(t);
-  o.appendChild(Xn(t, "🚀  Salesforce Release", e));
+  o.appendChild(Xn(t, "Salesforce Release", e));
   const i = document.createElement("div");
   (Object.assign(i.style, { padding: "8px 28px 20px" }), o.appendChild(i));
   const s = document.createElement("div");
@@ -34407,7 +34399,7 @@ function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyz
     height: "38px",
     fontFamily: "inherit"
   });
-  chatInput.placeholder = "Ask AI to generate or modify code...";
+  chatInput.placeholder = "Ask AI to generate or modify code…  (Enter to send, Shift+Enter for new line)";
   chatInputRow.appendChild(chatInput);
 
   const sendBtn = $e("button", {
@@ -34604,6 +34596,13 @@ function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyz
     const fullPrompt = `${prefix}\n\n\`\`\`apex\n${code}\n\`\`\``;
     await askAI(fullPrompt);
   }
+
+  chatInput.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" || ev.shiftKey || ev.isComposing || ev.keyCode === 229) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    sendBtn.click();
+  });
 
   sendBtn.addEventListener("click", async () => {
     const text = chatInput.value.trim();
@@ -35181,6 +35180,15 @@ function soqlSyntaxFix(q) {
   step(/\s*\|\|\s*/g, " OR ", "Use OR instead of ||");
   step(/,\s*,/g, ",", "Removed duplicate comma");
   step(/,\s*FROM\b/gi, " FROM", "Removed trailing comma before FROM");
+  // Fix missing commas between fields in SELECT clause (e.g. "SELECT Id Name CreatedDate FROM")
+  step(
+    /(\bSELECT\s+)([\w.,\s]+?)(\s+FROM\b)/gi,
+    (match, selectKw, fieldsStr, fromKw) => {
+      const fixedFields = fieldsStr.replace(/([a-zA-Z0-9_.]+(?:\([^)]*\))?)\s+([a-zA-Z0-9_.]+(?:\([^)]*\))?)/g, "$1, $2");
+      return selectKw + fixedFields + fromKw;
+    },
+    "Added missing comma between fields"
+  );
   step(/\bSELECT\s+FROM\b/gi, "SELECT Id FROM", "Selected at least one field (Id)");
   // "FROM Account Name = 'x'" → "FROM Account WHERE Name = 'x'"
   step(
@@ -35243,6 +35251,23 @@ function soqlSemanticFix(q, err, cb) {
       const hit = soqlClosest(rel, fields.map((f) => f.relationshipName).filter(Boolean));
       cb(hit ? { query: replaceWord(rel, hit), fixes: [`${rel} → ${hit} (relationship on ${from})`] } : null);
     });
+  }
+  // Auto-fix for aggregate expressions missing alias:
+  // e.g. "field expression cannot be used without an alias" or "Duplicate field selected" or missing alias on aggregate
+  m = err.match(/(?:duplicate field|field expression|aggregate expression).*alias|must use an alias/i);
+  if (m || /expr\d+/i.test(err)) {
+    let fixedQuery = q;
+    let count = 0;
+    const aggRegex = /\b(COUNT|SUM|AVG|MIN|MAX)\s*\(([^)]+)\)(?!\s+AS\s+\w+)(?!\s+\w+)/gi;
+    fixedQuery = fixedQuery.replace(aggRegex, (full, fn, fld) => {
+      count++;
+      const cleanFld = fld.replace(/[^a-zA-Z0-9_]/g, "");
+      const aliasName = `${fn.toLowerCase()}_${cleanFld || count}`;
+      return `${fn}(${fld}) ${aliasName}`;
+    });
+    if (count > 0 && fixedQuery !== q) {
+      return cb({ query: fixedQuery, fixes: [`Added alias for ${count} aggregate expression(s)`] });
+    }
   }
   cb(null);
 }
@@ -35336,7 +35361,7 @@ function Ku(o, t, e, n) {
     flexDirection: "column",
   }),
     o.appendChild(a));
-  const l = Xn(t, "📤  Export Data", e);
+  const l = Xn(t, "Export Data", e);
   a.appendChild(l);
   const d =
       "SELECT Id, Name, CreatedDate FROM Account ORDER BY CreatedDate DESC LIMIT 50",
@@ -35394,11 +35419,14 @@ function Ku(o, t, e, n) {
     a.appendChild(F));
   const k = document.createElement("div");
   k.style.position = "relative";
+  k.style.width = "100%";
+  
   const c = document.createElement("textarea");
   ((c.value =
     "SELECT Id, Name, CreatedDate FROM Account ORDER BY CreatedDate DESC LIMIT 50"),
     (c.spellcheck = !1),
     Object.assign(c.style, {
+      position: "relative",
       width: "100%",
       minHeight: "76px",
       resize: "vertical",
@@ -35415,11 +35443,12 @@ function Ku(o, t, e, n) {
       transition: "border-color 0.15s, box-shadow 0.15s",
     }),
     c.addEventListener("focus", () => {
-      ((c.style.borderColor = i.accent),
-        (c.style.boxShadow = `0 0 0 3px ${t ? "rgba(37,99,235,0.35)" : "rgba(37,99,235,0.18)"}`));
+      c.style.borderColor = i.accent;
+      c.style.boxShadow = `0 0 0 3px ${t ? "rgba(37,99,235,0.35)" : "rgba(37,99,235,0.18)"}`;
     }),
     c.addEventListener("blur", () => {
-      ((c.style.borderColor = i.borderStrong), (c.style.boxShadow = "none"));
+      c.style.borderColor = i.borderStrong;
+      c.style.boxShadow = "none";
     }),
     k.appendChild(c));
   const O = document.createElement("div");
@@ -35494,7 +35523,7 @@ function Ku(o, t, e, n) {
     border: "1px solid #ef4444",
     color: "#ef4444",
   });
-  const V = L("🧱 Builder");
+  const V = L("Builder");
   V.addEventListener("click", n);
   const C = L("Query Plan"),
     Z = L("Save"),
@@ -36036,7 +36065,50 @@ function Ku(o, t, e, n) {
         }),
         box.appendChild(code));
       const run = L("Apply & Run", !0),
-        apply = L("Apply");
+        apply = L("Apply"),
+        aiFixBtn = document.createElement("button");
+
+      (Object.assign(aiFixBtn.style, {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "5px",
+        padding: "6px 12px",
+        fontSize: "12px",
+        fontWeight: "600",
+        borderRadius: "8px",
+        border: "none",
+        background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+        color: "#ffffff",
+        cursor: "pointer",
+        marginLeft: "8px",
+        transition: "opacity 0.2s",
+      }),
+        (aiFixBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Ask AI Fixer`),
+        aiFixBtn.addEventListener("click", async () => {
+          aiFixBtn.disabled = true;
+          aiFixBtn.style.opacity = "0.7";
+          aiFixBtn.textContent = "AI fixing...";
+          try {
+            const prompt = `Fix this invalid Salesforce SOQL query and reply ONLY with the corrected SOQL query string and nothing else (no markdown formatting, no explanation):\n\nQuery: ${q}\nError: ${err}`;
+            const resText = await callAIProvider(prompt);
+            const cleanedQuery = (typeof resText === "string" ? resText : "").replace(/```sql|```soql|```/gi, "").trim();
+            if (cleanedQuery) {
+              c.value = cleanedQuery;
+              ot("AI successfully fixed your query!");
+              Te();
+              box.remove();
+            } else {
+              ot("AI could not fix this query.");
+            }
+          } catch (e) {
+            ot(`AI Fix Error: ${e.message}`);
+          } finally {
+            aiFixBtn.disabled = false;
+            aiFixBtn.style.opacity = "1";
+            aiFixBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Ask AI Fixer`;
+          }
+        }));
+
       ((run.style.padding = apply.style.padding = "6px 12px"),
         (run.style.fontSize = apply.style.fontSize = "12px"),
         (apply.style.marginLeft = "8px"),
@@ -36048,7 +36120,12 @@ function Ku(o, t, e, n) {
         }),
         box.appendChild(run),
         box.appendChild(apply),
+        box.appendChild(aiFixBtn),
         P.appendChild(box));
+
+      // Auto-apply fix into textarea immediately
+      c.value = fix.query;
+      ot(`Auto-applied fix: ${fix.fixes.join(", ")}`);
     };
     const syn = soqlSyntaxFix(q);
     syn.fixes.length ? render(syn) : soqlSemanticFix(q, err, render);
@@ -36944,7 +37021,7 @@ function Xu(o, t, e, n) {
     textFaint: t ? "rgba(148,163,184,0.6)" : "rgba(31,41,55,0.45)",
     accent: "#2563eb",
   };
-  o.appendChild(Xn(t, "🧱  Query Builder", e));
+  o.appendChild(Xn(t, "Query Builder", e));
   const s = document.createElement("div");
   (Object.assign(s.style, {
     height: "100%",
@@ -37942,7 +38019,7 @@ function Xu(o, t, e, n) {
   }),
     drawTemplates());
   function Re() {
-    we.textContent = Y();
+    we.innerHTML = highlightSOQL(Y(), t);
   }
   (j(), se(), X(), Re());
   const Ie = Gi();
@@ -38058,9 +38135,14 @@ function Wa(o) {
       (g.style.borderRadius = "0"));
   else {
     ((g.style.maxWidth = spotlightBox(n).w),
-      (g.style.borderRadius = "24px"),
-      (g.style.boxShadow = "0 25px 50px rgba(0, 0, 0, 0.5)"),
-      (g.style.border = `1px solid ${s.modalBorder}`));
+      (g.style.borderRadius = "20px"),
+      (g.style.backgroundColor = t ? "rgba(22, 28, 36, 0.78)" : "rgba(255, 255, 255, 0.78)"),
+      (g.style.backdropFilter = "blur(40px) saturate(200%)"),
+      (g.style.webkitBackdropFilter = "blur(40px) saturate(200%)"),
+      (g.style.boxShadow = t
+        ? "0 40px 80px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.15) inset, 0 1px 0 rgba(255, 255, 255, 0.1) inset"
+        : "0 40px 80px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.7) inset, 0 1px 2px rgba(255, 255, 255, 0.9) inset"),
+      (g.style.border = `1px solid ${t ? "rgba(255, 255, 255, 0.14)" : "rgba(209, 213, 219, 0.5)"}`));
     const f = typeof Do == "number" ? Do : 100;
     f < 100 && (g.style.opacity = String(Math.max(0.2, f / 100)));
     // Bottom-right grip: drag to resize, size is saved to Panel appearance
@@ -38200,7 +38282,7 @@ function Wa(o) {
     const f = globalThis.chrome?.runtime,
       _ = Vt(en()),
       m = f?.getURL
-        ? `${f.getURL("spotlight.html")}?host=${encodeURIComponent(_)}`
+        ? `${f.getURL("sfpilot.html")}?host=${encodeURIComponent(_)}`
         : "";
     (m && f.sendMessage({ type: "OPEN_TAB", url: m }), gt());
   };
@@ -38312,16 +38394,12 @@ function Wa(o) {
     (X.style.borderTop = `1px solid ${a.divider}`),
     (X.style.backgroundColor = a.side));
   const re = document.createElement("a");
-  ((re.href = "https://sfspotlight.vercel.app/index.html"),
-    (re.target = "_blank"),
-    (re.rel = "noopener noreferrer"),
-    (re.title = "Open documentation"),
-    (re.style.display = "flex"),
+  ((re.style.display = "flex"),
     (re.style.alignItems = "center"),
     (re.style.gap = "10px"),
     (re.style.flexShrink = "0"),
     (re.style.textDecoration = "none"),
-    (re.style.cursor = "pointer"),
+    (re.style.cursor = "default"),
     re.addEventListener("mouseover", () => {
       re.style.opacity = "0.7";
     }),
@@ -38378,49 +38456,7 @@ function Wa(o) {
         _.appendChild(W),
         Be.appendChild(_));
     }));
-  const ge = document.createElement("a");
-  ((ge.href = "https://sfspotlight.vercel.app/docs.html"),
-    (ge.target = "_blank"),
-    (ge.rel = "noopener noreferrer"),
-    (ge.style.display = "flex"),
-    (ge.style.alignItems = "center"),
-    (ge.style.gap = "6px"),
-    (ge.style.fontSize = "13px"),
-    (ge.style.fontWeight = "600"),
-    (ge.style.color = s.textMuted),
-    (ge.style.textDecoration = "none"),
-    (ge.style.whiteSpace = "nowrap"),
-    (ge.innerHTML =
-      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg><span>Docs</span>'),
-    ge.addEventListener("mouseover", () => {
-      ge.style.color = s.textPrimary;
-    }),
-    ge.addEventListener("mouseout", () => {
-      ge.style.color = s.textMuted;
-    }),
-    Be.appendChild(ge));
-  const ue = document.createElement("a");
-  ((ue.href = "https://forms.gle/ed2VcwQTJXTDaMUv6"),
-    (ue.target = "_blank"),
-    (ue.rel = "noopener noreferrer"),
-    (ue.style.display = "flex"),
-    (ue.style.alignItems = "center"),
-    (ue.style.gap = "6px"),
-    (ue.style.fontSize = "13px"),
-    (ue.style.fontWeight = "600"),
-    (ue.style.color = s.textMuted),
-    (ue.style.textDecoration = "none"),
-    (ue.style.whiteSpace = "nowrap"),
-    (ue.innerHTML =
-      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="6" width="8" height="14" rx="4"></rect><path d="m19 7-3 2"></path><path d="m5 7 3 2"></path><path d="M19 19l-3-2"></path><path d="m5 19 3-2"></path><path d="M20 13h-4"></path><path d="M4 13h4"></path><path d="m10 4 1 2"></path><path d="m14 4-1 2"></path></svg><span>Report issue</span>'),
-    ue.addEventListener("mouseover", () => {
-      ue.style.color = s.textPrimary;
-    }),
-    ue.addEventListener("mouseout", () => {
-      ue.style.color = s.textMuted;
-    }),
-    Be.appendChild(ue),
-    e || X.appendChild(re));
+  (e || X.appendChild(re));
   let Me = null;
   if (e) {
     const f = mt === "dark",
@@ -38491,8 +38527,8 @@ function Wa(o) {
             (B) => {
               B?.success &&
                 B.data &&
-                (W(ie, "🏛️", B.data.OrganizationType || ""),
-                W(I, "📍", B.data.InstanceName || ""));
+                (W(ie, "", B.data.OrganizationType || ""),
+                W(I, "", B.data.InstanceName || ""));
             },
           ),
             globalThis.chrome?.runtime?.sendMessage(
@@ -38501,7 +38537,7 @@ function Wa(o) {
                 B?.success &&
                   B.data &&
                   (W(h, "‹›", B.data.version || ""),
-                  W(v, "☁️", B.data.label || ""));
+                  W(v, "", B.data.label || ""));
               },
             ));
         }));
@@ -38751,12 +38787,12 @@ function Wa(o) {
         {
           label: "Open user detail",
           short: "Detail",
-          icon: "👤",
+          icon: "",
           onClick: () => {
             const m = `${bt()}/lightning/setup/ManageUsers/page?address=%2F${f.id}%3Fnoredirect%3D1%26isUserEntityOverride%3D1`;
             (Ut({
               kind: "user",
-              icon: "👤",
+              icon: "",
               title: f.name,
               subtitle: f.email || f.username,
               meta: "User",
@@ -38769,7 +38805,7 @@ function Wa(o) {
         {
           label: "Enable debug mode",
           short: "Debug On",
-          icon: "🐞",
+          icon: "",
           onClick: () => _(!0),
         },
         {
@@ -39094,7 +39130,7 @@ function Wa(o) {
             _.style.background = "transparent";
           })));
       const m = document.createElement("div");
-      ((m.textContent = f.icon),
+      ((m.innerHTML = f.icon),
         (m.style.fontSize = "18px"),
         (m.style.flexShrink = "0"));
       const W = document.createElement("div"),
@@ -39123,14 +39159,14 @@ function Wa(o) {
     getToolsList = () => [
       {
         id: "speedtest",
-        icon: "🏎️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><polyline points=\"12 6 12 12 16 14\"/></svg>',
         label: "Org Speed Test",
         desc: "Run Salesforce speed test",
         run: () => {
           const he = `${bt()}/speedtest.jsp`;
           (Ut({
             kind: "tool",
-            icon: "🏎️",
+            icon: "",
             title: "Org Speed Test",
             subtitle: "speedtest.jsp",
             meta: "Tool",
@@ -39142,14 +39178,14 @@ function Wa(o) {
       },
       {
         id: "sfhome",
-        icon: "🏠",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-9.5z\"/></svg>',
         label: "Salesforce Home",
         desc: "Open Lightning home",
         run: () => {
           const he = `${bt()}/lightning/page/home`;
           (Ut({
             kind: "tool",
-            icon: "🏠",
+            icon: "",
             title: "Salesforce Home",
             subtitle: "Lightning home",
             meta: "Tool",
@@ -39161,14 +39197,14 @@ function Wa(o) {
       },
       {
         id: "webconsole",
-        icon: "🖥️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"4 17 10 11 4 5\"/><line x1=\"12\" y1=\"19\" x2=\"20\" y2=\"19\"/></svg>',
         label: "Web Console (Beta)",
         desc: "Open /webconsole — requires Web Console (Beta) enabled in Setup → Development",
         run: () => {
           const he = `${bt()}/webconsole`;
           (Ut({
             kind: "tool",
-            icon: "🖥️",
+            icon: "",
             title: "Web Console (Beta)",
             subtitle: "/webconsole",
             meta: "Tool",
@@ -39180,14 +39216,14 @@ function Wa(o) {
       },
       {
         id: "webconsolesetup",
-        icon: "⚙️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z\"/></svg>',
         label: "Enable Web Console (Beta)",
         desc: "Open the Web Console (Beta) setup page to turn it on",
         run: () => {
           const he = `${bt()}/lightning/setup/PlatformWebIdeSetup/home`;
           (Ut({
             kind: "tool",
-            icon: "⚙️",
+            icon: "",
             title: "Enable Web Console (Beta)",
             subtitle: "PlatformWebIdeSetup",
             meta: "Setup",
@@ -39199,7 +39235,7 @@ function Wa(o) {
       },
       {
         id: "settings",
-        icon: "⚙️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z\"/></svg>',
         label: "Settings",
         desc: "Open the extension settings page",
         run: () => {
@@ -39208,7 +39244,7 @@ function Wa(o) {
       },
       {
         id: "classic",
-        icon: "🕹️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"2\" y=\"6\" width=\"20\" height=\"12\" rx=\"2\"/><path d=\"M6 12h4M8 10v4\"/><circle cx=\"15\" cy=\"11\" r=\"1\" fill=\"#0077B6\"/><circle cx=\"18\" cy=\"13\" r=\"1\" fill=\"#0077B6\"/></svg>',
         label: "Switch to Classic",
         desc: "Open Salesforce Classic",
         run: () => {
@@ -39218,7 +39254,7 @@ function Wa(o) {
       },
       {
         id: "export",
-        icon: "📤",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"16 8 12 4 8 8\"/><line x1=\"12\" y1=\"16\" x2=\"12\" y2=\"4\"/><path d=\"M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2\"/></svg>',
         label: "Export Data",
         desc: "Run SOQL & export CSV",
         run: () => {
@@ -39227,7 +39263,7 @@ function Wa(o) {
       },
       {
         id: "querybuilder",
-        icon: "🧱",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/></svg>',
         label: "Query Builder",
         desc: "Build SOQL visually",
         run: () => {
@@ -39236,7 +39272,7 @@ function Wa(o) {
       },
       {
         id: "orgdetails",
-        icon: "🏢",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 21h18M9 8h1M9 12h1M9 16h1M14 8h1M14 12h1M14 16h1M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16\"/></svg>',
         label: "Org Details",
         desc: "View this org’s info",
         run: () => {
@@ -39245,7 +39281,7 @@ function Wa(o) {
       },
       {
         id: "objectmanager",
-        icon: "🛠️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/><polyline points=\"3.27 6.96 12 12.01 20.73 6.96\"/><line x1=\"12\" y1=\"22.08\" x2=\"12\" y2=\"12\"/></svg>',
         label: "Object Manager",
         desc: "Create objects & fields with FLS",
         run: () => {
@@ -39254,7 +39290,7 @@ function Wa(o) {
       },
       {
         id: "objectdetails",
-        icon: "📦",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/></svg>',
         label: "Object Details",
         desc: "View fields, CRUDQ and export to CSV",
         run: () => {
@@ -39263,7 +39299,7 @@ function Wa(o) {
       },
       {
         id: "bulkfieldcreator",
-        icon: "✨",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/></svg>',
         label: "Bulk Field Creator",
         desc: "Create custom fields in bulk and set FLS",
         run: () => {
@@ -39272,7 +39308,7 @@ function Wa(o) {
       },
       {
         id: "automationmap",
-        icon: "🧭",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
         label: "Automation Map",
         desc: "What fires on save, in order",
         run: () => {
@@ -39281,7 +39317,7 @@ function Wa(o) {
       },
       {
         id: "flowmanager",
-        icon: "🌊",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><path d="M10 6.5h4M6.5 10v7.5a1 1 0 0 0 1 1H14"/></svg>',
         label: "Flow Manager",
         desc: "View, activate, deactivate & open flows",
         run: () => {
@@ -39290,7 +39326,7 @@ function Wa(o) {
       },
       {
         id: "validationrules",
-        icon: "✅",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
         label: "Validation Rules",
         desc: "Activate, deactivate & open validation rules",
         run: () => {
@@ -39299,7 +39335,7 @@ function Wa(o) {
       },
       {
         id: "whereused",
-        icon: "🔎",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
         label: "Where Used",
         desc: "Find what references a component",
         run: () => {
@@ -39308,7 +39344,7 @@ function Wa(o) {
       },
       {
         id: "restexplorer",
-        icon: "🧪",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
         label: "REST Explorer",
         desc: "Call any Salesforce REST endpoint (Beta)",
         run: () => {
@@ -39317,7 +39353,7 @@ function Wa(o) {
       },
       {
         id: "eventmonitor",
-        icon: "📡",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1.8 16 1.8 11 4.9 7.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9c3.1 3.1 3.1 8.2 0 11.3"/></svg>',
         label: "Event Monitor (Beta)",
         desc: "Subscribe to platform events, CDC & push topics live",
         run: () => {
@@ -39326,7 +39362,7 @@ function Wa(o) {
       },
       {
         id: "executeanonymous",
-        icon: "⚡",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
         label: "Execute Anonymous",
         desc: "Run Apex & analyze the debug log",
         run: () => {
@@ -39335,7 +39371,7 @@ function Wa(o) {
       },
       {
         id: "aiagent",
-        icon: "🧠",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M12 12 2.1 10a10 10 0 0 1 9.9-8v10z"/></svg>',
         label: "AI Agent",
         desc: "Ask in plain language — query, create, update, delete records and edit Apex (with approval)",
         run: () => {
@@ -39344,7 +39380,7 @@ function Wa(o) {
       },
       {
         id: "aicodeeditor",
-        icon: "🤖",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
         label: "AI Code Editor",
         desc: "Write Apex, generate tests and ask AI with Monaco Editor",
         run: () => {
@@ -39353,7 +39389,7 @@ function Wa(o) {
       },
       {
         id: "permcompare",
-        icon: "🔐",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
         label: "Permission Comparison",
         desc: "Compare profiles & permission sets",
         run: () => {
@@ -39362,7 +39398,7 @@ function Wa(o) {
       },
       {
         id: "permclone",
-        icon: "🧬",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M2 15c6.667-6 13.333 0 20-6"/><path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993"/><path d="M15 2c-1.798 1.998-2.518 3.995-2.807 5.993"/></svg>',
         label: "Profile & Permission Clone",
         desc: "Clone, convert & merge Profiles and Permission Sets with granular control",
         run: () => {
@@ -39371,7 +39407,7 @@ function Wa(o) {
       },
       {
         id: "userclone",
-        icon: "👥",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>',
         label: "User Clone & Onboarding",
         desc: "Clone users, replicate permission sets, packages, public groups & queues with Smart Paste",
         run: () => {
@@ -39380,7 +39416,7 @@ function Wa(o) {
       },
       {
         id: "accessmap",
-        icon: "🗺️",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
         label: "Access Explorer",
         desc: "Object, field & user access map",
         run: () => {
@@ -39389,7 +39425,7 @@ function Wa(o) {
       },
       {
         id: "dataimport",
-        icon: "⬆️",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 12 12 8 16 12"/><line x1="12" y1="8" x2="12" y2="20"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>',
         label: "Data Import",
         desc: "Insert / update / upsert / delete from CSV",
         run: () => {
@@ -39398,8 +39434,8 @@ function Wa(o) {
       },
       {
         id: "sampledata",
-        icon: "🧪",
-        label: "Bulk Sample Data Generator",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.5L4.5 18A2 2 0 0 0 6 21h12a2 2 0 0 0 1.5-3L14 9.5V2"/></svg>',
+        label: "Sample Data Generator",
         desc: "Analyze multiple objects and create realistic test records in bulk",
         run: () => {
           ((u.value = ""), (x = "sampledata"), oe());
@@ -39407,7 +39443,7 @@ function Wa(o) {
       },
       {
         id: "release",
-        icon: "🚀",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 19 21 12 17 5 21 12 2"/></svg>',
         label: "Salesforce Release",
         desc: "Current release & updates",
         run: () => {
@@ -39416,7 +39452,7 @@ function Wa(o) {
       },
       {
         id: "apiusage",
-        icon: "📊",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
         label: "API Usage",
         desc: "Daily API limits",
         run: () => {
@@ -39425,7 +39461,7 @@ function Wa(o) {
       },
       {
         id: "storage",
-        icon: "💾",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
         label: "Storage Insights",
         desc: "Data & file storage",
         run: () => {
@@ -39434,7 +39470,7 @@ function Wa(o) {
       },
       {
         id: "orglimits",
-        icon: "📈",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
         label: "Org Status",
         desc: "All org limits & usage",
         run: () => {
@@ -39443,7 +39479,7 @@ function Wa(o) {
       },
       {
         id: "shortcuts",
-        icon: "🔖",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
         label: "Custom Shortcuts",
         desc: "Save your own Setup links",
         run: () => {
@@ -39452,7 +39488,7 @@ function Wa(o) {
       },
       {
         id: "inspectlwc",
-        icon: "🔍",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
         label: "Inspect Components",
         desc: "Highlight LWCs on this page (Alt/⌥+Z)",
         run: () => {
@@ -39461,7 +39497,7 @@ function Wa(o) {
       },
       {
         id: "clearsession",
-        icon: "🧹",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
         label: "Clear Cache",
         desc: "Clear cached session & reload",
         run: () => {
@@ -39478,7 +39514,7 @@ function Wa(o) {
       },
       {
         id: "ghost",
-        icon: "👻",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10h.01M15 10h.01M12 2a8 8 0 0 0-8 8v11l3-3 3 3 2-2 2 2 3-3 3 3V10a8 8 0 0 0-8-8z"/></svg>',
         label: "Ghost Session",
         desc: "Open your session in Incognito",
         run: () => {
@@ -39499,14 +39535,14 @@ function Wa(o) {
       },
       {
         id: "fieldapi",
-        icon: "🏷️",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
         label: "Show Field API Names",
         desc: "On record pages",
         toggleKey: "showFieldApi",
       },
       {
         id: "magicfill",
-        icon: "✨",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>',
         label: "Magic Fill",
         desc: "Auto-fill new-record modals",
         run: () => {
@@ -39515,7 +39551,7 @@ function Wa(o) {
       },
       {
         id: "whatsnew",
-        icon: "✨",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
         label: "What's New",
         desc: "See the latest features",
         run: () => {
@@ -39543,7 +39579,7 @@ function Wa(o) {
         if (toolId === "home") {
           ie.push({
             id: "home",
-            icon: "🏠",
+            icon: "",
             title: "Home dashboard",
             desc: "Org health, debug status, quick actions and recents.",
             onClick: () => Ie("home"),
@@ -39580,7 +39616,7 @@ function Wa(o) {
         }
       });
       ie.push({
-        icon: "🛠️",
+        icon: "",
         title: "Browse all tools",
         desc: "Object Manager, Automation Map, Org Status, and more.",
         onClick: () => Ie("tools"),
@@ -39621,7 +39657,7 @@ function Wa(o) {
                 cursor: "pointer",
                 fontFamily: "inherit",
               }),
-              (ne.innerHTML = `<span style="font-size:20px;line-height:1">${R.icon}</span><span style="font-size:11px;font-weight:600;text-align:center;line-height:1.2;color:${s.textMuted}">${R.title}</span>`),
+              (ne.innerHTML = `<span style="display:flex;align-items:center;justify-content:center;height:24px;width:24px">${R.icon || ""}</span><span style="font-size:11px;font-weight:600;text-align:center;line-height:1.2;color:${s.textMuted}">${R.title}</span>`),
               ne.addEventListener("mouseover", () => {
                 ne.style.background = s.surfaceHover;
               }),
@@ -39646,23 +39682,23 @@ function Wa(o) {
         _.appendChild(h),
         [
           {
-            icon: "🔗",
+            icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
             title: "Paste a record Id",
             desc: "Open the record or view all its fields instantly.",
           },
           {
-            icon: "🗂️",
+            icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
             title: `Press ${f ? "Option" : "Alt"}+D on a record`,
             desc: "See every field, its value and type — and edit inline.",
           },
           {
-            icon: "🌓",
+            icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 1 0 10 10"/></svg>',
             title: "Light or dark",
             desc: "Switch the Spotlight theme in Settings.",
             onClick: () => i(),
           },
           {
-            icon: "⚡",
+            icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
             title: "Search everything",
             desc: "Setup, Objects, Users, Flows, Permissions, Apps and more.",
           },
@@ -39740,122 +39776,122 @@ function Wa(o) {
           const xe = globalThis.chrome?.runtime,
             ze = Vt(en()),
             He = xe?.getURL
-              ? `${xe.getURL("spotlight.html")}?host=${encodeURIComponent(ze)}&tool=${encodeURIComponent(B)}`
+              ? `${xe.getURL("sfpilot.html")}?host=${encodeURIComponent(ze)}&tool=${encodeURIComponent(B)}`
               : "";
           (He && xe.sendMessage({ type: "OPEN_TAB", url: He }), gt());
         },
         h = [
           {
             id: "export",
-            icon: "📤",
+            icon: "",
             label: "Export Data",
             desc: "Run SOQL and export CSV",
           },
           {
             id: "querybuilder",
-            icon: "🧱",
+            icon: "",
             label: "Query Builder",
             desc: "Build SOQL visually",
           },
           {
             id: "sampledata",
-            icon: "🧪",
-            label: "Bulk Sample Data Generator",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.5L4.5 18A2 2 0 0 0 6 21h12a2 2 0 0 0 1.5-3L14 9.5V2"/></svg>',
+            label: "Sample Data Generator",
             desc: "Analyze multiple objects and create realistic test records in bulk",
           },
           {
             id: "whereused",
-            icon: "🔎",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
             label: "Where Used",
             desc: "Find what references a component",
           },
           {
             id: "restexplorer",
-            icon: "🧪",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
             label: "REST Explorer",
             desc: "Call any Salesforce REST endpoint",
           },
           {
             id: "eventmonitor",
-            icon: "📡",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1.8 16 1.8 11 4.9 7.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9c3.1 3.1 3.1 8.2 0 11.3"/></svg>',
             label: "Event Monitor (Beta)",
             desc: "Subscribe to platform events & CDC live",
           },
           {
             id: "objectmanager",
-            icon: "🛠️",
+            icon: "",
             label: "Object Manager",
             desc: "Create objects and fields",
           },
           {
             id: "automationmap",
-            icon: "🧭",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
             label: "Automation Map",
             desc: "What fires on save",
           },
           {
             id: "flowmanager",
-            icon: "🌊",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><path d="M10 6.5h4M6.5 10v7.5a1 1 0 0 0 1 1H14"/></svg>',
             label: "Flow Manager",
             desc: "View, activate & open flows",
           },
           {
             id: "validationrules",
-            icon: "✅",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
             label: "Validation Rules",
             desc: "Activate, deactivate & open rules",
           },
           {
             id: "objectdetails",
-            icon: "📦",
+            icon: "",
             label: "Object Details",
             desc: "View fields, CRUDQ and export to CSV",
           },
           {
             id: "executeanonymous",
-            icon: "⚡",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
             label: "Execute Anonymous",
             desc: "Run Apex",
           },
           {
             id: "permcompare",
-            icon: "🔐",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
             label: "Permission Comparison",
             desc: "Compare profiles and permission sets",
           },
           {
             id: "permclone",
-            icon: "🧬",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M2 15c6.667-6 13.333 0 20-6"/><path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993"/><path d="M15 2c-1.798 1.998-2.518 3.995-2.807 5.993"/></svg>',
             label: "Profile & Permission Clone",
             desc: "Clone, convert & merge Profiles and Permission Sets",
           },
           {
             id: "userclone",
-            icon: "👥",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>',
             label: "User Clone & Onboarding",
             desc: "Clone user licenses, permission sets, groups & smart onboarding",
           },
           {
             id: "accessmap",
-            icon: "🗺️",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
             label: "Access Explorer",
             desc: "Object, field and user access",
           },
           {
             id: "dataimport",
-            icon: "⬆️",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 12 12 8 16 12"/><line x1="12" y1="8" x2="12" y2="20"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>',
             label: "Data Import",
             desc: "Insert / update / upsert / delete",
           },
           {
             id: "orglimits",
-            icon: "📈",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
             label: "Org Status",
             desc: "All org limits and usage",
           },
           {
             id: "orgdetails",
-            icon: "🏢",
+            icon: "",
             label: "Org Details",
             desc: "This org’s info",
           },
@@ -39944,7 +39980,7 @@ function Wa(o) {
             )
             .slice(0, 5)
             .map((B) => ({
-              icon: "📦",
+              icon: "",
               title: B.label || B.apiName,
               subtitle: B.apiName,
               url: `${bt()}/lightning/setup/ObjectManager/${encodeURIComponent(B.durableId || B.apiName)}/FieldsAndRelationships/view`,
@@ -39973,7 +40009,7 @@ function Wa(o) {
           )
           .slice(0, 5)
           .map((B) => ({
-            icon: "⚡",
+            icon: "",
             title: B.label,
             subtitle: B.apiName,
             meta: B.isActive ? "Active" : "Inactive",
@@ -40163,7 +40199,7 @@ function Wa(o) {
           m === "005" &&
             C.appendChild(
               M({
-                icon: "⚙️",
+                icon: "",
                 title: "Open in Setup",
                 subtitle: "User detail in Setup",
                 meta: "Setup",
@@ -40426,7 +40462,7 @@ function Wa(o) {
           const v = `${bt()}/lightning/setup/ObjectManager/${encodeURIComponent(I.durableId || I.apiName)}/FieldsAndRelationships/view`,
             R = {
               kind: "object",
-              icon: "📦",
+              icon: "",
               title: I.label || I.apiName,
               subtitle: I.apiName,
               meta: I.keyPrefix ? `Key prefix ${I.keyPrefix}` : void 0,
@@ -40434,7 +40470,7 @@ function Wa(o) {
             };
           ie.appendChild(
             M({
-              icon: "📦",
+              icon: "",
               title: I.label || I.apiName,
               subtitle: I.apiName,
               meta: I.keyPrefix ? `Key prefix ${I.keyPrefix}` : void 0,
@@ -41041,7 +41077,7 @@ ${at.error}`),
                         Lt = `${ht}/lightning/setup/ManageUsers/page?address=%2F${h.id}%3Fnoredirect%3D1%26isUserEntityOverride%3D1`;
                       (Ut({
                         kind: "user",
-                        icon: "👤",
+                        icon: "",
                         title: h.name,
                         subtitle: h.email || h.username,
                         meta: "User",
@@ -41671,7 +41707,7 @@ ${at.error}`),
               : `${v}/lightning/setup/Flows/home`,
             xe = {
               kind: "flow",
-              icon: "⚡",
+              icon: "",
               title: I.label,
               subtitle: I.apiName,
               meta: `${I.processType || "Flow"} · ${I.isActive ? "Active" : "Inactive"}`,
@@ -41679,7 +41715,7 @@ ${at.error}`),
             };
           ie.appendChild(
             M({
-              icon: "⚡",
+              icon: "",
               title: I.label,
               subtitle: I.apiName,
               meta: `${I.processType || "Flow"} · ${I.isActive ? "Active" : "Inactive"}`,
@@ -42562,7 +42598,7 @@ ${at.error}`),
           }
           x = null;
         }
-        const ie = getToolsList();
+        const ie = getToolsList(),
           I = new Map(lo.map((he, Pe) => [he, Pe])),
           h = ie
             .map((he, Pe) => ({ t: he, i: Pe }))
@@ -42720,8 +42756,18 @@ ${at.error}`),
             }),
             Ce.appendChild(Ee));
           const Ye = document.createElement("div");
-          ((Ye.textContent = he.icon),
-            Object.assign(Ye.style, { fontSize: "32px", lineHeight: "1" }));
+          ((typeof he.icon === "string" && he.icon.includes("<svg")
+            ? (Ye.innerHTML = he.icon)
+            : (Ye.textContent = he.icon)),
+            Object.assign(Ye.style, {
+              width: "32px",
+              height: "32px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              lineHeight: "1",
+              marginBottom: "4px",
+            }));
           const ht = document.createElement("div");
           ((ht.textContent = he.label),
             Object.assign(ht.style, { fontSize: "13px", fontWeight: "700" }));
@@ -42844,28 +42890,46 @@ ${at.error}`),
     we = a.accentSoft,
     Te = (f, _) => {
       const m = document.createElement("button");
-      if (_) {
-        const W = e ? "16px" : "14px",
-          ie = e ? "11px" : "6px";
-        m.innerHTML = `<span style="margin-right:${ie};font-size:${W}">${_}</span><span>${f}</span>`;
-      } else m.textContent = f;
+      const iconMap = {
+        "Home": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+        "Apps & Tools": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
+        "Quick Access": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+        "Query Editor": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+        "Export Data / Query": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+        "Log Explorer": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+        "Apex Tests": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+        "Access Explorer": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+        "REST Console": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+        "Event Console": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9c3.9 3.9 3.9 10.3 0 14.2"/></svg>',
+        "Code Editor": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+        "Flow Manager": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M6 9v3a2 2 0 0 0 2 2h7"/></svg>',
+        "Validation Rules": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+        "Automation Map": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+        "Org Status": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+        "Object Details": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>',
+        "Settings": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+      };
+      const svgIcon = iconMap[f] || (_ ? `<span style="font-size:${e ? '16px' : '14px'}">${_}</span>` : '');
+      const ie = e ? "10px" : "8px";
+      m.innerHTML = `<span style="margin-right:${ie};display:inline-flex;align-items:center;justify-content:center;opacity:0.85">${svgIcon}</span><span>${f}</span>`;
       return (
         (m.style.color = s.tabInactive),
         (m.style.backgroundColor = "transparent"),
         (m.style.border = "none"),
         (m.style.cursor = "pointer"),
         (m.style.outline = "none"),
-        (m.style.transition = "all 0.15s"),
+        (m.style.transition = "all 0.15s ease"),
         (m.style.fontFamily = "inherit"),
         e
           ? ((m.style.display = "flex"),
             (m.style.alignItems = "center"),
             (m.style.width = "100%"),
             (m.style.textAlign = "left"),
-            (m.style.padding = "9px 11px"),
-            (m.style.borderRadius = "9px"),
-            (m.style.fontWeight = "600"),
-            (m.style.fontSize = "13.5px"))
+            (m.style.padding = "8px 12px"),
+            (m.style.margin = "2px 0"),
+            (m.style.borderRadius = "8px"),
+            (m.style.fontWeight = "550"),
+            (m.style.fontSize = "13px"))
           : ((m.style.display = "inline-flex"),
             (m.style.alignItems = "center"),
             (m.style.borderBottom = "3px solid transparent"),
@@ -42913,6 +42977,7 @@ ${at.error}`),
         }));
     },
     Ie = async (f) => {
+      if (f === "settings") f = "__settings";
       if (
         ((c = f),
         (me = -1),
@@ -43014,7 +43079,7 @@ ${at.error}`),
             document.addEventListener("click", B, !0));
         }, 0));
     },
-    ke = 5,
+    ke = 6,
     Ne = "#9aa1ab",
     je = (f) =>
       `<svg width="${f}" height="${f}" viewBox="0 0 24 24" fill="#ffffff" aria-hidden="true"><path d="M12 12.2a4.4 4.4 0 1 0 0-8.8 4.4 4.4 0 0 0 0 8.8zm0 2.1c-4 0-7.2 2.4-7.2 5.3V21h14.4v-1.4c0-2.9-3.2-5.3-7.2-5.3z"/></svg>`,
@@ -43392,7 +43457,17 @@ ${at.error}`),
                 c !== I && (v.style.backgroundColor = "transparent");
               }));
           }
-          (v.addEventListener("click", () => Ie(I)),
+          (v.addEventListener("click", () => {
+            if (h.isTool) {
+              Ie("tools").then(() => {
+                x = h.id;
+                oe();
+                if (e) Ae();
+              });
+            } else {
+              Ie(I);
+            }
+          }),
             (fe[I] = v),
             k.appendChild(v));
         }),

@@ -105,7 +105,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["index.html", "spotlight.html", "chunks/*", "*.js", "*.css", "assets/*", "icons/*"],
+      "resources": ["index.html", "sfpilot.html", "chunks/*", "*.js", "*.css", "assets/*", "icons/*"],
       "matches": [
         "https://*.salesforce.com/*",
         "https://*.salesforce-setup.com/*",
