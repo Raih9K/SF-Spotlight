@@ -10024,9 +10024,13 @@ function Fc() {
   return Oo ? "https:" : window.location.protocol;
 }
 function Vt(o) {
+  if (!o) return "";
   return o
+    .replace(/\.mcas\.ms$/, "")
+    .replace(/\.lightning\.force\.com$/, ".my.salesforce.com")
     .replace(/\.lightning\.force\./, ".my.salesforce.")
-    .replace(/\.mcas\.ms$/, "");
+    .replace(/\.salesforce-setup\.com$/, ".salesforce.com")
+    .replace(/\.salesforce-setup\./, ".salesforce.");
 }
 function bt() {
   return `https://${wn()
@@ -10049,7 +10053,7 @@ function us() {
 function wn() {
   return Mi || Vt(en());
 }
-function it(o = 4) {
+function it(o = 4, refresh = !1) {
   const t = globalThis.chrome?.runtime;
   if (!t || !t.id) return Promise.resolve(null);
   const e = (n) =>
@@ -10059,12 +10063,15 @@ function it(o = 4) {
           i(null);
           return;
         }
-        t.sendMessage({ type: "GET_SF_CREDENTIALS", hostname: wn() }, (s) => {
+        t.sendMessage({ type: "GET_SF_CREDENTIALS", hostname: wn(), refresh: !!refresh }, (s) => {
           if (globalThis.chrome?.runtime?.lastError) {
             i(null);
             return;
           }
           const a = s?.data || null;
+          if (a?.instanceUrl && a.instanceUrl.includes("salesforce-setup")) {
+            a.instanceUrl = a.instanceUrl.replace(/\.salesforce-setup\./, ".salesforce.").replace(/\.salesforce-setup\.com/, ".salesforce.com");
+          }
           if (a?.sessionId || n >= o) {
             i(a);
             return;
@@ -40538,26 +40545,41 @@ function Wa(o) {
             new Promise((at) => {
               it().then((st) => {
                 if (!st?.instanceUrl || !st?.sessionId) {
-                  at({ records: [], error: "Salesforce session not detected" });
+                  at({ records: [], error: "Salesforce session not detected. Please ensure you are logged into Salesforce." });
                   return;
                 }
                 let Ot = I(Ke.soql, W);
-                (Ke.namespace && (Ot = I(Ot, "NamespacePrefix")),
+                Ke.namespace && (Ot = I(Ot, "NamespacePrefix"));
+                const doQuery = (sessionInfo, isRetry = !1) => {
+                  const targetInstance = (sessionInfo.instanceUrl || "").replace(/\.salesforce-setup\./, ".salesforce.").replace(/\.salesforce-setup\.com/, ".salesforce.com");
                   globalThis.chrome.runtime.sendMessage(
                     {
                       type: "METADATA_QUERY",
-                      instanceUrl: st.instanceUrl,
-                      sessionId: st.sessionId,
+                      instanceUrl: targetInstance,
+                      sessionId: sessionInfo.sessionId,
                       query: Ot,
                       tooling: Ke.tooling,
                     },
-                    ($t) =>
+                    ($t) => {
+                      if (!isRetry && $t?.error && ($t.error.includes("401") || $t.error.includes("INVALID_SESSION_ID"))) {
+                        it(3, !0).then((fresh) => {
+                          if (fresh?.sessionId && fresh.sessionId !== sessionInfo.sessionId) {
+                            doQuery(fresh, !0);
+                          } else {
+                            at({ records: [], error: $t.error });
+                          }
+                        });
+                        return;
+                      }
                       at(
                         $t?.success
                           ? { records: $t.data || [] }
                           : { records: [], error: $t?.error || "Query failed" },
-                      ),
-                  ));
+                      );
+                    },
+                  );
+                };
+                doQuery(st);
               });
             }),
           v = (Ke, at) => at.split(".").reduce((st, Ot) => st?.[Ot], Ke),
@@ -40659,15 +40681,37 @@ function Wa(o) {
           if (((Pe.innerHTML = ""), at.error)) {
             const st = document.createElement("div");
             (Object.assign(st.style, {
-              padding: "20px",
+              padding: "20px 20px 10px",
               color: "#ef4444",
               fontSize: "13px",
               whiteSpace: "pre-wrap",
             }),
-              (st.textContent = `Could not load ${m.label}:
-${at.error}`),
+              (st.textContent = `Could not load ${m.label}:\n${at.error}`),
               Pe.appendChild(st),
               (He.textContent = ""));
+            const retryWrap = document.createElement("div");
+            retryWrap.style.padding = "0 20px 20px";
+            const retryBtn = document.createElement("button");
+            retryBtn.textContent = "↻ Reconnect / Retry";
+            Object.assign(retryBtn.style, {
+              padding: "6px 14px",
+              background: "#3b82f6",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontWeight: "600",
+              fontSize: "12px",
+              fontFamily: "inherit",
+            });
+            retryBtn.addEventListener("click", async () => {
+              retryBtn.textContent = "Connecting…";
+              delete U[m.id];
+              await it(4, !0);
+              oe();
+            });
+            retryWrap.appendChild(retryBtn);
+            Pe.appendChild(retryWrap);
             return;
           }
           ((Ue = at.records),
@@ -42598,25 +42642,25 @@ ${at.error}`),
           }
           x = null;
         }
-        const ie = getToolsList(),
-          I = new Map(lo.map((he, Pe) => [he, Pe])),
-          h = ie
-            .map((he, Pe) => ({ t: he, i: Pe }))
-            .sort((he, Pe) => {
-              const Ue = I.has(he.t.id) ? I.get(he.t.id) : 1 / 0,
-                Ce = I.has(Pe.t.id) ? I.get(Pe.t.id) : 1 / 0;
-              return Ue !== Ce ? Ue - Ce : he.i - Pe.i;
-            })
-            .map(({ t: he }) => he),
-          v = f.length === 0,
-          R =
-            f.length > 0
-              ? h.filter(
-                  (he) =>
-                    he.label.toLowerCase().includes(f) ||
-                    he.desc.toLowerCase().includes(f),
-                )
-              : h;
+        const ie = getToolsList();
+        const orderMap = new Map((lo || []).map((he, Pe) => [he, Pe]));
+        const h = ie
+          .map((he, Pe) => ({ t: he, i: Pe }))
+          .sort((he, Pe) => {
+            const Ue = orderMap.has(he.t.id) ? orderMap.get(he.t.id) : 1 / 0,
+              Ce = orderMap.has(Pe.t.id) ? orderMap.get(Pe.t.id) : 1 / 0;
+            return Ue !== Ce ? Ue - Ce : he.i - Pe.i;
+          })
+          .map(({ t: he }) => he);
+        const v = f.length === 0;
+        const R =
+          f.length > 0
+            ? h.filter(
+                (he) =>
+                  he.label.toLowerCase().includes(f) ||
+                  he.desc.toLowerCase().includes(f),
+              )
+            : h;
         if (R.length === 0) {
           z("No tools match your search.");
           return;
