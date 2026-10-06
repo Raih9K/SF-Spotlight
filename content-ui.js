@@ -1,3 +1,51 @@
+// When the extension is reloaded/updated, this copy of the script stays on the page
+// but can no longer reach the extension ("Extension context invalidated"). Make every
+// chrome.runtime / chrome.storage call a silent no-op from then on instead of throwing.
+(() => {
+  const c = globalThis.chrome;
+  if (!c?.runtime) return;
+  const alive = () => {
+    try {
+      return !!c.runtime?.id;
+    } catch {
+      return !1;
+    }
+  };
+  const isInvalidated = (e) => /context invalidated/i.test(String(e?.message || e));
+  const guard = (obj, name) => {
+    const orig = obj?.[name];
+    if (typeof orig != "function") return;
+    const wrapped = function (...args) {
+      // No callback → caller expects a promise; a never-settling one is the safe no-op
+      const dead = () =>
+        name === "getURL" ? "" : typeof args[args.length - 1] == "function" ? void 0 : new Promise(() => {});
+      if (!alive()) return dead();
+      try {
+        return orig.apply(this, args);
+      } catch (e) {
+        if (isInvalidated(e)) return dead();
+        throw e;
+      }
+    };
+    try {
+      obj[name] = wrapped;
+    } catch {}
+    // Fall back to defineProperty if plain assignment didn't stick
+    if (obj[name] !== wrapped)
+      try {
+        Object.defineProperty(obj, name, { value: wrapped, configurable: !0, writable: !0 });
+      } catch {}
+  };
+  (["sendMessage", "connect", "getURL"].forEach((n) => guard(c.runtime, n)),
+    ["get", "set", "remove"].forEach((n) => guard(c.storage?.local, n)));
+  // Anything that still slips through (e.g. a port posting after disconnect)
+  (globalThis.addEventListener?.("error", (ev) => {
+    isInvalidated(ev.error || ev.message) && ev.preventDefault();
+  }),
+    globalThis.addEventListener?.("unhandledrejection", (ev) => {
+      isInvalidated(ev.reason) && ev.preventDefault();
+    }));
+})();
 const Go = [
     {
       label: "Setup Home",
@@ -7222,6 +7270,90 @@ const ia = {
 function Ri(o) {
   return ia[o] || "#64748b";
 }
+
+// ── SOQL Syntax Colorizer ─────────────────────────────────────────────────────
+function colorizeSOQL(query, isDark) {
+  if (!query || typeof query !== "string") return "";
+  // Escape HTML entities first
+  const esc = (s) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Token patterns in priority order
+  const KEYWORDS =
+    /\b(SELECT|FROM|WHERE|LIMIT|OFFSET|ORDER\s+BY|GROUP\s+BY|HAVING|WITH\s+DATA\s+CATEGORY|USING\s+SCOPE|FOR\s+VIEW|FOR\s+REFERENCE|FOR\s+UPDATE|UPDATE\s+TRACKING|UPDATE\s+VIEWSTAT|INCLUDES|EXCLUDES|LIKE|IN|NOT\s+IN|TYPEOF|WHEN|THEN|ELSE|END|DISTANCE|GEOLOCATION)\b/gi;
+  const LOGICAL =
+    /\b(AND|OR|NOT|NULL|TRUE|FALSE)\b/gi;
+  const AGG_FN =
+    /\b(COUNT|COUNT_DISTINCT|SUM|AVG|MIN|MAX|FIELDS|ALL|CUSTOM|STANDARD|toLabel|convertCurrency|FORMAT|CALENDAR_YEAR|CALENDAR_MONTH|CALENDAR_QUARTER|FISCAL_YEAR|FISCAL_QUARTER|FISCAL_MONTH|DAY_ONLY|WEEK_IN_YEAR|WEEK_IN_MONTH|DAY_IN_WEEK|DAY_IN_MONTH|DAY_IN_YEAR|HOUR_IN_DAY|convertTimezone|grouping)\b/gi;
+  const DATE_LIT =
+    /\b(TODAY|YESTERDAY|TOMORROW|LAST_WEEK|THIS_WEEK|NEXT_WEEK|LAST_MONTH|THIS_MONTH|NEXT_MONTH|LAST_QUARTER|THIS_QUARTER|NEXT_QUARTER|LAST_YEAR|THIS_YEAR|NEXT_YEAR|LAST_90_DAYS|NEXT_90_DAYS|LAST_N_DAYS|NEXT_N_DAYS|LAST_N_WEEKS|NEXT_N_WEEKS|LAST_N_MONTHS|NEXT_N_MONTHS|LAST_N_QUARTERS|NEXT_N_QUARTERS|LAST_N_YEARS|NEXT_N_YEARS|LAST_N_FISCAL_QUARTERS|NEXT_N_FISCAL_QUARTERS|LAST_N_FISCAL_YEARS|NEXT_N_FISCAL_YEARS):\d*|\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})?)?\b/gi;
+  // Color palette (works on both dark and light)
+  const C = {
+    kw:   isDark ? "#60a5fa" : "#2563eb",   // blue — SELECT FROM WHERE
+    fn:   isDark ? "#c084fc" : "#7c3aed",   // purple — COUNT SUM etc
+    logic:isDark ? "#fb923c" : "#c2410c",   // orange — AND OR NOT
+    str:  isDark ? "#fbbf24" : "#b45309",   // amber — string literals
+    num:  isDark ? "#4ade80" : "#15803d",   // green — numbers
+    date: isDark ? "#34d399" : "#047857",   // emerald — date literals
+    op:   isDark ? "#94a3b8" : "#475569",   // slate — = != < > ,
+    paren:isDark ? "#e2e8f0" : "#374151",   // near-white/dark — ( )
+  };
+  // Tokenise by splitting on string literals first
+  const parts = [];
+  const strRegex = /'(?:[^'\\]|\\.)*'/g;
+  let last = 0, m;
+  while ((m = strRegex.exec(query)) !== null) {
+    if (m.index > last) parts.push({ type: "code", val: query.slice(last, m.index) });
+    parts.push({ type: "str", val: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < query.length) parts.push({ type: "code", val: query.slice(last) });
+  const highlightCode = (s) => {
+    // Replace in order: date literals → keywords → agg fns → logical → numbers → ops → parens
+    s = esc(s);
+    // date literals (must come before numeric to capture date numbers)
+    s = s.replace(
+      /\b(TODAY|YESTERDAY|TOMORROW|LAST_WEEK|THIS_WEEK|NEXT_WEEK|LAST_MONTH|THIS_MONTH|NEXT_MONTH|LAST_QUARTER|THIS_QUARTER|NEXT_QUARTER|LAST_YEAR|THIS_YEAR|NEXT_YEAR|LAST_\d*_?DAYS|NEXT_\d*_?DAYS|LAST_N_DAYS:\d+|NEXT_N_DAYS:\d+|LAST_N_WEEKS:\d+|NEXT_N_WEEKS:\d+|LAST_N_MONTHS:\d+|NEXT_N_MONTHS:\d+|LAST_N_QUARTERS:\d+|NEXT_N_QUARTERS:\d+|LAST_N_YEARS:\d+|NEXT_N_YEARS:\d+|LAST_N_FISCAL_QUARTERS:\d+|NEXT_N_FISCAL_QUARTERS:\d+|LAST_N_FISCAL_YEARS:\d+|NEXT_N_FISCAL_YEARS:\d+)\b|\b(\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})?)?)\b/gi,
+      (w) => `<span style="color:${C.date}">${w}</span>`,
+    );
+    // keywords
+    s = s.replace(
+      /\b(SELECT|FROM|WHERE|LIMIT|OFFSET|ORDER\s+BY|GROUP\s+BY|HAVING|WITH\s+DATA\s+CATEGORY|USING\s+SCOPE|FOR\s+VIEW|FOR\s+REFERENCE|FOR\s+UPDATE|UPDATE\s+TRACKING|UPDATE\s+VIEWSTAT|INCLUDES|EXCLUDES|LIKE|NOT\s+IN|IN|TYPEOF|WHEN|THEN|ELSE|END|DISTANCE|GEOLOCATION|FIELDS)\b/gi,
+      (w) => `<span style="color:${C.kw};font-weight:600">${w}</span>`,
+    );
+    // aggregate / date functions
+    s = s.replace(
+      /\b(COUNT_DISTINCT|COUNT|SUM|AVG|MIN|MAX|ALL|CUSTOM|STANDARD|toLabel|convertCurrency|FORMAT|CALENDAR_YEAR|CALENDAR_MONTH|CALENDAR_QUARTER|FISCAL_YEAR|FISCAL_QUARTER|FISCAL_MONTH|DAY_ONLY|WEEK_IN_YEAR|WEEK_IN_MONTH|DAY_IN_WEEK|DAY_IN_MONTH|DAY_IN_YEAR|HOUR_IN_DAY|convertTimezone|grouping)\b/gi,
+      (w) => `<span style="color:${C.fn}">${w}</span>`,
+    );
+    // logical
+    s = s.replace(
+      /\b(AND|OR|NOT|NULL|TRUE|FALSE)\b/gi,
+      (w) => `<span style="color:${C.logic}">${w}</span>`,
+    );
+    // numbers (standalone, not inside identifiers)
+    s = s.replace(
+      /(?<![\w.])\b(\d+(?:\.\d+)?)\b(?![\w.])/g,
+      (w) => `<span style="color:${C.num}">${w}</span>`,
+    );
+    // operators
+    s = s.replace(
+      /(!?=|&lt;=?|&gt;=?|!=)/g,
+      (w) => `<span style="color:${C.op}">${w}</span>`,
+    );
+    // commas
+    s = s.replace(/(,)/g, `<span style="color:${C.op}">$1</span>`);
+    // parentheses
+    s = s.replace(/([()])/g, `<span style="color:${C.paren}">$1</span>`);
+    return s;
+  };
+  return parts
+    .map((p) =>
+      p.type === "str"
+        ? `<span style="color:${C.str}">${esc(p.val)}</span>`
+        : highlightCode(p.val),
+    )
+    .join("");
+}
 const hc = new Set([
     "CUMULATIVE_LIMIT_USAGE",
     "LIMIT_USAGE_FOR_NS",
@@ -7291,7 +7423,7 @@ function ts(o, t, e) {
     {
       id: "timeline",
       label: "Timeline",
-      icon: "📊",
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 17v-4"/><path d="M12 17V7"/><path d="M17 17v-7"/></svg>',
       render: () => {
         d = Ec(l, i, n, e.isDark, () => u("calltree"));
       },
@@ -7299,7 +7431,7 @@ function ts(o, t, e) {
     {
       id: "calltree",
       label: "Call Tree",
-      icon: "☰",
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
       render: () => xc(l, i, n),
     },
     {
@@ -7308,14 +7440,23 @@ function ts(o, t, e) {
       icon: "</>",
       render: () => bc(l, i, n),
     },
-    { id: "database", label: "Database", icon: "🗄", render: () => yc(l, i, n) },
+    { id: "database", label: "Database", icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>', render: () => yc(l, i, n) },
     {
       id: "insights",
       label: "Insights",
-      icon: "💡",
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>',
       render: () => Cc(l, t, n),
     },
-    { id: "rawlog", label: "Raw Log", icon: "📄", render: () => Sc(l, t, n) },
+    { id: "rawlog", label: "Raw Log", icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>', render: () => Sc(l, t, n) },
+    {
+      id: "ai",
+      label: "AI",
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><rect x="4" y="8" width="16" height="12" rx="2"/></svg>',
+      render: () =>
+        typeof renderLogAI == "function"
+          ? renderLogAI(l, t, n)
+          : (l.textContent = "AI module not loaded — reload the extension."),
+    },
   ];
   let g = "timeline";
   const r = new Map(),
@@ -8314,20 +8455,18 @@ function yc(o, t, e) {
         L = ve("tr");
       (L.addEventListener("mouseover", () => (L.style.background = e.hover)),
         L.addEventListener("mouseout", () => (L.style.background = "")),
-        L.appendChild(
-          ve(
-            "td",
-            {
-              ...qt(e),
-              maxWidth: "620px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              fontFamily: "monospace",
-              fontSize: "12px",
-            },
-            c.text,
-          ),
-        ));
+        (() => {
+          const soqlTd = ve("td", {
+            ...qt(e),
+            maxWidth: "620px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            fontFamily: "monospace",
+            fontSize: "12px",
+          });
+          soqlTd.innerHTML = colorizeSOQL(c.text, e === e && !!e.bg && e.bg !== "#ffffff");
+          L.appendChild(soqlTd);
+        })());
       const D = ve("td", { ...qt(e), textAlign: "left" });
       ((D.innerHTML =
         x == null
@@ -8588,21 +8727,18 @@ function vc(o, t, e) {
           ss(t.slowestSoql.duration),
         ),
       ),
-      r.appendChild(
-        ve(
-          "div",
-          {
-            fontSize: "11px",
-            color: e.muted,
-            marginTop: "4px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            fontFamily: "monospace",
-          },
-          t.slowestSoql.query,
-        ),
-      ),
+      (() => {
+        const sqDiv = ve("div", {
+          fontSize: "11px",
+          marginTop: "4px",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          fontFamily: "monospace",
+        });
+        sqDiv.innerHTML = colorizeSOQL(t.slowestSoql.query, !!e.bg && e.bg !== "#ffffff");
+        r.appendChild(sqDiv);
+      })(),
       s.appendChild(r));
   }
   if (t.slowestMethod) {
@@ -8688,7 +8824,7 @@ function vc(o, t, e) {
       success: {
         bg: "rgba(34,197,94,0.10)",
         border: "rgba(34,197,94,0.35)",
-        icon: "✅",
+        icon: "",
         col: "#22c55e",
       },
       info: {
@@ -8940,7 +9076,7 @@ const as = [
     {
       id: "ApexClass",
       label: "Apex Classes",
-      icon: "📦",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, ApiVersion, LengthWithoutComments, Status, LastModifiedDate FROM ApexClass ORDER BY Name LIMIT 2000",
@@ -8955,7 +9091,7 @@ const as = [
     {
       id: "ApexTrigger",
       label: "Apex Triggers",
-      icon: "⚡",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, TableEnumOrId, ApiVersion, Status, LastModifiedDate FROM ApexTrigger ORDER BY Name LIMIT 2000",
@@ -8970,7 +9106,7 @@ const as = [
     {
       id: "ApexPage",
       label: "Visualforce Pages",
-      icon: "📄",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, MasterLabel, ApiVersion, LastModifiedDate FROM ApexPage ORDER BY Name LIMIT 2000",
@@ -8984,7 +9120,7 @@ const as = [
     {
       id: "ApexComponent",
       label: "VF Components",
-      icon: "🧱",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, MasterLabel, ApiVersion, LastModifiedDate FROM ApexComponent ORDER BY Name LIMIT 2000",
@@ -8998,7 +9134,7 @@ const as = [
     {
       id: "AuraDefinitionBundle",
       label: "Aura Components",
-      icon: "🟦",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, MasterLabel, ApiVersion, LastModifiedDate FROM AuraDefinitionBundle ORDER BY DeveloperName LIMIT 2000",
@@ -9012,7 +9148,7 @@ const as = [
     {
       id: "LightningComponentBundle",
       label: "Lightning Web Components",
-      icon: "🔆",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, MasterLabel, ApiVersion FROM LightningComponentBundle ORDER BY DeveloperName LIMIT 2000",
@@ -9025,7 +9161,7 @@ const as = [
     {
       id: "CustomObject",
       label: "Custom Objects",
-      icon: "🗃️",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, ManageableState FROM CustomObject ORDER BY DeveloperName LIMIT 2000",
@@ -9037,7 +9173,7 @@ const as = [
     {
       id: "CustomField",
       label: "Custom Fields",
-      icon: "🔤",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, TableEnumOrId FROM CustomField ORDER BY TableEnumOrId LIMIT 2000",
@@ -9049,7 +9185,7 @@ const as = [
     {
       id: "ValidationRule",
       label: "Validation Rules",
-      icon: "✅",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT ValidationName, Active, ErrorMessage FROM ValidationRule ORDER BY ValidationName LIMIT 2000",
@@ -9062,7 +9198,7 @@ const as = [
     {
       id: "FlowDefinitionView",
       label: "Flows",
-      icon: "🌊",
+      icon: "",
       tooling: !1,
       idField: "DurableId",
       namespace: !0,
@@ -9078,7 +9214,7 @@ const as = [
     {
       id: "PermissionSet",
       label: "Permission Sets",
-      icon: "🛡️",
+      icon: "",
       tooling: !1,
       namespace: !0,
       soql: "SELECT Name, Label, IsOwnedByProfile FROM PermissionSet ORDER BY Name LIMIT 2000",
@@ -9091,7 +9227,7 @@ const as = [
     {
       id: "Profile",
       label: "Profiles",
-      icon: "👤",
+      icon: "",
       tooling: !1,
       soql: "SELECT Name, UserType FROM Profile ORDER BY Name LIMIT 2000",
       columns: [
@@ -9102,7 +9238,7 @@ const as = [
     {
       id: "CustomPermission",
       label: "Custom Permissions",
-      icon: "🔑",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT DeveloperName, MasterLabel FROM CustomPermission ORDER BY DeveloperName LIMIT 2000",
@@ -9114,7 +9250,7 @@ const as = [
     {
       id: "ExternalString",
       label: "Custom Labels",
-      icon: "🏷️",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, MasterLabel, Category, Language FROM ExternalString ORDER BY Name LIMIT 2000",
@@ -9128,7 +9264,7 @@ const as = [
     {
       id: "StaticResource",
       label: "Static Resources",
-      icon: "📎",
+      icon: "",
       tooling: !0,
       namespace: !0,
       soql: "SELECT Name, ContentType, BodyLength, LastModifiedDate FROM StaticResource ORDER BY Name LIMIT 2000",
@@ -9142,7 +9278,7 @@ const as = [
     {
       id: "EmailTemplate",
       label: "Email Templates",
-      icon: "✉️",
+      icon: "",
       tooling: !1,
       namespace: !0,
       soql: "SELECT Name, DeveloperName, FolderName, TemplateType FROM EmailTemplate ORDER BY Name LIMIT 2000",
@@ -9156,7 +9292,7 @@ const as = [
     {
       id: "Report",
       label: "Reports",
-      icon: "📊",
+      icon: "",
       tooling: !1,
       soql: "SELECT Name, FolderName, Format FROM Report ORDER BY Name LIMIT 2000",
       columns: [
@@ -9168,7 +9304,7 @@ const as = [
     {
       id: "Dashboard",
       label: "Dashboards",
-      icon: "📈",
+      icon: "",
       tooling: !1,
       soql: "SELECT Title, FolderName FROM Dashboard ORDER BY Title LIMIT 2000",
       columns: [
@@ -9179,7 +9315,7 @@ const as = [
     {
       id: "CronTrigger",
       label: "Scheduled Jobs",
-      icon: "⏰",
+      icon: "",
       tooling: !1,
       soql: "SELECT CronJobDetail.Name, State, NextFireTime, PreviousFireTime FROM CronTrigger ORDER BY NextFireTime LIMIT 2000",
       columns: [
@@ -9192,7 +9328,7 @@ const as = [
     {
       id: "ApexTestRunResult",
       label: "Test History",
-      icon: "🧪",
+      icon: "",
       tooling: !0,
       soql: "SELECT JobName, Status, StartTime, TestTime, ClassesCompleted, MethodsCompleted, MethodsFailed FROM ApexTestRunResult ORDER BY StartTime DESC LIMIT 1000",
       columns: [
@@ -9403,7 +9539,7 @@ function wc(o) {
     const s = document.createElement("li");
     ((s.id = ri),
       (s.className = "slds-global-actions__item slds-grid"),
-      (s.title = "Object Explorer (SF Spotlight)"),
+      (s.title = "Object Explorer (SFPilot)"),
       (s.dataset.obj = i),
       Object.assign(s.style, {
         cursor: "pointer",
@@ -9855,6 +9991,8 @@ const Jn = {
     showObjectExplorer: !0,
     uiSkin: "default",
     minimalView: !1,
+    spotlightWidth: 1280,
+    spotlightHeight: 1200,
   },
   Un = "sf_log_analyzer_settings";
 function Ni(o) {
@@ -9871,7 +10009,7 @@ function Ni(o) {
     }
 }
 const pn =
-  typeof location < "u" && location.pathname.endsWith("spotlight.html");
+  typeof location < "u" && location.pathname.endsWith("sfpilot.html");
 let Oo = null;
 if (pn)
   try {
@@ -9886,9 +10024,13 @@ function Fc() {
   return Oo ? "https:" : window.location.protocol;
 }
 function Vt(o) {
+  if (!o) return "";
   return o
+    .replace(/\.mcas\.ms$/, "")
+    .replace(/\.lightning\.force\.com$/, ".my.salesforce.com")
     .replace(/\.lightning\.force\./, ".my.salesforce.")
-    .replace(/\.mcas\.ms$/, "");
+    .replace(/\.salesforce-setup\.com$/, ".salesforce.com")
+    .replace(/\.salesforce-setup\./, ".salesforce.");
 }
 function bt() {
   return `https://${wn()
@@ -9911,7 +10053,7 @@ function us() {
 function wn() {
   return Mi || Vt(en());
 }
-function it(o = 4) {
+function it(o = 4, refresh = !1) {
   const t = globalThis.chrome?.runtime;
   if (!t || !t.id) return Promise.resolve(null);
   const e = (n) =>
@@ -9921,12 +10063,15 @@ function it(o = 4) {
           i(null);
           return;
         }
-        t.sendMessage({ type: "GET_SF_CREDENTIALS", hostname: wn() }, (s) => {
+        t.sendMessage({ type: "GET_SF_CREDENTIALS", hostname: wn(), refresh: !!refresh }, (s) => {
           if (globalThis.chrome?.runtime?.lastError) {
             i(null);
             return;
           }
           const a = s?.data || null;
+          if (a?.instanceUrl && a.instanceUrl.includes("salesforce-setup")) {
+            a.instanceUrl = a.instanceUrl.replace(/\.salesforce-setup\./, ".salesforce.").replace(/\.salesforce-setup\.com/, ".salesforce.com");
+          }
           if (a?.sessionId || n >= o) {
             i(a);
             return;
@@ -10173,7 +10318,18 @@ const jc = [
   qc = ["Market St", "Oak Ave", "Cedar Rd", "Pine Blvd", "Elm Way", "Hill Dr"],
   Wt = (o) => o[Math.floor(Math.random() * o.length)],
   Zt = (o, t) => Math.floor(Math.random() * (t - o + 1)) + o,
-  Jo = (o, t) => (t > 0 && o.length > t ? o.slice(0, t) : o);
+  Jo = (o, t) => {
+    if (t > 0 && o.length > t) {
+      const m = o.match(/-[0-9]+$/);
+      if (m) {
+        const sfx = m[0];
+        const left = t - sfx.length;
+        if (left > 0) return o.slice(0, left) + sfx;
+      }
+      return o.slice(0, t);
+    }
+    return o;
+  };
 function Zo(o, t, e) {
   const n = Math.min(t > 0 ? t : 0, 2),
     i = o > 0 ? Math.max(1, o - (t > 0 ? t : 0)) : 6;
@@ -10204,7 +10360,7 @@ function Gc(o, t) {
   }
 }
 function ua(o, t, e) {
-  const n = o.unique ? `-${e.seq}${t}` : "";
+  const n = `-${e.seq}${t}`;
   switch (o.type) {
     case "string":
     case "textarea":
@@ -10346,7 +10502,7 @@ function QcBulk(o, t) {
     Xe(
       "div",
       { fontSize: "16px", fontWeight: "800" },
-      "🧪 Bulk Sample Data Generator",
+      "Sample Data Generator",
     ),
   ),
     l.appendChild(
@@ -11657,22 +11813,25 @@ function bs() {
       if (!s || t.querySelector(".sf-api-chip")) return;
       const a = document.createElement("span");
       ((a.className = "sf-api-chip"),
+        (a.title = `Click to copy "${i}"`),
         Object.assign(a.style, {
           display: "inline-flex",
           alignItems: "center",
-          gap: "6px",
           verticalAlign: "middle",
           maxWidth: "100%",
-          marginLeft: "6px",
-          padding: "0px 4px 0px 8px",
-          borderRadius: "6px",
-          background: "rgba(37,99,235,0.10)",
-          border: "1px solid rgba(37,99,235,0.25)",
-          color: "#2563eb",
-          fontSize: "11px",
+          marginLeft: "4px",
+          padding: "0px 4px",
+          borderRadius: "3px",
+          background: "rgba(79,70,229,0.12)",
+          border: "1px solid rgba(99,102,241,0.35)",
+          color: "#4338ca",
+          fontSize: "9.5px",
           fontWeight: "600",
-          fontFamily: "monospace",
-          lineHeight: "1.7",
+          fontFamily: "Fira Code, monospace",
+          lineHeight: "1.2",
+          cursor: "pointer",
+          userSelect: "none",
+          transition: "all 0.15s ease",
         }));
       const l = document.createElement("span");
       ((l.textContent = i),
@@ -11681,43 +11840,31 @@ function bs() {
           overflow: "hidden",
           textOverflow: "ellipsis",
         }));
-      const d = document.createElement("button");
-      ((d.type = "button"), (d.title = "Copy API name"));
-      const y =
-          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
-        g =
-          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-      ((d.innerHTML = y),
-        Object.assign(d.style, {
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "2px",
-          background: "transparent",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer",
-          color: "#2563eb",
-          appearance: "none",
-          WebkitAppearance: "none",
-          flexShrink: "0",
-        }),
-        d.addEventListener("click", (r) => {
-          (r.preventDefault(),
-            r.stopPropagation(),
-            navigator.clipboard
-              ?.writeText(i)
-              .then(() => {
-                ((d.innerHTML = g),
-                  setTimeout(() => {
-                    d.innerHTML = y;
-                  }, 1100));
-              })
-              .catch(() => {}));
-        }),
-        a.appendChild(l),
-        a.appendChild(d),
-        s.insertAdjacentElement("afterend", a));
+      a.addEventListener("mouseover", () => {
+        ((a.style.background = "rgba(79,70,229,0.22)"), (a.style.borderColor = "rgba(79,70,229,0.5)"), (a.style.color = "#3730a3"));
+      });
+      a.addEventListener("mouseout", () => {
+        ((a.style.background = "rgba(79,70,229,0.12)"), (a.style.borderColor = "rgba(99,102,241,0.35)"), (a.style.color = "#4338ca"));
+      });
+      a.addEventListener("click", (r) => {
+        (r.preventDefault(),
+          r.stopPropagation(),
+          navigator.clipboard
+            ?.writeText(i)
+            .then(() => {
+              const origText = l.textContent;
+              ((l.textContent = "Copied!"),
+                (a.style.color = "#16a34a"),
+                (a.style.borderColor = "#22c55e"),
+                setTimeout(() => {
+                  ((l.textContent = origText),
+                    (a.style.color = "#4338ca"),
+                    (a.style.borderColor = "rgba(99,102,241,0.35)"));
+                }, 900));
+            })
+            .catch(() => {}));
+      });
+      (a.appendChild(l), s.insertAdjacentElement("afterend", a));
     });
 }
 function Wi(o) {
@@ -11933,17 +12080,6 @@ function ka(o, t) {
     padding: "16px 24px",
     borderTop: `1px solid ${n.divider}`,
   });
-  const b = document.createElement("a");
-  ((b.textContent = "View docs ↗"),
-    (b.href = "https://sfspotlight.vercel.app/docs.html"),
-    (b.target = "_blank"),
-    (b.rel = "noopener noreferrer"),
-    Object.assign(b.style, {
-      fontSize: "13px",
-      fontWeight: "600",
-      color: n.textMuted,
-      textDecoration: "none",
-    }));
   const N = document.createElement("button");
   ((N.textContent = "Got it"),
     Object.assign(N.style, {
@@ -11958,7 +12094,7 @@ function ka(o, t) {
       fontFamily: "inherit",
     }),
     N.addEventListener("click", s),
-    u.appendChild(b),
+    (u.style.justifyContent = "flex-end"),
     u.appendChild(N),
     d.appendChild(u),
     (i.style.pointerEvents = "auto"));
@@ -12016,7 +12152,7 @@ function hp(o, t) {
       rt(
         "div",
         { fontSize: "15px", fontWeight: "800", color: n.text },
-        "🔐 Profile & PermissionSet Comparison",
+        "Profile & PermissionSet Comparison",
       ),
     ),
     i.appendChild(s));
@@ -12030,6 +12166,51 @@ function hp(o, t) {
     borderBottom: `1px solid ${n.divider}`,
   });
   i.appendChild(l);
+  let compareMode = "perm"; // "perm" | "user"
+  const modeSwitchWrap = rt("div", {
+    display: "inline-flex",
+    background: e ? "#1e293b" : "#e2e8f0",
+    borderRadius: "8px",
+    padding: "3px",
+    gap: "3px",
+    marginRight: "4px",
+  });
+  const permModeBtn = rt(
+    "button",
+    {
+      background: n.accent,
+      color: "#fff",
+      border: "none",
+      borderRadius: "6px",
+      padding: "5px 12px",
+      fontSize: "12px",
+      fontWeight: "700",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      transition: "all 0.15s ease",
+    },
+    "Profiles & Perm Sets",
+  );
+  const userModeBtn = rt(
+    "button",
+    {
+      background: "transparent",
+      color: n.muted,
+      border: "none",
+      borderRadius: "6px",
+      padding: "5px 12px",
+      fontSize: "12px",
+      fontWeight: "500",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      transition: "all 0.15s ease",
+    },
+    "Users",
+  );
+  modeSwitchWrap.appendChild(permModeBtn);
+  modeSwitchWrap.appendChild(userModeBtn);
+  l.appendChild(modeSwitchWrap);
+
   const d = () =>
       rt("select", {
         flex: "1",
@@ -12087,14 +12268,23 @@ function hp(o, t) {
   });
   i.appendChild(E);
   let u = "objects";
-  const tabs = [
-    { id: "system", label: "🛡️ System" },
-    { id: "objects", label: "📦 Objects" },
-    { id: "fields", label: "🔑 FLS" },
-    { id: "apex", label: "☕ Apex" },
-    { id: "vf", label: "📄 VF Pages" },
-    { id: "custom", label: "🔑 Custom" },
-    { id: "dependency", label: "📊 Dependency" }
+  const permTabs = [
+    { id: "system", label: "System" },
+    { id: "objects", label: "Objects" },
+    { id: "fields", label: "FLS" },
+    { id: "apex", label: "Apex" },
+    { id: "vf", label: "VF Pages" },
+    { id: "custom", label: "Custom" },
+    { id: "dependency", label: "Dependency" },
+  ];
+  const userTabs = [
+    { id: "assigned", label: "Assigned Sets" },
+    { id: "objects", label: "Objects" },
+    { id: "fields", label: "FLS" },
+    { id: "system", label: "System" },
+    { id: "apex", label: "Apex" },
+    { id: "vf", label: "VF Pages" },
+    { id: "custom", label: "Custom" },
   ];
   const b = rt("div", {
       display: "inline-flex",
@@ -12102,28 +12292,8 @@ function hp(o, t) {
       borderRadius: "8px",
       overflow: "hidden",
       flexWrap: "wrap",
-    }),
-    N = {};
-  tabs.forEach(({ id: P, label: lbl }) => {
-    const ee = rt(
-      "button",
-      {
-        background: "transparent",
-        border: "none",
-        padding: "6px 14px",
-        cursor: "pointer",
-        fontSize: "12.5px",
-        fontFamily: "inherit",
-        color: n.muted,
-      },
-      lbl,
-    );
-    (ee.addEventListener("click", () => {
-      ((u = P), F(), te());
-    }),
-      (N[P] = ee),
-      b.appendChild(ee));
-  });
+    });
+  let N = {};
   const F = () =>
     Object.entries(N).forEach(([P, ee]) =>
       Object.assign(ee.style, {
@@ -12132,7 +12302,40 @@ function hp(o, t) {
         fontWeight: u === P ? "700" : "500",
       }),
     );
+  const renderTabs = () => {
+    b.innerHTML = "";
+    N = {};
+    const curTabs = compareMode === "user" ? userTabs : permTabs;
+    if (!curTabs.some((t) => t.id === u)) {
+      u = compareMode === "user" ? "assigned" : "objects";
+    }
+    curTabs.forEach(({ id: P, label: lbl }) => {
+      const ee = rt(
+        "button",
+        {
+          background: "transparent",
+          border: "none",
+          padding: "6px 14px",
+          cursor: "pointer",
+          fontSize: "12.5px",
+          fontFamily: "inherit",
+          color: n.muted,
+        },
+        lbl,
+      );
+      ee.addEventListener("click", () => {
+        u = P;
+        F();
+        te();
+      });
+      N[P] = ee;
+      b.appendChild(ee);
+    });
+    F();
+  };
+  renderTabs();
   E.appendChild(b);
+
   const k = rt("label", {
     display: "none",
     alignItems: "center",
@@ -12193,6 +12396,48 @@ function hp(o, t) {
     color: n.muted,
   });
   E.appendChild($);
+
+  const exportBtn = rt(
+    "button",
+    {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "5px",
+      background: n.panel,
+      border: `1px solid ${n.border}`,
+      borderRadius: "6px",
+      padding: "4px 10px",
+      fontSize: "12px",
+      fontWeight: "700",
+      color: n.text,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      marginLeft: "6px",
+    },
+    "📥 Export Tab CSV",
+  );
+  const exportFullBtn = rt(
+    "button",
+    {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "5px",
+      background: n.accent,
+      border: "none",
+      borderRadius: "6px",
+      padding: "4px 10px",
+      fontSize: "12px",
+      fontWeight: "700",
+      color: "#fff",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      marginLeft: "4px",
+    },
+    "⚡ Full Diff Audit CSV",
+  );
+  E.appendChild(exportBtn);
+  E.appendChild(exportFullBtn);
+
   const V = rt("div", {
     padding: "8px 24px",
     fontSize: "11.5px",
@@ -12222,48 +12467,158 @@ function hp(o, t) {
           .map(([ee, G]) => C(ee, G))
           .join(" &nbsp;·&nbsp; ");
         V.innerHTML = `Access: ${P}<br><span style="color:${n.grant}">■</span> granted &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
+      } else if (u === "assigned") {
+        V.innerHTML = `User Assignments:<br><span style="color:${n.grant}">■</span> assigned &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not assigned &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
       } else {
         V.innerHTML = `Access / Assignment:<br><span style="color:${n.grant}">■</span> granted / assigned &nbsp;·&nbsp; <span style="text-decoration:line-through;opacity:.7">A</span> not granted / assigned &nbsp;·&nbsp; <span style="background:${n.diff};padding:0 6px;border-radius:4px">amber row</span> differs`;
       }
     },
     se = rt("div", { flex: "1", minHeight: "0", overflow: "auto" });
   i.appendChild(se);
+
   let De = [],
-    Be = null;
-  const be = (P) => De.find((ee) => ee.id === P)?.label || P,
-    ge = (P) => {
-      ((se.innerHTML = ""),
-        se.appendChild(
-          rt("div", { padding: "24px", color: n.muted, fontSize: "13px" }, P),
-        ));
+    userList = [],
+    Be = null,
+    userPermsCache = null,
+    cachedSystemFields = null,
+    currentExportData = null;
+
+  const permSetLabelMap = new Map();
+
+  function sanitizeFilename(name) {
+    return String(name || "comparison").replace(/[^a-zA-Z0-9_\-]/g, "_");
+  }
+
+  function downloadCSV(filename, headers, rows) {
+    const escapeVal = (val) => {
+      if (val == null) return '""';
+      const s = String(val).replace(/"/g, '""');
+      return `"${s}"`;
     };
-  (ge("Loading permission sets & profiles…"),
-    t
-      .runQuery(
-        "SELECT Id, Label, Name, IsOwnedByProfile, Profile.Name, Type FROM PermissionSet ORDER BY IsOwnedByProfile DESC, Label LIMIT 2000",
-      )
-      .then(({ records: P, error: ee }) => {
-        if (ee) {
-          ge("Could not load permission sets: " + ee);
-          return;
-        }
-        ((De = P.map((G) => ({
-          id: G.Id,
-          isProfile: !!G.IsOwnedByProfile,
-          isGroup: G.Type === "Group",
-          label: G.IsOwnedByProfile
-            ? `Profile: ${G.Profile?.Name || G.Label}`
-            : G.Type === "Group"
-              ? `Group: ${G.Label || G.Name}`
-              : G.Label || G.Name,
-        })).sort((G, T) => G.label.localeCompare(T.label))),
-          ue(y),
-          ue(g),
-          (y.selectedIndex = 0),
-          (g.selectedIndex = 0),
-          F(),
-          te());
-      }));
+    let csv = "\uFEFF" + headers.map(escapeVal).join(",") + "\r\n";
+    rows.forEach((row) => {
+      csv += row.map(escapeVal).join(",") + "\r\n";
+    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
+
+  function getGrantSources(parentIds) {
+    if (!parentIds) return "None";
+    const arr = parentIds instanceof Set ? Array.from(parentIds) : Array.isArray(parentIds) ? parentIds : [parentIds];
+    if (arr.length === 0) return "None";
+    const labels = arr.map((id) => permSetLabelMap.get(id) || id);
+    return Array.from(new Set(labels)).join("; ");
+  }
+
+  exportBtn.addEventListener("click", () => {
+    if (!currentExportData || !currentExportData.rows || currentExportData.rows.length === 0) {
+      if (t.flashToast) t.flashToast("No data currently available to export.");
+      else alert("No data currently available to export.");
+      return;
+    }
+    downloadCSV(currentExportData.filename, currentExportData.headers, currentExportData.rows);
+    if (t.flashToast) t.flashToast(`Exported ${currentExportData.rows.length} rows to CSV!`);
+  });
+
+  exportFullBtn.addEventListener("click", () => {
+    exportFullDiffReport();
+  });
+
+  const be = (P) => {
+    if (compareMode === "user") {
+      const uObj = userList.find((usr) => usr.id === P);
+      return uObj ? `${uObj.name}` : P;
+    }
+    return De.find((ee) => ee.id === P)?.label || P;
+  };
+
+  const ge = (P) => {
+    ((se.innerHTML = ""),
+      se.appendChild(
+        rt("div", { padding: "24px", color: n.muted, fontSize: "13px" }, P),
+      ));
+  };
+
+  ge("Loading permission sets & profiles…");
+  t.runQuery(
+    "SELECT Id, Label, Name, IsOwnedByProfile, Profile.Name, Type FROM PermissionSet ORDER BY IsOwnedByProfile DESC, Label LIMIT 2000",
+  ).then(({ records: P, error: ee }) => {
+    if (ee) {
+      ge("Could not load permission sets: " + ee);
+      return;
+    }
+    De = (P || []).map((G) => {
+      const lbl = G.IsOwnedByProfile
+        ? `Profile: ${G.Profile?.Name || G.Label}`
+        : G.Type === "Group"
+          ? `Group: ${G.Label || G.Name}`
+          : G.Label || G.Name;
+      permSetLabelMap.set(G.Id, lbl);
+      return {
+        id: G.Id,
+        isProfile: !!G.IsOwnedByProfile,
+        isGroup: G.Type === "Group",
+        label: lbl,
+      };
+    }).sort((G, T) => G.label.localeCompare(T.label));
+    populateDropdowns();
+    F();
+    te();
+  });
+
+  async function loadUsers() {
+    if (userList.length > 0) return userList;
+    ge("Loading active users…");
+    const { records: P, error: ee } = await t.runQuery(
+      "SELECT Id, Name, Username FROM User WHERE IsActive = true ORDER BY Name LIMIT 2000",
+    );
+    if (ee) {
+      ge("Could not load users: " + ee);
+      return [];
+    }
+    userList = (P || []).map((G) => ({
+      id: G.Id,
+      name: G.Name,
+      username: G.Username,
+      label: `${G.Name} (${G.Username})`,
+    }));
+    return userList;
+  }
+
+  function populateDropdowns() {
+    if (compareMode === "user") {
+      const fillSel = (sel) => {
+        sel.innerHTML = "";
+        const emptyOpt = rt("option");
+        emptyOpt.value = "";
+        emptyOpt.textContent = "— select a user —";
+        sel.appendChild(emptyOpt);
+        userList.forEach((usr) => {
+          const opt = rt("option");
+          opt.value = usr.id;
+          opt.textContent = usr.label;
+          sel.appendChild(opt);
+        });
+      };
+      fillSel(y);
+      fillSel(g);
+      y.selectedIndex = 0;
+      g.selectedIndex = 0;
+    } else {
+      ue(y);
+      ue(g);
+      y.selectedIndex = 0;
+      g.selectedIndex = 0;
+    }
+  }
+
   function ue(P) {
     P.innerHTML = "";
     const ee = rt("option");
@@ -12287,12 +12642,65 @@ function hp(o, t) {
      w("Permission Sets", T, ""),
      w("Permission Set Groups", psgs, /^Group:\s*/));
   }
+
+  const updateModeUI = async () => {
+    if (compareMode === "perm") {
+      permModeBtn.style.background = n.accent;
+      permModeBtn.style.color = "#fff";
+      permModeBtn.style.fontWeight = "700";
+      userModeBtn.style.background = "transparent";
+      userModeBtn.style.color = n.muted;
+      userModeBtn.style.fontWeight = "500";
+      populateDropdowns();
+      renderTabs();
+      Be = null;
+      userPermsCache = null;
+      currentExportData = null;
+      te();
+    } else {
+      userModeBtn.style.background = n.accent;
+      userModeBtn.style.color = "#fff";
+      userModeBtn.style.fontWeight = "700";
+      permModeBtn.style.background = "transparent";
+      permModeBtn.style.color = n.muted;
+      permModeBtn.style.fontWeight = "500";
+      if (userList.length === 0) {
+        await loadUsers();
+      }
+      populateDropdowns();
+      renderTabs();
+      Be = null;
+      userPermsCache = null;
+      currentExportData = null;
+      te();
+    }
+  };
+
+  permModeBtn.addEventListener("click", () => {
+    if (compareMode === "perm") return;
+    compareMode = "perm";
+    updateModeUI();
+  });
+
+  userModeBtn.addEventListener("click", () => {
+    if (compareMode === "user") return;
+    compareMode = "user";
+    updateModeUI();
+  });
+
   (y.addEventListener("change", () => {
-    ((Be = null), te());
+    Be = null;
+    userPermsCache = null;
+    currentExportData = null;
+    te();
   }),
     g.addEventListener("change", () => {
-      ((Be = null), te());
+      Be = null;
+      userPermsCache = null;
+      currentExportData = null;
+      te();
     }));
+
   const Me = (P, ee) => go.every(([, G]) => !!P?.[G] == !!ee?.[G]),
     ye = (P, ee) => {
       const G = rt("div", {
@@ -12332,7 +12740,213 @@ function hp(o, t) {
     return span;
   };
 
-  let cachedSystemFields = null;
+  async function loadUserAssignments(P, ee) {
+    ge("Loading user permissions & assignments…");
+    const { records: assignRecs, error: assignErr } = await t.runQuery(
+      `SELECT Id, AssigneeId, Assignee.Name, Assignee.Username, PermissionSetId, PermissionSet.Label, PermissionSet.Name, PermissionSet.IsOwnedByProfile, PermissionSet.ProfileId, PermissionSet.Profile.Name, PermissionSetGroupId, PermissionSetGroup.DeveloperName, PermissionSetGroup.MasterLabel FROM PermissionSetAssignment WHERE AssigneeId IN ('${P}', '${ee}')`
+    );
+    if (assignErr) {
+      ge("Could not load user assignments: " + assignErr);
+      return false;
+    }
+    assignRecs.forEach((r) => {
+      if (r.PermissionSetId) {
+        const lbl = r.PermissionSet.IsOwnedByProfile
+          ? (r.PermissionSet.Profile?.Name ? `Profile: ${r.PermissionSet.Profile.Name}` : r.PermissionSet.Label)
+          : (r.PermissionSet.Label || r.PermissionSet.Name);
+        permSetLabelMap.set(r.PermissionSetId, lbl);
+      }
+    });
+
+    const extractUserBundle = (assigneeId) => {
+      const userRecs = (assignRecs || []).filter((r) => r.AssigneeId === assigneeId);
+      const profileRec = userRecs.find((r) => r.PermissionSet?.IsOwnedByProfile);
+      const profileName = profileRec?.PermissionSet?.Profile?.Name || profileRec?.PermissionSet?.Label || "Standard User";
+      const psgMap = new Map();
+      userRecs.forEach((r) => {
+        if (r.PermissionSetGroupId && r.PermissionSetGroup) {
+          psgMap.set(r.PermissionSetGroupId, {
+            id: r.PermissionSetGroupId,
+            label: r.PermissionSetGroup.MasterLabel || r.PermissionSetGroup.DeveloperName,
+            name: r.PermissionSetGroup.DeveloperName,
+          });
+        }
+      });
+      const directPermSets = new Map();
+      userRecs.forEach((r) => {
+        if (!r.PermissionSet?.IsOwnedByProfile && !r.PermissionSetGroupId && r.PermissionSetId) {
+          directPermSets.set(r.PermissionSetId, {
+            id: r.PermissionSetId,
+            label: r.PermissionSet?.Label || r.PermissionSet?.Name,
+            name: r.PermissionSet?.Name,
+          });
+        }
+      });
+      const allPermSetIds = Array.from(new Set(userRecs.map((r) => r.PermissionSetId).filter(Boolean)));
+      return {
+        profileName,
+        psgs: Array.from(psgMap.values()),
+        directPermSets: Array.from(directPermSets.values()),
+        allPermSetIds,
+      };
+    };
+    userPermsCache = { key: `${P}|${ee}`, a: extractUserBundle(P), b: extractUserBundle(ee) };
+    return true;
+  }
+
+  async function compareAssignedSets(P, ee) {
+    if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+      const loaded = await loadUserAssignments(P, ee);
+      if (!loaded) return;
+    }
+    const { a: uA, b: uB } = userPermsCache;
+
+    const container = rt("div", { padding: "16px", display: "flex", flexDirection: "column", gap: "24px" });
+
+    // 1. Profile Section
+    const profTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginBottom: "8px", color: n.text }, "Profile");
+    container.appendChild(profTitle);
+
+    const profTable = M(["User Attribute", be(P), be(ee)]);
+    const profTbody = profTable.querySelector("tbody");
+    const profDiffers = uA.profileName !== uB.profileName;
+    if (!U || profDiffers) {
+      const tr = rt("tr", { background: profDiffers ? n.diff : "" });
+      tr.appendChild(rt("td", K(), "Assigned Profile"));
+      tr.appendChild(rt("td", j(), uA.profileName));
+      tr.appendChild(rt("td", j(), uB.profileName));
+      profTbody.appendChild(tr);
+      container.appendChild(profTable);
+    } else {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "Profiles are identical."));
+    }
+
+    // 2. Permission Set Groups Section
+    const allPsgs = new Map();
+    uA.psgs.forEach((g) => allPsgs.set(g.id, g));
+    uB.psgs.forEach((g) => allPsgs.set(g.id, g));
+    const setPsgA = new Set(uA.psgs.map((g) => g.id));
+    const setPsgB = new Set(uB.psgs.map((g) => g.id));
+
+    let sortedPsgIds = Array.from(allPsgs.keys()).sort((id1, id2) =>
+      (allPsgs.get(id1).label || "").localeCompare(allPsgs.get(id2).label || "")
+    );
+    if (x) {
+      sortedPsgIds = sortedPsgIds.filter((id) => {
+        const g = allPsgs.get(id);
+        return `${g.label} ${g.name}`.toLowerCase().includes(x);
+      });
+    }
+    if (U) {
+      sortedPsgIds = sortedPsgIds.filter((id) => setPsgA.has(id) !== setPsgB.has(id));
+    }
+
+    const psgTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginTop: "12px", marginBottom: "8px", color: n.text }, "Permission Set Groups");
+    container.appendChild(psgTitle);
+
+    if (sortedPsgIds.length === 0) {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "No Permission Set Groups match."));
+    } else {
+      const psgTable = M(["Permission Set Group", be(P), be(ee)]);
+      const psgTbody = psgTable.querySelector("tbody");
+      sortedPsgIds.forEach((id, idx) => {
+        const g = allPsgs.get(id);
+        const valA = setPsgA.has(id);
+        const valB = setPsgB.has(id);
+        const differs = valA !== valB;
+        const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+        tr.appendChild(rt("td", K(), `${g.label} (${g.name})`));
+        const tdA = rt("td", j());
+        tdA.appendChild(renderStatus(valA));
+        tr.appendChild(tdA);
+        const tdB = rt("td", j());
+        tdB.appendChild(renderStatus(valB));
+        tr.appendChild(tdB);
+        psgTbody.appendChild(tr);
+      });
+      container.appendChild(psgTable);
+    }
+
+    // 3. Directly Assigned Permission Sets
+    const allPerms = new Map();
+    uA.directPermSets.forEach((ps) => allPerms.set(ps.id, ps));
+    uB.directPermSets.forEach((ps) => allPerms.set(ps.id, ps));
+    const setPermA = new Set(uA.directPermSets.map((ps) => ps.id));
+    const setPermB = new Set(uB.directPermSets.map((ps) => ps.id));
+
+    let sortedPermIds = Array.from(allPerms.keys()).sort((id1, id2) =>
+      (allPerms.get(id1).label || "").localeCompare(allPerms.get(id2).label || "")
+    );
+    if (x) {
+      sortedPermIds = sortedPermIds.filter((id) => {
+        const ps = allPerms.get(id);
+        return `${ps.label} ${ps.name}`.toLowerCase().includes(x);
+      });
+    }
+    if (U) {
+      sortedPermIds = sortedPermIds.filter((id) => setPermA.has(id) !== setPermB.has(id));
+    }
+
+    const permTitle = rt("div", { fontSize: "14px", fontWeight: "700", marginTop: "12px", marginBottom: "8px", color: n.text }, "Direct Permission Sets");
+    container.appendChild(permTitle);
+
+    if (sortedPermIds.length === 0) {
+      container.appendChild(rt("div", { padding: "8px 12px", color: n.muted, fontSize: "12.5px", fontStyle: "italic" }, "No Direct Permission Sets match."));
+    } else {
+      const permTable = M(["Permission Set", be(P), be(ee)]);
+      const permTbody = permTable.querySelector("tbody");
+      sortedPermIds.forEach((id, idx) => {
+        const ps = allPerms.get(id);
+        const valA = setPermA.has(id);
+        const valB = setPermB.has(id);
+        const differs = valA !== valB;
+        const tr = rt("tr", { background: differs ? n.diff : idx % 2 ? n.zebra : "" });
+        tr.appendChild(rt("td", K(), `${ps.label} (${ps.name})`));
+        const tdA = rt("td", j());
+        tdA.appendChild(renderStatus(valA));
+        tr.appendChild(tdA);
+        const tdB = rt("td", j());
+        tdB.appendChild(renderStatus(valB));
+        tr.appendChild(tdB);
+        permTbody.appendChild(tr);
+      });
+      container.appendChild(permTable);
+    }
+
+    const exportHeaders = [
+      "Category",
+      "Item / Group / Profile",
+      `Assigned in ${be(P)}`,
+      `Assigned in ${be(ee)}`,
+      "Differs?",
+    ];
+    const exportRows = [];
+    if (!U || profDiffers) {
+      exportRows.push(["Profile", "Assigned Profile", uA.profileName, uB.profileName, profDiffers ? "YES" : "NO"]);
+    }
+    sortedPsgIds.forEach((id) => {
+      const g = allPsgs.get(id);
+      const valA = setPsgA.has(id);
+      const valB = setPsgB.has(id);
+      exportRows.push(["Permission Set Group", `${g.label} (${g.name})`, valA ? "Assigned" : "Not Assigned", valB ? "Assigned" : "Not Assigned", valA !== valB ? "YES" : "NO"]);
+    });
+    sortedPermIds.forEach((id) => {
+      const ps = allPerms.get(id);
+      const valA = setPermA.has(id);
+      const valB = setPermB.has(id);
+      exportRows.push(["Direct Permission Set", `${ps.label} (${ps.name})`, valA ? "Assigned" : "Not Assigned", valB ? "Assigned" : "Not Assigned", valA !== valB ? "YES" : "NO"]);
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_assigned_sets.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+
+    $.textContent = `${sortedPsgIds.length} group${sortedPsgIds.length === 1 ? "" : "s"}, ${sortedPermIds.length} perm set${sortedPermIds.length === 1 ? "" : "s"}`;
+    se.innerHTML = "";
+    se.appendChild(container);
+  }
+
   async function compareSystemPerms(P, ee) {
     if (!cachedSystemFields) {
       ge("Describing System Permissions...");
@@ -12349,7 +12963,7 @@ function hp(o, t) {
             instanceUrl: creds.instanceUrl,
             sessionId: creds.sessionId,
           },
-          (res) => resolve(res)
+          (res) => resolve(res),
         );
       });
       if (!fieldsRes || !fieldsRes.success || !fieldsRes.data) {
@@ -12357,27 +12971,68 @@ function hp(o, t) {
         return;
       }
       cachedSystemFields = fieldsRes.data
-        .map(f => f.name)
-        .filter(name => name.startsWith("Permissions"))
+        .map((f) => f.name)
+        .filter((name) => name.startsWith("Permissions"))
         .sort();
     }
 
-    ge("Loading System Permissions...");
-    const fieldsToQuery = cachedSystemFields.join(", ");
-    const { records: permSets, error: queryErr } = await t.runQuery(
-      `SELECT Id, ${fieldsToQuery} FROM PermissionSet WHERE Id IN ('${P}', '${ee}')`
-    );
-    if (queryErr) {
-      ge("Could not load system permissions data: " + queryErr);
+    ge(compareMode === "user" ? "Loading effective system permissions for users..." : "Loading System Permissions...");
+    let idsA = [P];
+    let idsB = [ee];
+    if (compareMode === "user") {
+      if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+        const loaded = await loadUserAssignments(P, ee);
+        if (!loaded) return;
+      }
+      idsA = userPermsCache.a.allPermSetIds;
+      idsB = userPermsCache.b.allPermSetIds;
+    }
+    const allIds = Array.from(new Set([...idsA, ...idsB]));
+    if (allIds.length === 0) {
+      ge("No permission sets found to compare.");
       return;
     }
+    const fieldsToQuery = cachedSystemFields.join(", ");
+    const idChunks = [];
+    for (let idx = 0; idx < allIds.length; idx += 200) {
+      idChunks.push(allIds.slice(idx, idx + 200));
+    }
+    let permSets = [];
+    for (const chunk of idChunks) {
+      const inList = chunk.map((id) => `'${id}'`).join(", ");
+      const { records: recs, error: queryErr } = await t.runQuery(
+        `SELECT Id, ${fieldsToQuery} FROM PermissionSet WHERE Id IN (${inList})`,
+      );
+      if (queryErr) {
+        ge("Could not load system permissions data: " + queryErr);
+        return;
+      }
+      permSets.push(...(recs || []));
+    }
 
-    const mapA = permSets.find(r => r.Id === P) || {};
-    const mapB = permSets.find(r => r.Id === ee) || {};
+    const setIdsA = new Set(idsA);
+    const setIdsB = new Set(idsB);
 
-    let filtered = cachedSystemFields.filter(f => !x || f.toLowerCase().includes(x));
+    const mapA = {};
+    const mapB = {};
+    const srcA = new Map(), srcB = new Map();
+    cachedSystemFields.forEach((f) => {
+      const grantA = new Set(), grantB = new Set();
+      permSets.forEach((r) => {
+        if (!!r[f]) {
+          if (setIdsA.has(r.Id)) grantA.add(r.Id);
+          if (setIdsB.has(r.Id)) grantB.add(r.Id);
+        }
+      });
+      if (grantA.size > 0) srcA.set(f, grantA);
+      if (grantB.size > 0) srcB.set(f, grantB);
+      mapA[f] = grantA.size > 0;
+      mapB[f] = grantB.size > 0;
+    });
+
+    let filtered = cachedSystemFields.filter((f) => !x || f.toLowerCase().includes(x));
     if (U) {
-      filtered = filtered.filter(f => !mapA[f] !== !mapB[f]);
+      filtered = filtered.filter((f) => !mapA[f] !== !mapB[f]);
     }
 
     $.textContent = `${filtered.length} permission${filtered.length === 1 ? "" : "s"}`;
@@ -12405,46 +13060,108 @@ function hp(o, t) {
       tbody.appendChild(tr);
     });
 
+    const exportHeaders = [
+      "System Permission",
+      `Enabled in ${be(P)}`,
+      `Enabled in ${be(ee)}`,
+      "Differs?",
+      `Where Granted in ${be(P)}`,
+      `Where Granted in ${be(ee)}`,
+    ];
+    const exportRows = filtered.map((f) => {
+      const valA = !!mapA[f];
+      const valB = !!mapB[f];
+      const differs = valA !== valB;
+      return [
+        f.replace(/^Permissions/, ""),
+        valA ? "TRUE" : "FALSE",
+        valB ? "TRUE" : "FALSE",
+        differs ? "YES" : "NO",
+        getGrantSources(srcA.get(f)),
+        getGrantSources(srcB.get(f)),
+      ];
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_system_permissions.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+
     q(table, filtered.length, "No system permissions match.");
   }
 
   async function compareSetupEntity(P, ee, type, sobjectName, labelSingular) {
-    ge(`Loading ${labelSingular} access...`);
-    const { records: accessRecs, error: err } = await t.runQuery(
-      `SELECT ParentId, SetupEntityId FROM SetupEntityAccess WHERE ParentId IN ('${P}', '${ee}') AND SetupEntityType = '${type}' LIMIT 5000`
-    );
-    if (err) {
-      ge(`Could not load ${labelSingular} access: ` + err);
+    ge(compareMode === "user" ? `Loading effective ${labelSingular} access for users...` : `Loading ${labelSingular} access...`);
+    let idsA = [P];
+    let idsB = [ee];
+    if (compareMode === "user") {
+      if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+        const loaded = await loadUserAssignments(P, ee);
+        if (!loaded) return;
+      }
+      idsA = userPermsCache.a.allPermSetIds;
+      idsB = userPermsCache.b.allPermSetIds;
+    }
+    const allIds = Array.from(new Set([...idsA, ...idsB]));
+    if (allIds.length === 0) {
+      ge("No permission sets found to compare.");
       return;
     }
+    const idChunks = [];
+    for (let idx = 0; idx < allIds.length; idx += 400) {
+      idChunks.push(allIds.slice(idx, idx + 400));
+    }
+    let accessRecs = [];
+    for (const chunk of idChunks) {
+      const inList = chunk.map((id) => `'${id}'`).join(", ");
+      const { records: recs, error: err } = await t.runQuery(
+        `SELECT ParentId, SetupEntityId FROM SetupEntityAccess WHERE ParentId IN (${inList}) AND SetupEntityType = '${type}' LIMIT 5000`,
+      );
+      if (err) {
+        ge(`Could not load ${labelSingular} access: ` + err);
+        return;
+      }
+      accessRecs.push(...(recs || []));
+    }
 
+    const setIdsA = new Set(idsA);
+    const setIdsB = new Set(idsB);
     const setA = new Set();
     const setB = new Set();
-    accessRecs.forEach(r => {
-      if (r.ParentId === P) setA.add(r.SetupEntityId);
-      if (r.ParentId === ee) setB.add(r.SetupEntityId);
+    const srcA = new Map(), srcB = new Map();
+    accessRecs.forEach((r) => {
+      if (setIdsA.has(r.ParentId)) {
+        setA.add(r.SetupEntityId);
+        if (!srcA.has(r.SetupEntityId)) srcA.set(r.SetupEntityId, new Set());
+        srcA.get(r.SetupEntityId).add(r.ParentId);
+      }
+      if (setIdsB.has(r.ParentId)) {
+        setB.add(r.SetupEntityId);
+        if (!srcB.has(r.SetupEntityId)) srcB.set(r.SetupEntityId, new Set());
+        srcB.get(r.SetupEntityId).add(r.ParentId);
+      }
     });
 
-    const allIds = Array.from(new Set([...setA, ...setB]));
+    const allEntityIds = Array.from(new Set([...setA, ...setB]));
     let itemsMap = new Map();
 
-    if (allIds.length > 0) {
-      const idChunks = [];
-      for (let idx = 0; idx < allIds.length; idx += 500) {
-        idChunks.push(allIds.slice(idx, idx + 500));
+    if (allEntityIds.length > 0) {
+      const entityIdChunks = [];
+      for (let idx = 0; idx < allEntityIds.length; idx += 500) {
+        entityIdChunks.push(allEntityIds.slice(idx, idx + 500));
       }
 
-      for (const chunk of idChunks) {
-        const idList = chunk.map(id => `'${id}'`).join(", ");
+      for (const chunk of entityIdChunks) {
+        const idList = chunk.map((id) => `'${id}'`).join(", ");
         const fields = sobjectName === "CustomPermission" ? "Id, DeveloperName, NamespacePrefix" : "Id, Name";
         const { records: items, error: itemErr } = await t.runQuery(
-          `SELECT ${fields} FROM ${sobjectName} WHERE Id IN (${idList})`
+          `SELECT ${fields} FROM ${sobjectName} WHERE Id IN (${idList})`,
         );
         if (itemErr) {
           ge(`Could not load ${labelSingular} names: ` + itemErr);
           return;
         }
-        items.forEach(item => {
+        items.forEach((item) => {
           let name = item.Name;
           if (sobjectName === "CustomPermission") {
             name = item.NamespacePrefix ? `${item.NamespacePrefix}.${item.DeveloperName}` : item.DeveloperName;
@@ -12455,16 +13172,16 @@ function hp(o, t) {
     }
 
     let sortedIds = Array.from(itemsMap.keys()).sort((id1, id2) =>
-      (itemsMap.get(id1) || "").localeCompare(itemsMap.get(id2) || "")
+      (itemsMap.get(id1) || "").localeCompare(itemsMap.get(id2) || ""),
     );
 
-    let filteredIds = sortedIds.filter(id => {
+    let filteredIds = sortedIds.filter((id) => {
       const name = itemsMap.get(id) || "";
       return !x || name.toLowerCase().includes(x);
     });
 
     if (U) {
-      filteredIds = filteredIds.filter(id => setA.has(id) !== setB.has(id));
+      filteredIds = filteredIds.filter((id) => setA.has(id) !== setB.has(id));
     }
 
     $.textContent = `${filteredIds.length} ${labelSingular}${filteredIds.length === 1 ? "" : "s"}`;
@@ -12491,6 +13208,33 @@ function hp(o, t) {
       tbody.appendChild(tr);
     });
 
+    const exportHeaders = [
+      sobjectName === "CustomPermission" ? "Custom Permission" : sobjectName === "ApexClass" ? "Apex Class" : "Visualforce Page",
+      `Access in ${be(P)}`,
+      `Access in ${be(ee)}`,
+      "Differs?",
+      `Where Granted in ${be(P)}`,
+      `Where Granted in ${be(ee)}`,
+    ];
+    const exportRows = filteredIds.map((id) => {
+      const valA = setA.has(id);
+      const valB = setB.has(id);
+      const differs = valA !== valB;
+      return [
+        itemsMap.get(id) || id,
+        valA ? "TRUE" : "FALSE",
+        valB ? "TRUE" : "FALSE",
+        differs ? "YES" : "NO",
+        getGrantSources(srcA.get(id)),
+        getGrantSources(srcB.get(id)),
+      ];
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_${labelSingular}.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+
     q(table, filteredIds.length, `No ${labelSingular}s match.`);
   }
 
@@ -12499,7 +13243,7 @@ function hp(o, t) {
 
     const [{ records: psgs, error: psgErr }, { records: assignments, error: assignErr }] = await Promise.all([
       t.runQuery(`SELECT PermissionSetGroupId, PermissionSetGroup.DeveloperName, PermissionSetGroup.MasterLabel, PermissionSetId FROM PermissionSetGroupComponent WHERE PermissionSetId IN ('${P}', '${ee}') LIMIT 5000`),
-      t.runQuery(`SELECT AssigneeId, Assignee.Name, Assignee.Username, PermissionSetId FROM PermissionSetAssignment WHERE PermissionSetId IN ('${P}', '${ee}') AND Assignee.IsActive = true LIMIT 1000`)
+      t.runQuery(`SELECT AssigneeId, Assignee.Name, Assignee.Username, PermissionSetId FROM PermissionSetAssignment WHERE PermissionSetId IN ('${P}', '${ee}') AND Assignee.IsActive = true LIMIT 1000`),
     ]);
 
     if (psgErr || assignErr) {
@@ -12510,11 +13254,11 @@ function hp(o, t) {
     const psgMap = new Map();
     const psgSetA = new Set();
     const psgSetB = new Set();
-    psgs.forEach(r => {
+    psgs.forEach((r) => {
       if (r.PermissionSetGroup) {
         psgMap.set(r.PermissionSetGroupId, {
           name: r.PermissionSetGroup.DeveloperName,
-          label: r.PermissionSetGroup.MasterLabel
+          label: r.PermissionSetGroup.MasterLabel,
         });
         if (r.PermissionSetId === P) psgSetA.add(r.PermissionSetGroupId);
         if (r.PermissionSetId === ee) psgSetB.add(r.PermissionSetGroupId);
@@ -12524,11 +13268,11 @@ function hp(o, t) {
     const userMap = new Map();
     const userSetA = new Set();
     const userSetB = new Set();
-    assignments.forEach(r => {
+    assignments.forEach((r) => {
       if (r.Assignee) {
         userMap.set(r.AssigneeId, {
           name: r.Assignee.Name,
-          username: r.Assignee.Username
+          username: r.Assignee.Username,
         });
         if (r.PermissionSetId === P) userSetA.add(r.AssigneeId);
         if (r.PermissionSetId === ee) userSetB.add(r.AssigneeId);
@@ -12541,17 +13285,17 @@ function hp(o, t) {
     container.appendChild(psgTitle);
 
     let sortedPsgIds = Array.from(psgMap.keys()).sort((id1, id2) =>
-      (psgMap.get(id1).label || "").localeCompare(psgMap.get(id2).label || "")
+      (psgMap.get(id1).label || "").localeCompare(psgMap.get(id2).label || ""),
     );
 
-    let filteredPsgIds = sortedPsgIds.filter(id => {
+    let filteredPsgIds = sortedPsgIds.filter((id) => {
       const g = psgMap.get(id);
       const searchStr = `${g.label} ${g.name}`.toLowerCase();
       return !x || searchStr.includes(x);
     });
 
     if (U) {
-      filteredPsgIds = filteredPsgIds.filter(id => psgSetA.has(id) !== psgSetB.has(id));
+      filteredPsgIds = filteredPsgIds.filter((id) => psgSetA.has(id) !== setPsgB.has(id));
     }
 
     const psgTable = M(["Group Name (API Name)", be(P), be(ee)]);
@@ -12586,17 +13330,17 @@ function hp(o, t) {
     container.appendChild(userTitle);
 
     let sortedUserIds = Array.from(userMap.keys()).sort((id1, id2) =>
-      (userMap.get(id1).name || "").localeCompare(userMap.get(id2).name || "")
+      (userMap.get(id1).name || "").localeCompare(userMap.get(id2).name || ""),
     );
 
-    let filteredUserIds = sortedUserIds.filter(id => {
+    let filteredUserIds = sortedUserIds.filter((id) => {
       const uInfo = userMap.get(id);
       const searchStr = `${uInfo.name} ${uInfo.username}`.toLowerCase();
       return !x || searchStr.includes(x);
     });
 
     if (U) {
-      filteredUserIds = filteredUserIds.filter(id => userSetA.has(id) !== userSetB.has(id));
+      filteredUserIds = filteredUserIds.filter((id) => userSetA.has(id) !== userSetB.has(id));
     }
 
     const userTable = M(["User Name (Username)", be(P), be(ee)]);
@@ -12627,6 +13371,32 @@ function hp(o, t) {
       container.appendChild(userTable);
     }
 
+    const exportHeaders = [
+      "Category",
+      "Name",
+      `Assigned to ${be(P)}`,
+      `Assigned to ${be(ee)}`,
+      "Differs?",
+    ];
+    const exportRows = [];
+    filteredPsgIds.forEach((id) => {
+      const g = psgMap.get(id);
+      const valA = psgSetA.has(id);
+      const valB = psgSetB.has(id);
+      exportRows.push(["Permission Set Group", `${g.label} (${g.name})`, valA ? "Assigned" : "Not Assigned", valB ? "Assigned" : "Not Assigned", valA !== valB ? "YES" : "NO"]);
+    });
+    filteredUserIds.forEach((id) => {
+      const uInfo = userMap.get(id);
+      const valA = userSetA.has(id);
+      const valB = userSetB.has(id);
+      exportRows.push(["User Assignment", `${uInfo.name} (${uInfo.username})`, valA ? "Assigned" : "Not Assigned", valB ? "Assigned" : "Not Assigned", valA !== valB ? "YES" : "NO"]);
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_dependencies.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+
     $.textContent = `${filteredPsgIds.length} group${filteredPsgIds.length === 1 ? "" : "s"}, ${filteredUserIds.length} user${filteredUserIds.length === 1 ? "" : "s"}`;
 
     se.innerHTML = "";
@@ -12640,14 +13410,17 @@ function hp(o, t) {
     if (
       ((k.style.display = u === "fields" ? "inline-flex" : "none"), !P || !ee)
     ) {
-      (ge("Select a permission set or profile for both A and B to compare."),
+      (ge(compareMode === "user" ? "Select a user for both A and B to compare." : "Select a permission set or profile for both A and B to compare."),
         ($.textContent = ""));
+      currentExportData = null;
       return;
     }
     if (P === ee) {
       (ge("Pick two different entries to compare."), ($.textContent = ""));
+      currentExportData = null;
       return;
     }
+    if (u === "assigned") return compareAssignedSets(P, ee);
     if (u === "objects") return Le(P, ee);
     if (u === "fields") return z(P, ee);
     if (u === "system") return compareSystemPerms(P, ee);
@@ -12656,23 +13429,81 @@ function hp(o, t) {
     if (u === "custom") return compareSetupEntity(P, ee, "CustomPermission", "CustomPermission", "permission");
     if (u === "dependency") return compareDependencies(P, ee);
   }
+
   async function Le(P, ee) {
-    const G = `${P}|${ee}`;
+    const G = `${compareMode}|${P}|${ee}`;
     if (!Be || Be.key !== G) {
-      ge("Loading object permissions…");
-      const S = go.map(([, fe]) => fe).join(", "),
-        { records: Y, error: Se } = await t.runQuery(
-          `SELECT ParentId, SobjectType, ${S} FROM ObjectPermissions WHERE ParentId IN ('${P}','${ee}') LIMIT 5000`,
-        );
-      if (Se) {
-        ge("Could not load object permissions: " + Se);
+      ge(compareMode === "user" ? "Loading effective object permissions for users…" : "Loading object permissions…");
+      let idsA = [P];
+      let idsB = [ee];
+      if (compareMode === "user") {
+        if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+          const loaded = await loadUserAssignments(P, ee);
+          if (!loaded) return;
+        }
+        idsA = userPermsCache.a.allPermSetIds;
+        idsB = userPermsCache.b.allPermSetIds;
+      }
+      const allIds = Array.from(new Set([...idsA, ...idsB]));
+      if (allIds.length === 0) {
+        ge("No permission sets found to compare.");
         return;
       }
+      const idChunks = [];
+      for (let idx = 0; idx < allIds.length; idx += 400) {
+        idChunks.push(allIds.slice(idx, idx + 400));
+      }
+      const S = go.map(([, fe]) => fe).join(", ");
+      let Y = [];
+      for (const chunk of idChunks) {
+        const inList = chunk.map((id) => `'${id}'`).join(", ");
+        const { records: recs, error: Se } = await t.runQuery(
+          `SELECT ParentId, SobjectType, ${S} FROM ObjectPermissions WHERE ParentId IN (${inList}) LIMIT 5000`,
+        );
+        if (Se) {
+          ge("Could not load object permissions: " + Se);
+          return;
+        }
+        Y.push(...(recs || []));
+      }
+
       const oe = new Map(),
-        we = new Map();
-      Y.forEach((fe) => (fe.ParentId === P ? oe : we).set(fe.SobjectType, fe));
+        we = new Map(),
+        srcA = new Map(),
+        srcB = new Map();
+      const setIdsA = new Set(idsA);
+      const setIdsB = new Set(idsB);
+
+      Y.forEach((fe) => {
+        const obj = fe.SobjectType;
+        const hasAnyPerm = go.some(([, col]) => !!fe[col]);
+        if (setIdsA.has(fe.ParentId)) {
+          const prev = oe.get(obj) || {};
+          const merged = { SobjectType: obj };
+          go.forEach(([, permCol]) => {
+            merged[permCol] = prev[permCol] || !!fe[permCol];
+          });
+          oe.set(obj, merged);
+          if (hasAnyPerm) {
+            if (!srcA.has(obj)) srcA.set(obj, new Set());
+            srcA.get(obj).add(fe.ParentId);
+          }
+        }
+        if (setIdsB.has(fe.ParentId)) {
+          const prev = we.get(obj) || {};
+          const merged = { SobjectType: obj };
+          go.forEach(([, permCol]) => {
+            merged[permCol] = prev[permCol] || !!fe[permCol];
+          });
+          we.set(obj, merged);
+          if (hasAnyPerm) {
+            if (!srcB.has(obj)) srcB.set(obj, new Set());
+            srcB.get(obj).add(fe.ParentId);
+          }
+        }
+      });
       const Te = Array.from(new Set([...oe.keys(), ...we.keys()])).sort();
-      Be = { key: G, a: oe, b: we, objects: Te };
+      Be = { key: G, a: oe, b: we, objects: Te, srcA, srcB };
       const Ve = c.value;
       ((c.innerHTML = ""),
         Te.forEach((fe) => {
@@ -12681,7 +13512,7 @@ function hp(o, t) {
         }),
         Ve && Te.includes(Ve) && (c.value = Ve));
     }
-    const { a: T, b: w, objects: H } = Be;
+    const { a: T, b: w, objects: H, srcA, srcB } = Be;
     let p = H.filter((S) => !x || S.toLowerCase().includes(x));
     (U && (p = p.filter((S) => !Me(T.get(S), w.get(S)))),
       ($.textContent = `${p.length} object${p.length === 1 ? "" : "s"}`));
@@ -12699,7 +13530,54 @@ function hp(o, t) {
       (fe.appendChild(ye(oe, go)), Te.appendChild(fe), Q.appendChild(Te));
     }),
       q(A, p.length, "No objects match."));
+
+    const exportHeaders = [
+      "Object",
+      `Create (${be(P)})`,
+      `Create (${be(ee)})`,
+      `Read (${be(P)})`,
+      `Read (${be(ee)})`,
+      `Edit (${be(P)})`,
+      `Edit (${be(ee)})`,
+      `Delete (${be(P)})`,
+      `Delete (${be(ee)})`,
+      `View All (${be(P)})`,
+      `View All (${be(ee)})`,
+      `Modify All (${be(P)})`,
+      `Modify All (${be(ee)})`,
+      "Differs?",
+      `Where Granted in ${be(P)}`,
+      `Where Granted in ${be(ee)}`,
+    ];
+    const exportRows = p.map((S) => {
+      const Se = T.get(S), oe = w.get(S);
+      const differs = !Me(Se, oe);
+      return [
+        S,
+        Se?.PermissionsCreate ? "TRUE" : "FALSE",
+        oe?.PermissionsCreate ? "TRUE" : "FALSE",
+        Se?.PermissionsRead ? "TRUE" : "FALSE",
+        oe?.PermissionsRead ? "TRUE" : "FALSE",
+        Se?.PermissionsEdit ? "TRUE" : "FALSE",
+        oe?.PermissionsEdit ? "TRUE" : "FALSE",
+        Se?.PermissionsDelete ? "TRUE" : "FALSE",
+        oe?.PermissionsDelete ? "TRUE" : "FALSE",
+        Se?.PermissionsViewAllRecords ? "TRUE" : "FALSE",
+        oe?.PermissionsViewAllRecords ? "TRUE" : "FALSE",
+        Se?.PermissionsModifyAllRecords ? "TRUE" : "FALSE",
+        oe?.PermissionsModifyAllRecords ? "TRUE" : "FALSE",
+        differs ? "YES" : "NO",
+        getGrantSources(srcA?.get(S)),
+        getGrantSources(srcB?.get(S)),
+      ];
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_objects.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
   }
+
   async function z(P, ee) {
     const G = c.value || Be?.objects[0];
     if (!G) {
@@ -12709,17 +13587,74 @@ function hp(o, t) {
         ($.textContent = ""));
       return;
     }
-    ge(`Loading field permissions for ${G}…`);
-    const { records: T, error: w } = await t.runQuery(
-      `SELECT ParentId, Field, PermissionsRead, PermissionsEdit FROM FieldPermissions WHERE SobjectType = '${G}' AND ParentId IN ('${P}','${ee}') LIMIT 5000`,
-    );
-    if (w) {
-      ge("Could not load field permissions: " + w);
+    ge(compareMode === "user" ? `Loading effective field permissions for ${G}…` : `Loading field permissions for ${G}…`);
+    let idsA = [P];
+    let idsB = [ee];
+    if (compareMode === "user") {
+      if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+        const loaded = await loadUserAssignments(P, ee);
+        if (!loaded) return;
+      }
+      idsA = userPermsCache.a.allPermSetIds;
+      idsB = userPermsCache.b.allPermSetIds;
+    }
+    const allIds = Array.from(new Set([...idsA, ...idsB]));
+    if (allIds.length === 0) {
+      ge("No permission sets found to compare.");
       return;
     }
+    const idChunks = [];
+    for (let idx = 0; idx < allIds.length; idx += 400) {
+      idChunks.push(allIds.slice(idx, idx + 400));
+    }
+    let T = [];
+    for (const chunk of idChunks) {
+      const inList = chunk.map((id) => `'${id}'`).join(", ");
+      const { records: recs, error: w } = await t.runQuery(
+        `SELECT ParentId, Field, PermissionsRead, PermissionsEdit FROM FieldPermissions WHERE SobjectType = '${G}' AND ParentId IN (${inList}) LIMIT 5000`,
+      );
+      if (w) {
+        ge("Could not load field permissions: " + w);
+        return;
+      }
+      T.push(...(recs || []));
+    }
+
     const H = new Map(),
-      p = new Map();
-    T.forEach((we) => (we.ParentId === P ? H : p).set(we.Field, we));
+      p = new Map(),
+      srcA = new Map(),
+      srcB = new Map();
+    const setIdsA = new Set(idsA);
+    const setIdsB = new Set(idsB);
+
+    T.forEach((we) => {
+      const fld = we.Field;
+      if (setIdsA.has(we.ParentId)) {
+        const prev = H.get(fld) || {};
+        H.set(fld, {
+          Field: fld,
+          PermissionsRead: prev.PermissionsRead || !!we.PermissionsRead,
+          PermissionsEdit: prev.PermissionsEdit || !!we.PermissionsEdit,
+        });
+        if (we.PermissionsRead || we.PermissionsEdit) {
+          if (!srcA.has(fld)) srcA.set(fld, new Set());
+          srcA.get(fld).add(we.ParentId);
+        }
+      }
+      if (setIdsB.has(we.ParentId)) {
+        const prev = p.get(fld) || {};
+        p.set(fld, {
+          Field: fld,
+          PermissionsRead: prev.PermissionsRead || !!we.PermissionsRead,
+          PermissionsEdit: prev.PermissionsEdit || !!we.PermissionsEdit,
+        });
+        if (we.PermissionsRead || we.PermissionsEdit) {
+          if (!srcB.has(fld)) srcB.set(fld, new Set());
+          srcB.get(fld).add(we.ParentId);
+        }
+      }
+    });
+
     const A = [
         ["R", "PermissionsRead"],
         ["E", "PermissionsEdit"],
@@ -12745,6 +13680,305 @@ function hp(o, t) {
       (de.appendChild(ye(fe, A)), Re.appendChild(de), oe.appendChild(Re));
     }),
       q(Se, S.length, "No fields match."));
+
+    const exportHeaders = [
+      "Object",
+      "Field",
+      `Read (${be(P)})`,
+      `Read (${be(ee)})`,
+      `Edit (${be(P)})`,
+      `Edit (${be(ee)})`,
+      "Differs?",
+      `Where Granted in ${be(P)}`,
+      `Where Granted in ${be(ee)}`,
+    ];
+    const exportRows = S.map((we) => {
+      const Ve = H.get(we), fe = p.get(we);
+      const differs = !Q(Ve, fe);
+      return [
+        G,
+        Y(we),
+        Ve?.PermissionsRead ? "TRUE" : "FALSE",
+        fe?.PermissionsRead ? "TRUE" : "FALSE",
+        Ve?.PermissionsEdit ? "TRUE" : "FALSE",
+        fe?.PermissionsEdit ? "TRUE" : "FALSE",
+        differs ? "YES" : "NO",
+        getGrantSources(srcA.get(we)),
+        getGrantSources(srcB.get(we)),
+      ];
+    });
+    currentExportData = {
+      filename: `${sanitizeFilename(be(P))}_vs_${sanitizeFilename(be(ee))}_${G}_fls.csv`,
+      headers: exportHeaders,
+      rows: exportRows,
+    };
+  }
+
+  async function exportFullDiffReport() {
+    const P = y.value, ee = g.value;
+    if (!P || !ee || P === ee) {
+      if (t.flashToast) t.flashToast("Please select two different entries first.");
+      else alert("Please select two different entries first.");
+      return;
+    }
+    const nameA = be(P);
+    const nameB = be(ee);
+    const oldBtnText = exportFullBtn.textContent;
+    exportFullBtn.textContent = "⏳ Generating…";
+    exportFullBtn.disabled = true;
+
+    try {
+      let idsA = [P];
+      let idsB = [ee];
+      if (compareMode === "user") {
+        if (!userPermsCache || userPermsCache.key !== `${P}|${ee}`) {
+          const loaded = await loadUserAssignments(P, ee);
+          if (!loaded) return;
+        }
+        idsA = userPermsCache.a.allPermSetIds;
+        idsB = userPermsCache.b.allPermSetIds;
+      }
+
+      const allIds = Array.from(new Set([...idsA, ...idsB]));
+      if (allIds.length === 0) {
+        if (t.flashToast) t.flashToast("No permission sets found to compare.");
+        return;
+      }
+      const setIdsA = new Set(idsA);
+      const setIdsB = new Set(idsB);
+
+      const diffRows = [];
+
+      // 1. Assigned Sets / Profile (if user mode)
+      if (compareMode === "user" && userPermsCache) {
+        const { a: uA, b: uB } = userPermsCache;
+        if (uA.profileName !== uB.profileName) {
+          diffRows.push(["Profile", "Assigned Profile", uA.profileName, uB.profileName, uA.profileName, uB.profileName]);
+        }
+        const allPsgs = new Map();
+        uA.psgs.forEach((g) => allPsgs.set(g.id, g));
+        uB.psgs.forEach((g) => allPsgs.set(g.id, g));
+        const setPsgA = new Set(uA.psgs.map((g) => g.id));
+        const setPsgB = new Set(uB.psgs.map((g) => g.id));
+        allPsgs.forEach((g, id) => {
+          if (setPsgA.has(id) !== setPsgB.has(id)) {
+            diffRows.push([
+              "Permission Set Group",
+              `${g.label} (${g.name})`,
+              setPsgA.has(id) ? "Assigned" : "Not Assigned",
+              setPsgB.has(id) ? "Assigned" : "Not Assigned",
+              setPsgA.has(id) ? g.label : "None",
+              setPsgB.has(id) ? g.label : "None",
+            ]);
+          }
+        });
+
+        const allPerms = new Map();
+        uA.directPermSets.forEach((ps) => allPerms.set(ps.id, ps));
+        uB.directPermSets.forEach((ps) => allPerms.set(ps.id, ps));
+        const setPermA = new Set(uA.directPermSets.map((ps) => ps.id));
+        const setPermB = new Set(uB.directPermSets.map((ps) => ps.id));
+        allPerms.forEach((ps, id) => {
+          if (setPermA.has(id) !== setPermB.has(id)) {
+            diffRows.push([
+              "Direct Permission Set",
+              `${ps.label} (${ps.name})`,
+              setPermA.has(id) ? "Assigned" : "Not Assigned",
+              setPermB.has(id) ? "Assigned" : "Not Assigned",
+              setPermA.has(id) ? ps.label : "None",
+              setPermB.has(id) ? ps.label : "None",
+            ]);
+          }
+        });
+      }
+
+      // 2. Object Permissions
+      const idChunks = [];
+      for (let idx = 0; idx < allIds.length; idx += 400) {
+        idChunks.push(allIds.slice(idx, idx + 400));
+      }
+      const S = go.map(([, fe]) => fe).join(", ");
+      let objRecs = [];
+      for (const chunk of idChunks) {
+        const inList = chunk.map((id) => `'${id}'`).join(", ");
+        const { records: recs } = await t.runQuery(
+          `SELECT ParentId, SobjectType, ${S} FROM ObjectPermissions WHERE ParentId IN (${inList}) LIMIT 5000`,
+        );
+        objRecs.push(...(recs || []));
+      }
+      const oe = new Map(), we = new Map(), srcObjA = new Map(), srcObjB = new Map();
+      objRecs.forEach((fe) => {
+        const obj = fe.SobjectType;
+        const hasAnyPerm = go.some(([, col]) => !!fe[col]);
+        if (setIdsA.has(fe.ParentId)) {
+          const prev = oe.get(obj) || {};
+          const merged = { SobjectType: obj };
+          go.forEach(([, col]) => { merged[col] = prev[col] || !!fe[col]; });
+          oe.set(obj, merged);
+          if (hasAnyPerm) {
+            if (!srcObjA.has(obj)) srcObjA.set(obj, new Set());
+            srcObjA.get(obj).add(fe.ParentId);
+          }
+        }
+        if (setIdsB.has(fe.ParentId)) {
+          const prev = we.get(obj) || {};
+          const merged = { SobjectType: obj };
+          go.forEach(([, col]) => { merged[col] = prev[col] || !!fe[col]; });
+          we.set(obj, merged);
+          if (hasAnyPerm) {
+            if (!srcObjB.has(obj)) srcObjB.set(obj, new Set());
+            srcObjB.get(obj).add(fe.ParentId);
+          }
+        }
+      });
+      const allObjects = Array.from(new Set([...oe.keys(), ...we.keys()])).sort();
+      allObjects.forEach((obj) => {
+        const recA = oe.get(obj) || {};
+        const recB = we.get(obj) || {};
+        if (!Me(recA, recB)) {
+          const permsStr = (rec) => go.filter(([, col]) => !!rec[col]).map(([c]) => c).join("") || "None";
+          diffRows.push([
+            "Object Permission",
+            obj,
+            permsStr(recA),
+            permsStr(recB),
+            getGrantSources(srcObjA.get(obj)),
+            getGrantSources(srcObjB.get(obj)),
+          ]);
+        }
+      });
+
+      // 3. System Permissions
+      if (!cachedSystemFields) {
+        const creds = await it();
+        if (creds?.instanceUrl && creds?.sessionId) {
+          const fieldsRes = await new Promise((resolve) => {
+            globalThis.chrome.runtime.sendMessage(
+              { type: "GET_OBJECT_FIELDS", objectApiName: "PermissionSet", instanceUrl: creds.instanceUrl, sessionId: creds.sessionId },
+              (res) => resolve(res),
+            );
+          });
+          if (fieldsRes?.success && fieldsRes?.data) {
+            cachedSystemFields = fieldsRes.data.map((f) => f.name).filter((name) => name.startsWith("Permissions")).sort();
+          }
+        }
+      }
+      if (cachedSystemFields && cachedSystemFields.length > 0) {
+        const fieldsToQuery = cachedSystemFields.join(", ");
+        const sysChunks = [];
+        for (let idx = 0; idx < allIds.length; idx += 200) {
+          sysChunks.push(allIds.slice(idx, idx + 200));
+        }
+        let permSets = [];
+        for (const chunk of sysChunks) {
+          const inList = chunk.map((id) => `'${id}'`).join(", ");
+          const { records: recs } = await t.runQuery(
+            `SELECT Id, ${fieldsToQuery} FROM PermissionSet WHERE Id IN (${inList})`,
+          );
+          permSets.push(...(recs || []));
+        }
+        cachedSystemFields.forEach((f) => {
+          const srcSysA = new Set(), srcSysB = new Set();
+          permSets.forEach((r) => {
+            if (!!r[f]) {
+              if (setIdsA.has(r.Id)) srcSysA.add(r.Id);
+              if (setIdsB.has(r.Id)) srcSysB.add(r.Id);
+            }
+          });
+          const valA = srcSysA.size > 0;
+          const valB = srcSysB.size > 0;
+          if (valA !== valB) {
+            diffRows.push([
+              "System Permission",
+              f.replace(/^Permissions/, ""),
+              valA ? "Enabled" : "Disabled",
+              valB ? "Enabled" : "Disabled",
+              getGrantSources(srcSysA),
+              getGrantSources(srcSysB),
+            ]);
+          }
+        });
+      }
+
+      // 4. SetupEntityAccess (ApexClass, ApexPage, CustomPermission)
+      const entityTypes = [
+        { type: "ApexClass", sobj: "ApexClass", category: "Apex Class", fields: "Id, Name" },
+        { type: "ApexPage", sobj: "ApexPage", category: "Visualforce Page", fields: "Id, Name" },
+        { type: "CustomPermission", sobj: "CustomPermission", category: "Custom Permission", fields: "Id, DeveloperName, NamespacePrefix" },
+      ];
+
+      for (const ent of entityTypes) {
+        let accessRecs = [];
+        for (const chunk of idChunks) {
+          const inList = chunk.map((id) => `'${id}'`).join(", ");
+          const { records: recs } = await t.runQuery(
+            `SELECT ParentId, SetupEntityId FROM SetupEntityAccess WHERE ParentId IN (${inList}) AND SetupEntityType = '${ent.type}' LIMIT 5000`,
+          );
+          accessRecs.push(...(recs || []));
+        }
+        const setA = new Set(), setB = new Set(), srcEntA = new Map(), srcEntB = new Map();
+        accessRecs.forEach((r) => {
+          if (setIdsA.has(r.ParentId)) {
+            setA.add(r.SetupEntityId);
+            if (!srcEntA.has(r.SetupEntityId)) srcEntA.set(r.SetupEntityId, new Set());
+            srcEntA.get(r.SetupEntityId).add(r.ParentId);
+          }
+          if (setIdsB.has(r.ParentId)) {
+            setB.add(r.SetupEntityId);
+            if (!srcEntB.has(r.SetupEntityId)) srcEntB.set(r.SetupEntityId, new Set());
+            srcEntB.get(r.SetupEntityId).add(r.ParentId);
+          }
+        });
+        const diffEntityIds = Array.from(new Set([...setA, ...setB])).filter((id) => setA.has(id) !== setB.has(id));
+        if (diffEntityIds.length > 0) {
+          const entNameMap = new Map();
+          for (let idx = 0; idx < diffEntityIds.length; idx += 500) {
+            const chunk = diffEntityIds.slice(idx, idx + 500);
+            const inList = chunk.map((id) => `'${id}'`).join(", ");
+            const { records: items } = await t.runQuery(
+              `SELECT ${ent.fields} FROM ${ent.sobj} WHERE Id IN (${inList})`,
+            );
+            (items || []).forEach((item) => {
+              let name = item.Name;
+              if (ent.sobj === "CustomPermission") {
+                name = item.NamespacePrefix ? `${item.NamespacePrefix}.${item.DeveloperName}` : item.DeveloperName;
+              }
+              entNameMap.set(item.Id, name);
+            });
+          }
+          diffEntityIds.forEach((id) => {
+            const valA = setA.has(id);
+            const valB = setB.has(id);
+            diffRows.push([
+              ent.category,
+              entNameMap.get(id) || id,
+              valA ? "Granted" : "Not Granted",
+              valB ? "Granted" : "Not Granted",
+              getGrantSources(srcEntA.get(id)),
+              getGrantSources(srcEntB.get(id)),
+            ]);
+          });
+        }
+      }
+
+      const diffHeaders = [
+        "Category",
+        "Item / Permission Name",
+        `Access in ${nameA}`,
+        `Access in ${nameB}`,
+        `Where Granted in ${nameA}`,
+        `Where Granted in ${nameB}`,
+      ];
+
+      downloadCSV(`${sanitizeFilename(nameA)}_vs_${sanitizeFilename(nameB)}_full_diff_audit.csv`, diffHeaders, diffRows);
+      if (t.flashToast) t.flashToast(`Full Diff CSV Exported! (${diffRows.length} differences found)`);
+    } catch (err) {
+      console.error("CSV export error", err);
+      if (t.flashToast) t.flashToast("Export failed: " + err.message);
+    } finally {
+      exportFullBtn.textContent = oldBtnText;
+      exportFullBtn.disabled = false;
+    }
   }
   function M(P) {
     const ee = rt("table", {
@@ -12835,19 +14069,19 @@ const Mt = {
     deleteCheckboxes: !0,
   },
   Ui = [
-    { id: "home", label: "Home", icon: "🏠" },
-    { id: "tools", label: "Tools", icon: "🛠️" },
-    { id: "setup", label: "Setup", icon: "🏠" },
-    { id: "users", label: "Users", icon: "👤" },
-    { id: "flows", label: "Flows", icon: "⚡" },
-    { id: "metadata", label: "Metadata Explorer", icon: "🧩" },
-    { id: "security", label: "Security", icon: "🔑" },
-    { id: "debug", label: "Log Explorer", icon: "🐞" },
-    { id: "objects", label: "Objects", icon: "📦" },
-    { id: "apextests", label: "Apex Tests", icon: "🧪" },
-    { id: "access", label: "Access Explorer", icon: "🗺️" },
-    { id: "recent", label: "Recent", icon: "🕘" },
-    { id: "apps", label: "Apps & Tabs", icon: "🚀" },
+    { id: "home", label: "Home", icon: "" },
+    { id: "tools", label: "Tools", icon: "" },
+    { id: "setup", label: "Setup", icon: "" },
+    { id: "users", label: "Users", icon: "" },
+    { id: "flows", label: "Flows", icon: "" },
+    { id: "metadata", label: "Metadata Explorer", icon: "" },
+    { id: "security", label: "Security", icon: "" },
+    { id: "debug", label: "Log Explorer", icon: "" },
+    { id: "objects", label: "Objects", icon: "" },
+    { id: "apextests", label: "Apex Tests", icon: "" },
+    { id: "access", label: "Access Explorer", icon: "" },
+    { id: "recent", label: "Recent", icon: "" },
+    { id: "apps", label: "Apps & Tabs", icon: "" },
   ],
   mp = ["apps"];
 function mi() {
@@ -12880,6 +14114,8 @@ const vs = {
     showObjectExplorer: !0,
     uiSkin: "default",
     minimalView: !1,
+    spotlightWidth: 1280,
+    spotlightHeight: 1200,
   },
   Ss = {
     showFieldApi: !1,
@@ -12904,6 +14140,15 @@ const vs = {
     defaultHost: "",
     nicknames: {},
     pinnedTools: ["sfhome", "export", "sampledata", "whereused"],
+    ctrlShiftRReload: !0,
+    geminiApiKey: "",
+    anthropicApiKey: "",
+    openaiApiKey: "",
+    qwenApiKey: "",
+    openrouterApiKey: "",
+    aiProvider: "gemini",
+    aiModel: "",
+    aiCustomModel: "",
   },
   xi = { soql: 0, debugLogs: 0, rulesUpdated: 0, apexTests: 0 };
 let Es = Promise.resolve();
@@ -12967,6 +14212,1507 @@ function ks(o) {
     } catch {}
   window.open(o, "_blank");
 }
+// renderUserClone implementation for SFPilot
+function renderUserClone(o, t) {
+  const isDark = t.isDark,
+    n = kt(isDark);
+  o.innerHTML = "";
+
+  const container = rt("div", {
+    height: "100%",
+    minHeight: "0",
+    display: "flex",
+    flexDirection: "column",
+    background: n.bg,
+    color: n.text,
+    fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    position: "relative",
+  });
+  o.appendChild(container);
+
+  // Top header bar
+  const header = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 24px",
+    flexShrink: "0",
+    borderBottom: `1px solid ${n.divider}`,
+    background: n.headerBg || n.panel,
+  });
+
+  const headerLeft = rt("div", { display: "flex", alignItems: "center", gap: "10px" });
+  const backBtn = rt("button", {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    color: n.muted,
+    fontFamily: "inherit",
+    fontSize: "13px",
+    fontWeight: "700",
+  });
+  backBtn.innerHTML = '<span style="font-size:15px">←</span> Tools';
+  backBtn.addEventListener("click", t.onBack);
+  headerLeft.appendChild(backBtn);
+  headerLeft.appendChild(rt("span", { color: n.faint }, "/"));
+  headerLeft.appendChild(
+    rt("div", { fontSize: "15px", fontWeight: "800", color: n.text, display: "flex", alignItems: "center", gap: "8px" }, "User Clone & Onboarding")
+  );
+
+  // Mode badge switcher button (switch over to Profile & Permission Master Clone)
+  const switchPermBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "3px 9px",
+    fontSize: "11px",
+    fontWeight: "700",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    marginLeft: "8px",
+  }, "🧬 Switch to Profile/Perm Clone");
+  switchPermBtn.addEventListener("click", () => renderPermClone(o, t));
+  headerLeft.appendChild(switchPermBtn);
+
+  header.appendChild(headerLeft);
+
+  const headerRight = rt("div", { display: "flex", alignItems: "center", gap: "10px" });
+  const statusBadge = rt("span", {
+    fontSize: "11px",
+    fontWeight: "700",
+    padding: "3px 9px",
+    borderRadius: "12px",
+    background: "rgba(59,130,246,0.15)",
+    color: "#3b82f6",
+  }, "Ready");
+  headerRight.appendChild(statusBadge);
+
+  // Guide Modal
+  function showGuideModal() {
+    const overlay = rt("div", {
+      position: "fixed",
+      top: "0",
+      left: "0",
+      width: "100%",
+      height: "100%",
+      background: "rgba(0,0,0,0.6)",
+      zIndex: "2147483649",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      backdropFilter: "blur(4px)",
+    });
+    const modal = rt("div", {
+      background: n.panel,
+      border: `1px solid ${n.border}`,
+      borderRadius: "14px",
+      width: "600px",
+      maxWidth: "92vw",
+      maxHeight: "85vh",
+      overflow: "auto",
+      padding: "24px",
+      boxShadow: "0 20px 50px rgba(0,0,0,0.4)",
+    });
+    modal.innerHTML = `
+      <div style="font-size:18px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+        <span>👥</span> User Clone & Onboarding Guide
+      </div>
+      <div style="font-size:13px;line-height:1.6;color:${n.text};display:flex;flex-direction:column;gap:12px">
+        <p><b>1-Click User Replication:</b> Onboard new employees or clone existing users in seconds. Copies Profile, Role, Permission Sets, Permission Set Groups, Package Licenses (e.g. Litify, DocuSign, Financial Services), and Public Group/Queue memberships.</p>
+        <p><b>Target Modes:</b> You can create a <b>Brand New User</b> from scratch or replicate permissions into an <b>Existing Salesforce User</b>.</p>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:20px">
+        <button id="user-guide-close" style="background:#3b82f6;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">Got it</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    modal.querySelector("#user-guide-close").addEventListener("click", () => overlay.remove());
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+  }
+
+  const guideBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "4px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "Guide");
+  guideBtn.addEventListener("click", showGuideModal);
+  headerRight.appendChild(guideBtn);
+  header.appendChild(headerRight);
+  container.appendChild(header);
+
+  // Main scrollable body
+  const bodyWrap = rt("div", {
+    flex: "1",
+    minHeight: "0",
+    overflow: "auto",
+    padding: "20px 24px 140px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "18px",
+  });
+  container.appendChild(bodyWrap);
+
+  // State
+  let usersList = [];
+  let userLicenses = [];
+  let profilesList = [];
+  let rolesList = [];
+  let packageLicenses = [];
+  let orgInfo = null;
+
+  let selectedSourceUser = null;
+  let sourcePermissions = {
+    permissionSets: [],
+    permissionSetGroups: [],
+    packageLicenses: [],
+    groupMemberships: [],
+    userRecord: null,
+  };
+
+  let targetMode = "new"; // "new" | "existing"
+  let selectedTargetUser = null;
+  let isExecuting = false;
+
+  const cloneDomains = {
+    profile: true,
+    role: true,
+    permSets: true,
+    psg: true,
+    packages: true,
+    groups: true,
+  };
+
+  // Custom Toggle Switch Helper
+  function createToggle(checked, onChange) {
+    const box = rt("div", {
+      width: "36px",
+      height: "20px",
+      borderRadius: "10px",
+      background: checked ? "#3b82f6" : (isDark ? "#334155" : "#cbd5e1"),
+      position: "relative",
+      cursor: "pointer",
+      transition: "background 0.2s ease",
+      flexShrink: "0",
+    });
+    const knob = rt("div", {
+      width: "14px",
+      height: "14px",
+      borderRadius: "50%",
+      background: "#ffffff",
+      position: "absolute",
+      top: "3px",
+      left: checked ? "19px" : "3px",
+      transition: "left 0.2s ease",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+    });
+    box.appendChild(knob);
+    box.addEventListener("click", (e) => {
+      e.stopPropagation();
+      checked = !checked;
+      box.style.background = checked ? "#3b82f6" : (isDark ? "#334155" : "#cbd5e1");
+      knob.style.left = checked ? "19px" : "3px";
+      onChange(checked);
+    });
+    return {
+      element: box,
+      setChecked: (val) => {
+        checked = !!val;
+        box.style.background = checked ? "#3b82f6" : (isDark ? "#334155" : "#cbd5e1");
+        knob.style.left = checked ? "19px" : "3px";
+      },
+      getChecked: () => checked,
+    };
+  }
+
+  // --- SECTION B: Two-Column Configuration Grid ---
+  const configGrid = rt("div", {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
+    gap: "16px",
+  });
+  bodyWrap.appendChild(configGrid);
+
+  // 1. Source User Card
+  const sourceCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  configGrid.appendChild(sourceCard);
+
+  const sourceTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: n.text,
+  });
+  sourceTitle.innerHTML = `<span style="font-size:16px">👤</span> 1. Select Source User to Clone From`;
+  sourceCard.appendChild(sourceTitle);
+
+  const sourceSelect = rt("select", {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "13px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+  });
+  sourceSelect.innerHTML = `<option value="">— Loading Active Salesforce Users… —</option>`;
+  sourceCard.appendChild(sourceSelect);
+
+  const sourceDetails = rt("div", {
+    fontSize: "12px",
+    color: n.muted,
+    minHeight: "22px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  });
+  sourceCard.appendChild(sourceDetails);
+
+  // 2. Target User Card
+  const targetCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  configGrid.appendChild(targetCard);
+
+  const targetTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: n.text,
+  });
+  targetTitle.innerHTML = `<span style="font-size:16px">🎯</span> 2. Target User Configuration`;
+  targetCard.appendChild(targetTitle);
+
+  // Target Mode Switcher (New User vs Existing User)
+  const targetModeWrap = rt("div", {
+    display: "flex",
+    gap: "8px",
+    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
+    padding: "3px",
+    borderRadius: "8px",
+    width: "fit-content",
+  });
+  targetCard.appendChild(targetModeWrap);
+
+  const newTargetBtn = rt("button", {
+    padding: "5px 12px",
+    fontSize: "12px",
+    fontWeight: "700",
+    borderRadius: "6px",
+    border: "none",
+    cursor: "pointer",
+    background: "#3b82f6",
+    color: "#fff",
+    fontFamily: "inherit",
+  }, "🆕 Create New User");
+  targetModeWrap.appendChild(newTargetBtn);
+
+  const existTargetBtn = rt("button", {
+    padding: "5px 12px",
+    fontSize: "12px",
+    fontWeight: "700",
+    borderRadius: "6px",
+    border: "none",
+    cursor: "pointer",
+    background: "transparent",
+    color: n.muted,
+    fontFamily: "inherit",
+  }, "🔄 Clone into Existing User");
+  targetModeWrap.appendChild(existTargetBtn);
+
+  // Form Container: New User
+  const newUserForm = rt("div", { display: "flex", flexDirection: "column", gap: "10px" });
+  targetCard.appendChild(newUserForm);
+
+  const nameRow = rt("div", { display: "flex", gap: "10px" });
+  newUserForm.appendChild(nameRow);
+
+  const fnWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  fnWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "First Name"));
+  const fnInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  fnInput.placeholder = "e.g. Ryan";
+  fnWrap.appendChild(fnInput);
+  nameRow.appendChild(fnWrap);
+
+  const lnWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  lnWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Last Name *"));
+  const lnInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  lnInput.placeholder = "e.g. K.";
+  lnWrap.appendChild(lnInput);
+  nameRow.appendChild(lnWrap);
+
+  const emailRow = rt("div", { display: "flex", gap: "10px" });
+  newUserForm.appendChild(emailRow);
+
+  const emailWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  emailWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Email Address *"));
+  const emailInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  emailInput.placeholder = "e.g. raihan@micronetbd.org";
+  emailWrap.appendChild(emailInput);
+  emailRow.appendChild(emailWrap);
+
+  const usernameWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  usernameWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Username (Login) *"));
+  const usernameInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  usernameInput.placeholder = "e.g. raihan@micronetbd.org";
+  usernameWrap.appendChild(usernameInput);
+  emailRow.appendChild(usernameWrap);
+
+  const metaRow = rt("div", { display: "flex", gap: "10px" });
+  newUserForm.appendChild(metaRow);
+
+  const aliasWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  aliasWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Alias (max 8 chars)"));
+  const aliasInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  aliasInput.placeholder = "e.g. jcolw";
+  aliasWrap.appendChild(aliasInput);
+  metaRow.appendChild(aliasWrap);
+
+  const nickWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  nickWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Community Nickname"));
+  const nickInput = rt("input", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12.5px",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  nickInput.placeholder = "e.g. ryan.k";
+  nickWrap.appendChild(nickInput);
+  metaRow.appendChild(nickWrap);
+
+  const permRow = rt("div", { display: "flex", gap: "10px" });
+  newUserForm.appendChild(permRow);
+
+  const profWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  profWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Profile *"));
+  const profSelect = rt("select", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  profSelect.innerHTML = `<option value="">— Source User's Profile —</option>`;
+  profWrap.appendChild(profSelect);
+  permRow.appendChild(profWrap);
+
+  const roleWrap = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "4px" });
+  roleWrap.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Role (Optional)"));
+  const roleSelect = rt("select", {
+    padding: "7px 10px",
+    borderRadius: "6px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "12px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    width: "100%",
+    boxSizing: "border-box",
+  });
+  roleSelect.innerHTML = `<option value="">— None / Source Role —</option>`;
+  roleWrap.appendChild(roleSelect);
+  permRow.appendChild(roleWrap);
+
+  // Form Container: Existing Target User
+  const existingUserForm = rt("div", { display: "none", flexDirection: "column", gap: "10px" });
+  targetCard.appendChild(existingUserForm);
+
+  existingUserForm.appendChild(rt("label", { fontSize: "11px", fontWeight: "700", color: n.muted }, "Select Target Existing User"));
+  const existingUserSelect = rt("select", {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+    background: isDark ? "#1e293b" : "#f8fafc",
+    color: n.text,
+    fontSize: "13px",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    boxSizing: "border-box",
+  });
+  existingUserSelect.innerHTML = `<option value="">— Select Target User to Receive Permissions —</option>`;
+  existingUserForm.appendChild(existingUserSelect);
+
+  newTargetBtn.addEventListener("click", () => {
+    targetMode = "new";
+    newTargetBtn.style.background = "#3b82f6";
+    newTargetBtn.style.color = "#fff";
+    existTargetBtn.style.background = "transparent";
+    existTargetBtn.style.color = n.muted;
+    newUserForm.style.display = "flex";
+    existingUserForm.style.display = "none";
+    updateSummary();
+  });
+
+  existTargetBtn.addEventListener("click", () => {
+    targetMode = "existing";
+    existTargetBtn.style.background = "#3b82f6";
+    existTargetBtn.style.color = "#fff";
+    newTargetBtn.style.background = "transparent";
+    newTargetBtn.style.color = n.muted;
+    newUserForm.style.display = "none";
+    existingUserForm.style.display = "flex";
+    updateSummary();
+  });
+
+  // Auto-generate alias, username, nickname on email or name changes
+  function autoPopulateUserMeta() {
+    const fn = fnInput.value.trim();
+    const ln = lnInput.value.trim();
+    const email = emailInput.value.trim();
+
+    if (!usernameInput.value.trim() && email) {
+      usernameInput.value = email;
+    }
+    if (!aliasInput.value.trim() && (fn || ln)) {
+      const alias = ((fn.charAt(0) || "") + ln).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+      aliasInput.value = alias;
+    }
+    if (!nickInput.value.trim() && (fn || ln)) {
+      const nick = `${fn}.${ln}`.toLowerCase().replace(/[^a-z0-9.]/g, "").replace(/^\.|\.$/g, "");
+      nickInput.value = nick;
+    }
+    updateSummary();
+  }
+  fnInput.addEventListener("input", autoPopulateUserMeta);
+  lnInput.addEventListener("input", autoPopulateUserMeta);
+  emailInput.addEventListener("input", autoPopulateUserMeta);
+  usernameInput.addEventListener("input", updateSummary);
+
+  // --- SECTION C: Domains & Package Licenses Grid ---
+  const domainCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  });
+  bodyWrap.appendChild(domainCard);
+
+  const domainHeader = rt("div", { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" });
+  domainCard.appendChild(domainHeader);
+
+  const domainTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    color: n.text,
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  });
+  domainTitle.innerHTML = `<span style="font-size:16px">⚙️</span> 3. Domains to Replicate & Assign`;
+  domainHeader.appendChild(domainTitle);
+
+  const domainTogglesGrid = rt("div", {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: "12px",
+  });
+  domainCard.appendChild(domainTogglesGrid);
+
+  const domainDefinitions = [
+    { key: "profile", icon: "", label: "Profile & Role", desc: "User license, base security profile & role" },
+    { key: "permSets", icon: "", label: "Permission Sets", desc: "All direct Permission Sets assigned to source" },
+    { key: "psg", icon: "", label: "Permission Set Groups", desc: "All Permission Set Groups bundled for user" },
+    { key: "packages", icon: "💼", label: "Package Licenses", desc: "Installed managed package seats (e.g. Litify)" },
+    { key: "groups", icon: "👥", label: "Public Groups & Queues", desc: "Replicate public group and case/lead queue memberships" },
+  ];
+
+  const domainElements = {};
+  domainDefinitions.forEach((d) => {
+    const item = rt("div", {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "12px 14px",
+      borderRadius: "10px",
+      border: `1px solid ${cloneDomains[d.key] ? "rgba(59,130,246,0.35)" : n.border}`,
+      background: cloneDomains[d.key] ? (isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)") : "transparent",
+      cursor: "pointer",
+      userSelect: "none",
+      transition: "all 0.15s ease",
+      gap: "10px",
+    });
+
+    const info = rt("div", { flex: "1", display: "flex", flexDirection: "column", gap: "3px" });
+    const topRow = rt("div", { display: "flex", alignItems: "center", gap: "6px" });
+    topRow.innerHTML = `<span style="font-size:13px;font-weight:700;color:${n.text}">${d.icon} ${d.label}</span>`;
+    const countBadge = rt("span", {
+      fontSize: "11px",
+      fontWeight: "700",
+      padding: "1px 7px",
+      borderRadius: "10px",
+      background: "rgba(59,130,246,0.12)",
+      color: "#3b82f6",
+    }, "0");
+    topRow.appendChild(countBadge);
+    info.appendChild(topRow);
+    info.appendChild(rt("span", { fontSize: "11px", color: n.muted }, d.desc));
+    item.appendChild(info);
+
+    const toggle = createToggle(cloneDomains[d.key], (val) => {
+      cloneDomains[d.key] = val;
+      item.style.borderColor = val ? "rgba(59,130,246,0.35)" : n.border;
+      item.style.background = val ? (isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)") : "transparent";
+      updateCloneButton();
+      updateSummary();
+    });
+    item.appendChild(toggle.element);
+
+    item.addEventListener("click", () => {
+      const newVal = !cloneDomains[d.key];
+      cloneDomains[d.key] = newVal;
+      toggle.setChecked(newVal);
+      item.style.borderColor = newVal ? "rgba(59,130,246,0.35)" : n.border;
+      item.style.background = newVal ? (isDark ? "rgba(59,130,246,0.08)" : "rgba(59,130,246,0.04)") : "transparent";
+      updateCloneButton();
+      updateSummary();
+    });
+
+    domainElements[d.key] = { item, toggle, countBadge };
+    domainTogglesGrid.appendChild(item);
+  });
+
+  // --- SECTION D: Package License Manual Multi-Select / Overrides ---
+  const pkgCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  bodyWrap.appendChild(pkgCard);
+
+  const pkgTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    color: n.text,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+  });
+  pkgTitle.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><span>💼</span> Package Licenses (Managed App Seats)</div><span style="font-size:11.5px;font-weight:600;color:${n.muted}">Select seats to assign</span>`;
+  pkgCard.appendChild(pkgTitle);
+
+  const pkgListWrap = rt("div", {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+    gap: "10px",
+  });
+  pkgCard.appendChild(pkgListWrap);
+
+  const selectedPackages = new Set();
+
+  function renderPackageLicensesList() {
+    pkgListWrap.innerHTML = "";
+    if (packageLicenses.length === 0) {
+      pkgListWrap.appendChild(
+        rt("div", { color: n.muted, fontSize: "12.5px", padding: "10px" }, "No managed package licenses found or detected in this org.")
+      );
+      return;
+    }
+
+    packageLicenses.forEach((pkg) => {
+      const isSelected = selectedPackages.has(pkg.Id);
+      const isFull = pkg.AllowedLicenses > 0 && pkg.UsedLicenses >= pkg.AllowedLicenses;
+      const card = rt("div", {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "10px 14px",
+        borderRadius: "8px",
+        border: `1px solid ${isSelected ? "#3b82f6" : n.border}`,
+        background: isSelected ? (isDark ? "rgba(59,130,246,0.12)" : "rgba(59,130,246,0.06)") : "transparent",
+        cursor: "pointer",
+        transition: "all 0.15s ease",
+      });
+
+      const left = rt("div", { display: "flex", flexDirection: "column", gap: "2px" });
+      const pName = rt("div", { fontSize: "12.5px", fontWeight: "700", color: n.text }, pkg.NamespacePrefix ? `${pkg.NamespacePrefix} (Package)` : "Package Seat");
+      const seatText = pkg.AllowedLicenses === -1
+        ? "Unlimited seats"
+        : `${pkg.UsedLicenses || 0} / ${pkg.AllowedLicenses} seats used`;
+      const pSeats = rt("div", {
+        fontSize: "11px",
+        color: isFull ? "#ef4444" : n.muted,
+        fontWeight: isFull ? "700" : "400",
+      }, isFull ? `⚠️ Full (${seatText})` : `✓ Open seats available (${seatText})`);
+
+      left.appendChild(pName);
+      left.appendChild(pSeats);
+      card.appendChild(left);
+
+      const checkBadge = rt("span", {
+        fontSize: "16px",
+        color: isSelected ? "#3b82f6" : n.faint,
+      }, isSelected ? "☑" : "☐");
+      card.appendChild(checkBadge);
+
+      card.addEventListener("click", () => {
+        if (selectedPackages.has(pkg.Id)) {
+          selectedPackages.delete(pkg.Id);
+        } else {
+          selectedPackages.add(pkg.Id);
+        }
+        renderPackageLicensesList();
+        updateSummary();
+      });
+
+      pkgListWrap.appendChild(card);
+    });
+  }
+
+  // --- SECTION E: Pre-Clone Inspection & Analysis Tabs ---
+  const inspectCard = rt("div", {
+    background: n.panel,
+    border: `1px solid ${n.border}`,
+    borderRadius: "12px",
+    padding: "16px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  });
+  bodyWrap.appendChild(inspectCard);
+
+  const inspectTitle = rt("div", {
+    fontSize: "14px",
+    fontWeight: "800",
+    color: n.text,
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  });
+  inspectTitle.innerHTML = `<span>🔍</span> 4. Source User Access Breakdown & Preview`;
+  inspectCard.appendChild(inspectTitle);
+
+  const inspectContent = rt("div", {
+    maxHeight: "260px",
+    overflow: "auto",
+    border: `1px solid ${n.divider}`,
+    borderRadius: "8px",
+    padding: "12px 16px",
+    fontSize: "12.5px",
+    color: n.muted,
+    background: isDark ? "#0f172a" : "#ffffff",
+  });
+  inspectContent.textContent = "Select a source user above to inspect their profile, permission sets, package licenses, and public groups.";
+  inspectCard.appendChild(inspectContent);
+
+  function renderInspectionBreakdown() {
+    if (!selectedSourceUser) {
+      inspectContent.textContent = "Select a source user above to inspect their profile, permission sets, package licenses, and public groups.";
+      return;
+    }
+
+    inspectContent.innerHTML = "";
+    const wrap = rt("div", { display: "flex", flexDirection: "column", gap: "14px" });
+
+    // Profile & Role Row
+    const pRow = rt("div", { display: "flex", flexDirection: "column", gap: "4px" });
+    pRow.innerHTML = `
+      <div style="font-weight:700;color:${n.text};font-size:13px">👤 Base Profile & Role:</div>
+      <div style="font-size:12px;color:${n.muted}">Profile: <b style="color:${n.text}">${selectedSourceUser.Profile?.Name || 'None'}</b> · User License: <b style="color:${n.text}">${selectedSourceUser.Profile?.UserLicense?.Name || 'Standard'}</b> · Role: <b style="color:${n.text}">${selectedSourceUser.UserRole?.Name || 'None'}</b></div>
+    `;
+    wrap.appendChild(pRow);
+
+    // Permission Sets
+    if (sourcePermissions.permissionSets.length > 0) {
+      const psRow = rt("div", { display: "flex", flexDirection: "column", gap: "6px" });
+      psRow.innerHTML = `<div style="font-weight:700;color:${n.text};font-size:13px">🔑 Permission Sets (${sourcePermissions.permissionSets.length}):</div>`;
+      const psList = rt("div", { display: "flex", flexWrap: "wrap", gap: "6px" });
+      sourcePermissions.permissionSets.forEach((ps) => {
+        const chip = rt("span", {
+          padding: "3px 9px",
+          borderRadius: "6px",
+          background: isDark ? "rgba(59,130,246,0.15)" : "rgba(59,130,246,0.08)",
+          border: "1px solid rgba(59,130,246,0.3)",
+          color: n.text,
+          fontSize: "11.5px",
+          fontWeight: "600",
+        }, ps.PermissionSet?.Label || ps.PermissionSet?.Name);
+        psList.appendChild(chip);
+      });
+      psRow.appendChild(psList);
+      wrap.appendChild(psRow);
+    }
+
+    // Permission Set Groups
+    if (sourcePermissions.permissionSetGroups.length > 0) {
+      const psgRow = rt("div", { display: "flex", flexDirection: "column", gap: "6px" });
+      psgRow.innerHTML = `<div style="font-weight:700;color:${n.text};font-size:13px">📦 Permission Set Groups (${sourcePermissions.permissionSetGroups.length}):</div>`;
+      const psgList = rt("div", { display: "flex", flexWrap: "wrap", gap: "6px" });
+      sourcePermissions.permissionSetGroups.forEach((psg) => {
+        const chip = rt("span", {
+          padding: "3px 9px",
+          borderRadius: "6px",
+          background: isDark ? "rgba(16,185,129,0.15)" : "rgba(16,185,129,0.08)",
+          border: "1px solid rgba(16,185,129,0.3)",
+          color: n.text,
+          fontSize: "11.5px",
+          fontWeight: "600",
+        }, psg.PermissionSetGroup?.MasterLabel || psg.PermissionSetGroup?.DeveloperName);
+        psgList.appendChild(chip);
+      });
+      psgRow.appendChild(psgList);
+      wrap.appendChild(psgRow);
+    }
+
+    // Package Licenses
+    if (sourcePermissions.packageLicenses.length > 0) {
+      const pkgRow = rt("div", { display: "flex", flexDirection: "column", gap: "6px" });
+      pkgRow.innerHTML = `<div style="font-weight:700;color:${n.text};font-size:13px">💼 Package Licenses (${sourcePermissions.packageLicenses.length}):</div>`;
+      const pkgList = rt("div", { display: "flex", flexWrap: "wrap", gap: "6px" });
+      sourcePermissions.packageLicenses.forEach((pkg) => {
+        const chip = rt("span", {
+          padding: "3px 9px",
+          borderRadius: "6px",
+          background: isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.08)",
+          border: "1px solid rgba(245,158,11,0.3)",
+          color: n.text,
+          fontSize: "11.5px",
+          fontWeight: "600",
+        }, pkg.PackageLicense?.NamespacePrefix || "Managed Package");
+        pkgList.appendChild(chip);
+      });
+      pkgRow.appendChild(pkgList);
+      wrap.appendChild(pkgRow);
+    }
+
+    // Public Groups & Queues
+    if (sourcePermissions.groupMemberships.length > 0) {
+      const grpRow = rt("div", { display: "flex", flexDirection: "column", gap: "6px" });
+      grpRow.innerHTML = `<div style="font-weight:700;color:${n.text};font-size:13px">👥 Public Groups & Queues (${sourcePermissions.groupMemberships.length}):</div>`;
+      const grpList = rt("div", { display: "flex", flexWrap: "wrap", gap: "6px" });
+      sourcePermissions.groupMemberships.forEach((gm) => {
+        const chip = rt("span", {
+          padding: "3px 9px",
+          borderRadius: "6px",
+          background: isDark ? "rgba(168,85,247,0.15)" : "rgba(168,85,247,0.08)",
+          border: "1px solid rgba(168,85,247,0.3)",
+          color: n.text,
+          fontSize: "11.5px",
+          fontWeight: "600",
+        }, `${gm.Group?.Type === 'Queue' ? '📮 Queue' : '👥 Group'}: ${gm.Group?.Name || gm.Group?.DeveloperName}`);
+        grpList.appendChild(chip);
+      });
+      grpRow.appendChild(grpList);
+      wrap.appendChild(grpRow);
+    }
+
+    inspectContent.appendChild(wrap);
+  }
+
+  // --- SECTION F: Sticky Action Bar & Execution Progress ---
+  const stickyActionBar = rt("div", {
+    position: "fixed",
+    bottom: "0",
+    left: "0",
+    right: "0",
+    background: isDark ? "rgba(15,23,42,0.94)" : "rgba(255,255,255,0.96)",
+    backdropFilter: "blur(14px)",
+    WebkitBackdropFilter: "blur(14px)",
+    borderTop: `1px solid ${n.divider}`,
+    boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
+    zIndex: "100",
+    padding: "14px 24px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  });
+  container.appendChild(stickyActionBar);
+
+  const progressBox = rt("div", {
+    display: "none",
+    flexDirection: "column",
+    gap: "8px",
+    background: isDark ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.03)",
+    padding: "10px 14px",
+    borderRadius: "8px",
+    border: `1px solid ${n.border}`,
+  });
+  stickyActionBar.appendChild(progressBox);
+
+  const progressHeader = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    fontSize: "12px",
+    fontWeight: "700",
+  });
+  const progressStatusLabel = rt("span", { color: n.text }, "Starting clone workflow…");
+  const progressPercentLabel = rt("span", { color: "#3b82f6" }, "0%");
+  progressHeader.appendChild(progressStatusLabel);
+  progressHeader.appendChild(progressPercentLabel);
+  progressBox.appendChild(progressHeader);
+
+  const progressBarTrack = rt("div", {
+    width: "100%",
+    height: "6px",
+    borderRadius: "3px",
+    background: isDark ? "#334155" : "#e2e8f0",
+    overflow: "hidden",
+  });
+  const progressBarFill = rt("div", {
+    width: "0%",
+    height: "100%",
+    borderRadius: "3px",
+    background: "linear-gradient(90deg, #3b82f6, #10b981)",
+    transition: "width 0.2s ease-out",
+  });
+  progressBarTrack.appendChild(progressBarFill);
+  progressBox.appendChild(progressBarTrack);
+
+  const logTerminal = rt("div", {
+    maxHeight: "120px",
+    overflow: "auto",
+    background: isDark ? "#020617" : "#1e293b",
+    color: "#e2e8f0",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: "11px",
+    padding: "8px 10px",
+    borderRadius: "6px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "3px",
+    lineHeight: "1.4",
+  });
+  progressBox.appendChild(logTerminal);
+
+  function logMsg(type, text) {
+    const row = rt("div", { display: "flex", gap: "8px", alignItems: "flex-start" });
+    const time = new Date().toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const timeSpan = rt("span", { color: "#64748b", flexShrink: "0" }, `[${time}]`);
+    let badgeColor = "#38bdf8";
+    if (type === "SUCCESS") badgeColor = "#4ade80";
+    if (type === "WARN") badgeColor = "#facc15";
+    if (type === "ERROR") badgeColor = "#f87171";
+
+    const badge = rt("span", { color: badgeColor, fontWeight: "700", flexShrink: "0" }, `[${type}]`);
+    const msg = rt("span", { color: type === "ERROR" ? "#fca5a5" : "#f1f5f9" }, text);
+    row.appendChild(timeSpan);
+    row.appendChild(badge);
+    row.appendChild(msg);
+    logTerminal.appendChild(row);
+    logTerminal.scrollTop = logTerminal.scrollHeight;
+  }
+
+  const resultCard = rt("div", {
+    display: "none",
+    flexDirection: "column",
+    gap: "10px",
+    background: isDark ? "rgba(16,185,129,0.1)" : "rgba(16,185,129,0.06)",
+    border: "1px solid rgba(16,185,129,0.35)",
+    borderRadius: "10px",
+    padding: "12px 16px",
+  });
+  stickyActionBar.appendChild(resultCard);
+
+  const actionRow = rt("div", {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "12px",
+  });
+  stickyActionBar.appendChild(actionRow);
+
+  const actionSummaryWrap = rt("div", { display: "flex", flexDirection: "column", gap: "2px", minWidth: "0" });
+  const actionMainSummary = rt("div", {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: n.text,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  }, "Select a source user to begin cloning.");
+  const actionSubSummary = rt("div", { fontSize: "11.5px", color: n.muted }, "Configure domains and click Clone & Onboard User.");
+  actionSummaryWrap.appendChild(actionMainSummary);
+  actionSummaryWrap.appendChild(actionSubSummary);
+  actionRow.appendChild(actionSummaryWrap);
+
+  const startCloneBtn = rt("button", {
+    background: "#3b82f6",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "8px",
+    padding: "10px 24px",
+    fontSize: "13.5px",
+    fontWeight: "800",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    boxShadow: "0 4px 14px rgba(59,130,246,0.35)",
+    transition: "all 0.15s ease",
+    flexShrink: "0",
+  });
+  startCloneBtn.innerHTML = `<span>👥</span> Clone & Onboard User`;
+  startCloneBtn.addEventListener("click", executeUserClone);
+  actionRow.appendChild(startCloneBtn);
+
+  function updateSummary() {
+    if (!selectedSourceUser) {
+      actionMainSummary.textContent = "Select a source user to replicate permissions from.";
+      actionSubSummary.textContent = "All permission sets, package seats, and groups will be assigned to target.";
+      return;
+    }
+
+    const targetDesc = targetMode === "new"
+      ? `New User "${fnInput.value.trim()} ${lnInput.value.trim() || 'New User'}" (${usernameInput.value.trim() || 'username'})`
+      : `Existing User "${existingUserSelect.options[existingUserSelect.selectedIndex]?.text || 'Target'}"`;
+
+    const activeDomains = Object.values(cloneDomains).filter(Boolean).length;
+    actionMainSummary.innerHTML = `<span style="color:#3b82f6">${selectedSourceUser.Name}</span> ➔ <span style="color:#10b981">${targetDesc}</span>`;
+    actionSubSummary.textContent = `${activeDomains} domain(s) active · ${sourcePermissions.permissionSets.length} PermSets · ${sourcePermissions.permissionSetGroups.length} PSGs · ${selectedPackages.size} Package Seats · ${sourcePermissions.groupMemberships.length} Groups`;
+  }
+
+  function updateCloneButton() {
+    if (!selectedSourceUser) {
+      startCloneBtn.disabled = true;
+      startCloneBtn.style.opacity = "0.5";
+      startCloneBtn.style.cursor = "not-allowed";
+      return;
+    }
+    startCloneBtn.disabled = false;
+    startCloneBtn.style.opacity = "1";
+    startCloneBtn.style.cursor = "pointer";
+  }
+
+
+
+  // Load Initial Data
+  async function loadInitialData() {
+    sourceDetails.textContent = "Loading active Salesforce users, roles, and licenses…";
+    try {
+      const [usersRes, licRes, profRes, roleRes, pkgRes, orgRes] = await Promise.all([
+        t.runQuery("SELECT Id, Name, Username, Email, Title, IsActive, ProfileId, Profile.Name, Profile.UserLicense.Name, UserRoleId, UserRole.Name FROM User WHERE IsActive = true ORDER BY Name LIMIT 1000"),
+        t.runQuery("SELECT Id, Name, TotalLicenses, UsedLicenses, Status FROM UserLicense WHERE Status = 'Active' ORDER BY Name"),
+        t.runQuery("SELECT Id, Name, UserLicense.Name FROM Profile ORDER BY Name LIMIT 1000"),
+        t.runQuery("SELECT Id, Name FROM UserRole ORDER BY Name LIMIT 1000"),
+        t.runQuery("SELECT Id, NamespacePrefix, AllowedLicenses, UsedLicenses, Status FROM PackageLicense WHERE Status = 'Active' ORDER BY NamespacePrefix"),
+        t.runQuery("SELECT Id, Name, DefaultLocaleSidKey, LanguageLocaleKey, TimeZoneSidKey FROM Organization LIMIT 1"),
+      ]);
+
+      usersList = usersRes.records || [];
+      userLicenses = licRes.records || [];
+      profilesList = profRes.records || [];
+      rolesList = roleRes.records || [];
+      packageLicenses = pkgRes.records || [];
+      orgInfo = (orgRes.records || [])[0] || {};
+
+      // Populate Source User Dropdown
+      sourceSelect.innerHTML = `<option value="">— Select Source User to Clone From —</option>`;
+      usersList.forEach((u) => {
+        const opt = rt("option");
+        opt.value = u.Id;
+        opt.textContent = `${u.Name} (${u.Title || u.Profile?.Name || 'User'}) - ${u.Username}`;
+        sourceSelect.appendChild(opt);
+      });
+
+      // Populate Existing Target User Dropdown
+      existingUserSelect.innerHTML = `<option value="">— Select Target User to Receive Permissions —</option>`;
+      usersList.forEach((u) => {
+        const opt = rt("option");
+        opt.value = u.Id;
+        opt.textContent = `${u.Name} (${u.Username})`;
+        existingUserSelect.appendChild(opt);
+      });
+
+      // Populate Profile Dropdown
+      profSelect.innerHTML = `<option value="">— Source User's Profile —</option>`;
+      profilesList.forEach((p) => {
+        const opt = rt("option");
+        opt.value = p.Id;
+        opt.textContent = `${p.Name} (${p.UserLicense?.Name || 'Standard'})`;
+        profSelect.appendChild(opt);
+      });
+
+      // Populate Role Dropdown
+      roleSelect.innerHTML = `<option value="">— None / Source User's Role —</option>`;
+      rolesList.forEach((r) => {
+        const opt = rt("option");
+        opt.value = r.Id;
+        opt.textContent = r.Name;
+        roleSelect.appendChild(opt);
+      });
+
+      renderPackageLicensesList();
+
+      sourceDetails.textContent = `${usersList.length} active users loaded. Select a source user to inspect.`;
+    } catch (err) {
+      sourceDetails.textContent = `Error loading users: ${err?.message || err}`;
+    }
+  }
+
+  // Handle Source User Selection
+  sourceSelect.addEventListener("change", async () => {
+    const sId = sourceSelect.value;
+    if (!sId) {
+      selectedSourceUser = null;
+      sourceDetails.textContent = "";
+      updateCloneButton();
+      updateSummary();
+      renderInspectionBreakdown();
+      return;
+    }
+
+    selectedSourceUser = (usersList || []).find((u) => u.Id === sId) || null;
+    if (!selectedSourceUser) {
+      sourceDetails.textContent = "";
+      return;
+    }
+    sourceDetails.innerHTML = `<span style="color:#3b82f6;font-weight:700">Loading assignments & permissions for ${selectedSourceUser.Name || sId}…</span>`;
+    statusBadge.textContent = "Analyzing…";
+    statusBadge.style.color = "#f59e0b";
+    statusBadge.style.background = "rgba(245,158,11,0.15)";
+
+    await loadSourceUserPermissions(selectedSourceUser.Id);
+  });
+
+  async function loadSourceUserPermissions(userId) {
+    try {
+      const [psRes, pkgRes, grpRes] = await Promise.all([
+        t.runQuery(`SELECT Id, PermissionSetId, PermissionSet.Label, PermissionSet.Name, PermissionSet.IsOwnedByProfile, PermissionSetGroupId, PermissionSetGroup.DeveloperName, PermissionSetGroup.MasterLabel FROM PermissionSetAssignment WHERE AssigneeId = '${userId}'`),
+        t.runQuery(`SELECT Id, PackageLicenseId, PackageLicense.NamespacePrefix, PackageLicense.AllowedLicenses, PackageLicense.UsedLicenses FROM UserPackageLicense WHERE UserId = '${userId}'`),
+        t.runQuery(`SELECT Id, GroupId, Group.Name, Group.DeveloperName, Group.Type FROM GroupMember WHERE UserOrGroupId = '${userId}' AND Group.Type IN ('Regular', 'Queue')`),
+      ]);
+
+      const rawPs = psRes.records || [];
+      sourcePermissions.permissionSets = rawPs.filter((p) => !p.PermissionSet?.IsOwnedByProfile && !p.PermissionSetGroupId);
+      sourcePermissions.permissionSetGroups = rawPs.filter((p) => p.PermissionSetGroupId);
+      sourcePermissions.packageLicenses = pkgRes.records || [];
+      sourcePermissions.groupMemberships = grpRes.records || [];
+
+      // Pre-select package licenses assigned to source
+      selectedPackages.clear();
+      sourcePermissions.packageLicenses.forEach((pkg) => {
+        if (pkg.PackageLicenseId) selectedPackages.add(pkg.PackageLicenseId);
+      });
+      renderPackageLicensesList();
+
+      // Update counters
+      domainElements.permSets.countBadge.textContent = String(sourcePermissions.permissionSets.length);
+      domainElements.psg.countBadge.textContent = String(sourcePermissions.permissionSetGroups.length);
+      domainElements.packages.countBadge.textContent = String(sourcePermissions.packageLicenses.length);
+      domainElements.groups.countBadge.textContent = String(sourcePermissions.groupMemberships.length);
+      domainElements.profile.countBadge.textContent = "1";
+
+      sourceDetails.innerHTML = `<span style="color:#10b981;font-weight:700">✓ Analyzed:</span> ${sourcePermissions.permissionSets.length} PermSets, ${sourcePermissions.permissionSetGroups.length} PSGs, ${sourcePermissions.packageLicenses.length} Package Seats, ${sourcePermissions.groupMemberships.length} Groups`;
+      statusBadge.textContent = "Ready";
+      statusBadge.style.color = "#3b82f6";
+      statusBadge.style.background = "rgba(59,130,246,0.15)";
+
+      renderInspectionBreakdown();
+      updateCloneButton();
+      updateSummary();
+    } catch (err) {
+      sourceDetails.textContent = `Error loading user permissions: ${err?.message || err}`;
+      statusBadge.textContent = "Error";
+      statusBadge.style.color = "#ef4444";
+      statusBadge.style.background = "rgba(239,68,68,0.15)";
+    }
+  }
+
+  // Execution Engine: User Clone & Onboard
+  async function executeUserClone() {
+    if (isExecuting) return;
+    isExecuting = true;
+
+    startCloneBtn.disabled = true;
+    startCloneBtn.style.opacity = "0.6";
+    startCloneBtn.innerHTML = `<span>⏳</span> Cloning in Progress…`;
+    progressBox.style.display = "flex";
+    resultCard.style.display = "none";
+    logTerminal.innerHTML = "";
+
+    statusBadge.textContent = "Executing…";
+    statusBadge.style.color = "#3b82f6";
+    statusBadge.style.background = "rgba(59,130,246,0.15)";
+
+    const setProgress = (percent, text) => {
+      progressBarFill.style.width = `${percent}%`;
+      progressPercentLabel.textContent = `${percent}%`;
+      progressStatusLabel.textContent = text;
+    };
+
+    setProgress(5, "Starting user onboarding workflow…");
+    logMsg("INFO", `Initiating clone workflow from source user "${selectedSourceUser.Name}"`);
+
+    let targetUserId = null;
+    let targetUserName = "";
+
+    try {
+      // Step 1: Create or Resolve Target User
+      if (targetMode === "new") {
+        const lastName = lnInput.value.trim();
+        const firstName = fnInput.value.trim();
+        const email = emailInput.value.trim();
+        const username = usernameInput.value.trim();
+        const alias = aliasInput.value.trim() || ((firstName.charAt(0) || "") + lastName).toLowerCase().slice(0, 8);
+        const nickname = nickInput.value.trim() || `${firstName}.${lastName}`.toLowerCase();
+        const profileId = profSelect.value || selectedSourceUser.ProfileId;
+        const roleId = roleSelect.value || selectedSourceUser.UserRoleId || null;
+
+        if (!lastName || !email || !username) {
+          throw new Error("Last Name, Email Address, and Username are required to create a new Salesforce user.");
+        }
+
+        setProgress(15, "Creating new User record…");
+        logMsg("INFO", `Creating User record "${firstName} ${lastName}" (${username})…`);
+
+        const userPayload = {
+          FirstName: firstName,
+          LastName: lastName,
+          Email: email,
+          Username: username,
+          Alias: alias,
+          CommunityNickname: nickname,
+          ProfileId: profileId,
+          EmailEncodingKey: "UTF-8",
+          LanguageLocaleKey: orgInfo.LanguageLocaleKey || "en_US",
+          LocaleSidKey: orgInfo.DefaultLocaleSidKey || "en_US",
+          TimeZoneSidKey: orgInfo.TimeZoneSidKey || "America/New_York",
+          IsActive: true,
+        };
+        if (roleId && cloneDomains.role) {
+          userPayload.UserRoleId = roleId;
+        }
+
+        const createRes = await t.apiCall({
+          type: "REST_EXPLORE",
+          endpoint: "/services/data/v60.0/sobjects/User",
+          method: "POST",
+          body: JSON.stringify(userPayload),
+        });
+
+        if (!createRes.success || !createRes.data || !createRes.data.ok) {
+          let errDetail = createRes.error || "";
+          try {
+            const parsed = JSON.parse(createRes.data?.body || "{}");
+            errDetail = parsed[0]?.message || parsed.message || createRes.data?.body || errDetail;
+          } catch {}
+          throw new Error(`Failed to create Salesforce User: ${errDetail}`);
+        }
+
+        const bodyObj = JSON.parse(createRes.data.body);
+        targetUserId = bodyObj.id;
+        targetUserName = `${firstName} ${lastName}`.trim();
+        logMsg("SUCCESS", `Created new Salesforce User ID: ${targetUserId}`);
+      } else {
+        targetUserId = existingUserSelect.value;
+        if (!targetUserId) {
+          throw new Error("Please select a target existing user.");
+        }
+        const found = usersList.find((u) => u.Id === targetUserId);
+        targetUserName = found ? found.Name : targetUserId;
+        logMsg("INFO", `Targeting existing user: ${targetUserName} (${targetUserId})`);
+
+        // If profile / role replication toggle is on, update existing user
+        if (cloneDomains.profile) {
+          const updatePayload = { ProfileId: profSelect.value || selectedSourceUser.ProfileId };
+          if (cloneDomains.role && (roleSelect.value || selectedSourceUser.UserRoleId)) {
+            updatePayload.UserRoleId = roleSelect.value || selectedSourceUser.UserRoleId;
+          }
+          await t.apiCall({
+            type: "REST_EXPLORE",
+            endpoint: `/services/data/v60.0/sobjects/User/${targetUserId}`,
+            method: "PATCH",
+            body: JSON.stringify(updatePayload),
+          });
+          logMsg("SUCCESS", "Updated Profile & Role on existing user.");
+        }
+      }
+
+      // Step 2: Assign Package Licenses (e.g. Litify)
+      let clonedPkgCount = 0;
+      if (cloneDomains.packages && selectedPackages.size > 0) {
+        setProgress(35, "Assigning package licenses (e.g. Litify)…");
+        logMsg("INFO", `Assigning ${selectedPackages.size} package license seats…`);
+
+        for (const pkgId of selectedPackages) {
+          try {
+            const pkgRes = await t.apiCall({
+              type: "REST_EXPLORE",
+              endpoint: "/services/data/v60.0/sobjects/UserPackageLicense",
+              method: "POST",
+              body: JSON.stringify({
+                UserId: targetUserId,
+                PackageLicenseId: pkgId,
+              }),
+            });
+            if (pkgRes.success && pkgRes.data?.ok) {
+              clonedPkgCount++;
+            } else {
+              const parsed = JSON.parse(pkgRes.data?.body || "{}");
+              const msg = parsed[0]?.message || parsed.message || "Failed seat assignment";
+              logMsg("WARN", `Package seat ${pkgId}: ${msg}`);
+            }
+          } catch (e) {
+            logMsg("WARN", `Package seat error: ${e?.message || e}`);
+          }
+        }
+        logMsg("SUCCESS", `Successfully assigned ${clonedPkgCount} package licenses.`);
+      }
+
+      // Step 3: Assign Permission Sets & Permission Set Groups
+      let clonedPermSetCount = 0;
+      let clonedPsgCount = 0;
+
+      const permSetAssignments = [];
+      if (cloneDomains.permSets) {
+        sourcePermissions.permissionSets.forEach((ps) => {
+          permSetAssignments.push({ AssigneeId: targetUserId, PermissionSetId: ps.PermissionSetId });
+        });
+      }
+      if (cloneDomains.psg) {
+        sourcePermissions.permissionSetGroups.forEach((psg) => {
+          permSetAssignments.push({ AssigneeId: targetUserId, PermissionSetGroupId: psg.PermissionSetGroupId });
+        });
+      }
+
+      if (permSetAssignments.length > 0) {
+        setProgress(60, "Assigning Permission Sets & Groups…");
+        logMsg("INFO", `Assigning ${permSetAssignments.length} Permission Sets & Groups…`);
+
+        for (let i = 0; i < permSetAssignments.length; i += 25) {
+          const chunk = permSetAssignments.slice(i, i + 25);
+          const compBody = {
+            allOrNone: false,
+            compositeRequest: chunk.map((item, idx) => ({
+              method: "POST",
+              url: "/services/data/v60.0/sobjects/PermissionSetAssignment",
+              referenceId: `psa_${idx}`,
+              body: item,
+            })),
+          };
+
+          const res = await t.apiCall({
+            type: "REST_EXPLORE",
+            endpoint: "/services/data/v60.0/composite",
+            method: "POST",
+            body: JSON.stringify(compBody),
+          });
+
+          if (res.success && res.data && res.data.ok) {
+            try {
+              const parsed = JSON.parse(res.data.body);
+              (parsed.compositeResponse || []).forEach((c) => {
+                if (c.httpStatusCode >= 200 && c.httpStatusCode < 300) {
+                  clonedPermSetCount++;
+                } else {
+                  const m = c.body?.[0]?.message || c.body?.message || "";
+                  if (!m.includes("duplicate value found") && !m.includes("already assigned")) {
+                    logMsg("WARN", `PermSet assignment error: ${m}`);
+                  }
+                }
+              });
+            } catch {}
+          }
+        }
+        logMsg("SUCCESS", `Successfully processed Permission Set & Group assignments.`);
+      }
+
+      // Step 4: Replicate Public Groups & Queues
+      let clonedGroupCount = 0;
+      if (cloneDomains.groups && sourcePermissions.groupMemberships.length > 0) {
+        setProgress(85, "Assigning Public Groups & Queues…");
+        logMsg("INFO", `Replicating ${sourcePermissions.groupMemberships.length} Public Group & Queue memberships…`);
+
+        for (let i = 0; i < sourcePermissions.groupMemberships.length; i += 25) {
+          const chunk = sourcePermissions.groupMemberships.slice(i, i + 25);
+          const compBody = {
+            allOrNone: false,
+            compositeRequest: chunk.map((gm, idx) => ({
+              method: "POST",
+              url: "/services/data/v60.0/sobjects/GroupMember",
+              referenceId: `gm_${idx}`,
+              body: {
+                GroupId: gm.GroupId,
+                UserOrGroupId: targetUserId,
+              },
+            })),
+          };
+
+          const res = await t.apiCall({
+            type: "REST_EXPLORE",
+            endpoint: "/services/data/v60.0/composite",
+            method: "POST",
+            body: JSON.stringify(compBody),
+          });
+
+          if (res.success && res.data && res.data.ok) {
+            try {
+              const parsed = JSON.parse(res.data.body);
+              (parsed.compositeResponse || []).forEach((c) => {
+                if (c.httpStatusCode >= 200 && c.httpStatusCode < 300) {
+                  clonedGroupCount++;
+                }
+              });
+            } catch {}
+          }
+        }
+        logMsg("SUCCESS", `Successfully assigned ${clonedGroupCount} Group & Queue memberships.`);
+      }
+
+      // Finish & Success Notification
+      setProgress(100, "User Clone & Onboarding Completed!");
+      logMsg("SUCCESS", `🎉 Onboarding completed for ${targetUserName}!`);
+      t.flashToast(`User ${targetUserName} Cloned Successfully!`);
+
+      statusBadge.textContent = "Cloned Successfully";
+      statusBadge.style.color = "#10b981";
+      statusBadge.style.background = "rgba(16,185,129,0.15)";
+
+      const sfUserUrl = `/lightning/setup/ManageUsers/page?address=%2F${targetUserId}`;
+
+      resultCard.style.display = "flex";
+      resultCard.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:15px;font-weight:800;color:#10b981;display:flex;align-items:center;gap:6px">
+              <span>🎉</span> User Onboarding & Clone Completed!
+            </div>
+            <div style="font-size:12.5px;color:${n.text};margin-top:2px">
+              Target User: <b>${targetUserName}</b> (ID: ${targetUserId})
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="open-user-btn" style="background:#10b981;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+              <span>🔗</span> Open User in Salesforce Setup
+            </button>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px;color:${n.muted};padding-top:6px;border-top:1px solid rgba(16,185,129,0.2)">
+          <span>👤 Profile & Role Configured</span> ·
+          <span>🔑 <b>${clonedPermSetCount}</b> Permission Sets / Groups</span> ·
+          <span>💼 <b>${clonedPkgCount}</b> Package Seats</span> ·
+          <span>👥 <b>${clonedGroupCount}</b> Group & Queue Memberships</span>
+        </div>
+      `;
+
+      resultCard.querySelector("#open-user-btn").addEventListener("click", () => {
+        globalThis.chrome?.runtime?.sendMessage({
+          type: "OPEN_TAB",
+          url: sfUserUrl,
+        });
+      });
+    } catch (err) {
+      logMsg("ERROR", `Clone Failed: ${err?.message || err}`);
+      setProgress(100, "Error encountered.");
+      statusBadge.textContent = "Clone Failed";
+      statusBadge.style.color = "#ef4444";
+      statusBadge.style.background = "rgba(239,68,68,0.15)";
+      t.flashToast(`Error: ${err?.message || err}`);
+    } finally {
+      isExecuting = false;
+      startCloneBtn.disabled = false;
+      startCloneBtn.style.opacity = "1";
+      startCloneBtn.innerHTML = `<span>👥</span> Clone & Onboard User`;
+    }
+  }
+
+  // Load initial data immediately
+  loadInitialData();
+}
+
 function renderPermClone(o, t) {
   const isDark = t.isDark,
     n = kt(isDark);
@@ -13015,6 +15761,21 @@ function renderPermClone(o, t) {
   headerLeft.appendChild(
     rt("div", { fontSize: "15px", fontWeight: "800", color: n.text, display: "flex", alignItems: "center", gap: "8px" }, "🧬 Profile & Permission Master Clone")
   );
+
+  const switchUserBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "3px 9px",
+    fontSize: "11px",
+    fontWeight: "700",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    marginLeft: "8px",
+  }, "👥 Switch to User Clone");
+  switchUserBtn.addEventListener("click", () => renderUserClone(o, t));
+  headerLeft.appendChild(switchUserBtn);
   header.appendChild(headerLeft);
 
   const headerRight = rt("div", { display: "flex", alignItems: "center", gap: "10px" });
@@ -13028,34 +15789,6 @@ function renderPermClone(o, t) {
   }, "Ready");
   headerRight.appendChild(statusBadge);
 
-  const guideBtn = rt("button", {
-    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
-    border: `1px solid ${n.border}`,
-    borderRadius: "6px",
-    padding: "4px 10px",
-    fontSize: "12px",
-    fontWeight: "600",
-    color: n.muted,
-    cursor: "pointer",
-    fontFamily: "inherit",
-  }, "ℹ️ Guide");
-  guideBtn.addEventListener("click", showGuideModal);
-  headerRight.appendChild(guideBtn);
-  header.appendChild(headerRight);
-  container.appendChild(header);
-
-  // Main scrollable body
-  const bodyWrap = rt("div", {
-    flex: "1",
-    minHeight: "0",
-    overflow: "auto",
-    padding: "20px 24px 120px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "18px",
-  });
-  container.appendChild(bodyWrap);
-
   // Guide Modal
   function showGuideModal() {
     const overlay = rt("div", {
@@ -13065,7 +15798,7 @@ function renderPermClone(o, t) {
       width: "100%",
       height: "100%",
       background: "rgba(0,0,0,0.6)",
-      zIndex: "999999",
+      zIndex: "2147483649",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -13084,7 +15817,7 @@ function renderPermClone(o, t) {
     });
     modal.innerHTML = `
       <div style="font-size:18px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:8px">
-        <span>🧬</span> Profile & Permission Master Clone Guide
+        Profile & Permission Master Clone Guide
       </div>
       <div style="font-size:13px;line-height:1.6;color:${n.text};display:flex;flex-direction:column;gap:12px">
         <p><b>Convert Profiles to Permission Sets:</b> Salesforce is transitioning permissions from Profiles to Permission Sets. This tool enables 1-click migration of all Profile CRUDQ, FLS, System Permissions, Apex classes, Visualforce pages, and Custom permissions into a clean, modern Permission Set.</p>
@@ -13102,6 +15835,34 @@ function renderPermClone(o, t) {
       if (e.target === overlay) overlay.remove();
     });
   }
+
+  const guideBtn = rt("button", {
+    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)",
+    border: `1px solid ${n.border}`,
+    borderRadius: "6px",
+    padding: "4px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: n.muted,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  }, "Guide");
+  guideBtn.addEventListener("click", showGuideModal);
+  headerRight.appendChild(guideBtn);
+  header.appendChild(headerRight);
+  container.appendChild(header);
+
+  // Main scrollable body
+  const bodyWrap = rt("div", {
+    flex: "1",
+    minHeight: "0",
+    overflow: "auto",
+    padding: "20px 24px 120px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "18px",
+  });
+  container.appendChild(bodyWrap);
 
   // State
   let securityPrincipals = [];
@@ -13343,7 +16104,7 @@ function renderPermClone(o, t) {
     width: "100%",
     boxSizing: "border-box",
   });
-  descInput.placeholder = "Cloned via SF Spotlight";
+  descInput.placeholder = "Cloned via SFPilot";
   descWrap.appendChild(descInput);
   licenseRow.appendChild(descWrap);
 
@@ -13498,12 +16259,12 @@ function renderPermClone(o, t) {
   modulesCard.appendChild(modulesGrid);
 
   const moduleDefinitions = [
-    { key: "objects", icon: "📦", label: "Object Permissions", desc: "CRUD, View All, Modify All" },
+    { key: "objects", icon: "", label: "Object Permissions", desc: "CRUD, View All, Modify All" },
     { key: "fields", icon: "🔤", label: "Field Permissions", desc: "Field-Level Security (FLS)" },
-    { key: "system", icon: "⚙️", label: "System Permissions", desc: "User & admin boolean flags" },
-    { key: "apex", icon: "⚡", label: "Apex Classes", desc: "Apex class access permissions" },
+    { key: "system", icon: "", label: "System Permissions", desc: "User & admin boolean flags" },
+    { key: "apex", icon: "", label: "Apex Classes", desc: "Apex class access permissions" },
     { key: "vf", icon: "📄", label: "Visualforce Pages", desc: "Visualforce page accesses" },
-    { key: "customPerms", icon: "🔑", label: "Custom Permissions", desc: "Custom platform permissions" },
+    { key: "customPerms", icon: "", label: "Custom Permissions", desc: "Custom platform permissions" },
   ];
 
   const moduleElements = {};
@@ -14151,7 +16912,7 @@ function renderPermClone(o, t) {
       : `${selectedSourcePrincipal.label} Cloned`;
     targetLabelInput.value = cleanLabel;
     targetApiNameInput.value = cleanLabel.replace(/[^a-zA-Z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
-    descInput.value = `Cloned from ${selectedSourcePrincipal.label} via SF Spotlight Master Clone`;
+    descInput.value = `Cloned from ${selectedSourcePrincipal.label} via SFPilot Master Clone`;
 
     updateCloneSummary();
     await loadSourcePermissions(selectedSourcePrincipal);
@@ -19930,19 +22691,19 @@ function Mp(o, t, e) {
       }),
     y = [
       {
-        icon: "🧱",
+        icon: "",
         title: "New Custom Object",
         desc: "Create a custom object with the full set of Setup options — record name, sharing model, optional features, and deployment status. Then add fields in one flow.",
         onClick: l,
       },
       {
-        icon: "🧩",
+        icon: "",
         title: "New Fields",
         desc: "Add fields to any object — every field type from Auto Number to URL, with type-specific settings, a multi-field queue, and one-step field-level security.",
         onClick: () => d(),
       },
       {
-        icon: "✨",
+        icon: "",
         title: "Bulk Field Creator",
         desc: "Create custom fields in bulk from CSV/TSV schema and automatically assign Field-Level Security (FLS) to profiles.",
         onClick: () => renderBulkFieldCreator(o, t.isDark, e),
@@ -19950,9 +22711,9 @@ function Mp(o, t, e) {
     ],
     g = $e("div", {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-      gap: "14px",
-      maxWidth: "720px",
+      gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+      gap: "18px",
+      width: "100%",
     });
   (y.forEach((r) => {
     const E = $e("button", {
@@ -19999,7 +22760,7 @@ function Mp(o, t, e) {
           fontSize: "11.5px",
           color: n.faint,
           lineHeight: "1.5",
-          maxWidth: "720px",
+          width: "100%",
         },
         "Changes deploy straight to this org via the Tooling API — the same result as the Setup wizards. Remember that new fields still need to be added to page layouts in Setup.",
       ),
@@ -20247,7 +23008,7 @@ function Pp(o, t) {
               return Me[ye] === !0;
             })
             .map((Me) => ({
-              icon: "⚙️",
+              icon: "",
               name: Ft(Me.Name),
               detail: ["Insert", "Update", "Delete", "Undelete"]
                 .filter(
@@ -20697,7 +23458,7 @@ function Bp(o, t) {
       Dt(
         "div",
         { fontSize: "16px", fontWeight: "800" },
-        "⚡ Execute Anonymous",
+        "Execute Anonymous",
       ),
     ),
       u.appendChild(
@@ -22085,7 +24846,7 @@ function Gp(o, t) {
         method: "POST",
         endpoint: `/services/data/${i}/sobjects/Account/`,
         body: `{
-  "Name": "SF Spotlight Test"
+  "Name": "SFPilot Test"
 }`,
       },
     ];
@@ -24295,39 +27056,88 @@ function ru(o, t) {
   }
   (x(), se());
 }
+function highlightSOQL(soql, isDark) {
+  if (!soql) return "";
+  const escapeHtml = (str) =>
+    str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const keywords = new Set([
+    "SELECT", "FROM", "WHERE", "ORDER", "BY", "GROUP", "LIMIT", "OFFSET",
+    "ASC", "DESC", "NULLS", "FIRST", "LAST", "AND", "OR", "NOT", "IN",
+    "LIKE", "INCLUDES", "EXCLUDES", "HAVING", "WITH", "SECURITY_ENFORCED",
+    "USING", "SCOPE", "TYPEOF", "WHEN", "THEN", "ELSE", "END", "FOR", "VIEW",
+    "REFERENCE", "UPDATE", "TRACKING", "VIEWSTAT", "FIELDS", "ALL", "CUSTOM", "STANDARD"
+  ]);
+  const functions = new Set([
+    "AVG", "COUNT", "COUNT_DISTINCT", "MIN", "MAX", "SUM", "FORMAT",
+    "CALENDAR_MONTH", "CALENDAR_QUARTER", "CALENDAR_YEAR", "DAY_IN_MONTH",
+    "DAY_IN_WEEK", "DAY_IN_YEAR", "DAY_ONLY", "FISCAL_MONTH", "FISCAL_QUARTER",
+    "FISCAL_YEAR", "HOUR_IN_DAY", "WEEK_IN_MONTH", "WEEK_IN_YEAR"
+  ]);
+
+  // Color tokens
+  const kwColor = isDark ? "#60a5fa" : "#2563eb";    // Blue (SELECT, FROM, etc.)
+  const fnColor = isDark ? "#c084fc" : "#9333ea";    // Purple (COUNT, SUM, etc.)
+  const strColor = isDark ? "#4ade80" : "#16a34a";   // Green ('Account', 'Contact')
+  const numColor = isDark ? "#f97316" : "#ea580c";   // Orange (50, 100)
+  const boolColor = isDark ? "#f43f5e" : "#e11d48";  // Red/Pink (true, false, null)
+
+  const tokenRegex = /('(?:[^'\\]|\\.)*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_.]*\b|[(),=><!]+|\s+)/g;
+  return escapeHtml(soql).replace(tokenRegex, (match) => {
+    const raw = match;
+    const unescaped = raw.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    if (unescaped.startsWith("'")) {
+      return `<span style="color:${strColor};font-weight:600;">${raw}</span>`;
+    }
+    if (/^\d+(?:\.\d+)?$/.test(unescaped)) {
+      return `<span style="color:${numColor};font-weight:700;">${raw}</span>`;
+    }
+    const upper = unescaped.toUpperCase();
+    if (keywords.has(upper)) {
+      return `<span style="color:${kwColor};font-weight:800;">${raw}</span>`;
+    }
+    if (functions.has(upper)) {
+      return `<span style="color:${fnColor};font-weight:800;">${raw}</span>`;
+    }
+    if (upper === "TRUE" || upper === "FALSE" || upper === "NULL") {
+      return `<span style="color:${boolColor};font-weight:700;">${raw}</span>`;
+    }
+    return raw;
+  });
+}
 function Fe(o, t, e) {
   const n = document.createElement(o);
-  return (t && Object.assign(n.style, t), e != null && (n.textContent = e), n);
+  return (t && Object.assign(n.style, t), e != null && (typeof e === "string" && e.includes("<svg") ? n.innerHTML = e : n.textContent = e), n);
 }
 const du = [
     {
       group: "System",
       items: [
-        { id: "cache", label: "Cache", icon: "🗄️" },
-        { id: "history", label: "History", icon: "🕘" },
-        { id: "tasks", label: "Tasks", icon: "✅" },
+        { id: "cache", label: "Cache", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>' },
+        { id: "history", label: "History", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' },
+        { id: "tasks", label: "Tasks", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' },
       ],
     },
     {
       group: "Experience",
       items: [
-        { id: "appearance", label: "Appearance", icon: "🎨" },
-        { id: "tabs", label: "Tabs", icon: "🧩" },
-        { id: "notification", label: "Notification", icon: "🔔" },
-        { id: "privacy", label: "Privacy", icon: "🛡️" },
+        { id: "appearance", label: "Appearance", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 1 0 10 10"/></svg>' },
+        { id: "tabs", label: "Tabs", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>' },
+        { id: "quickactions", label: "Quick Actions", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' },
+        { id: "notification", label: "Notification", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>' },
+        { id: "privacy", label: "Privacy", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' },
       ],
     },
     {
       group: "Salesforce",
       items: [
-        { id: "salesforce", label: "Salesforce", icon: "☁️" },
-        { id: "export", label: "Data Export", icon: "📤" },
-        { id: "connection", label: "Connection", icon: "🔗" },
+        { id: "salesforce", label: "Salesforce", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>' },
+        { id: "export", label: "Data Export", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>' },
+        { id: "connection", label: "Connection", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' },
       ],
     },
     {
       group: "Support",
-      items: [{ id: "support", label: "Support", icon: "ℹ️" }],
+      items: [{ id: "support", label: "Support", icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' }],
     },
   ],
   cu = ["64.0", "63.0", "62.0", "61.0", "60.0", "59.0", "58.0", "57.0", "56.0"],
@@ -24436,7 +27246,7 @@ function uu(o, t) {
       (p.alt = ""),
       H.appendChild(p),
       H.appendChild(
-        Fe("span", { fontSize: "15px", fontWeight: "800" }, "SF Spotlight"),
+        Fe("span", { fontSize: "15px", fontWeight: "800" }, "SFPilot"),
       ),
       w.appendChild(H),
       du.forEach((Q) => {
@@ -24813,6 +27623,269 @@ function uu(o, t) {
         S
       );
     };
+  function quickactions(T) {
+    const w = x();
+    w.appendChild(
+      D(
+        "Experience",
+        "Quick Actions",
+        "Reorder the Quick Actions shown at the top of your Setup tab, and toggle their visibility.",
+        Z("Reset", "ghost", () => N({ pinnedTools: ["sfhome", "export", "sampledata", "whereused"] })),
+      )
+    );
+    w.appendChild(L());
+    const H = "28px 1fr 84px",
+      p = Fe("div", {
+        display: "grid",
+        gridTemplateColumns: H,
+        gap: "8px",
+        alignItems: "center",
+        padding: "0 4px 8px",
+        fontSize: "11px",
+        fontWeight: "800",
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        color: n.faint,
+      });
+    ["#", "Tool", "Visible"].forEach((S, Y) =>
+      p.appendChild(
+        Fe(
+          "div",
+          Y === 2 ? { textAlign: "right" } : void 0,
+          S,
+        ),
+      ),
+    );
+    w.appendChild(p);
+    const A = Fe("div", {
+      border: `1px solid ${n.border}`,
+      borderRadius: "12px",
+      overflow: "hidden",
+    });
+    const tools = typeof getToolsList === "function" ? getToolsList() : (typeof globalThis.getToolsList === "function" ? globalThis.getToolsList() : []);
+    const pinned = l.pinnedTools || ["sfhome", "export", "sampledata", "whereused"];
+    const orderedTools = [];
+    pinned.forEach(id => {
+      const found = tools.find(t => t.id === id);
+      if (found) orderedTools.push({ ...found, isPinned: true });
+    });
+    tools.forEach(tool => {
+      if (!pinned.includes(tool.id)) {
+        orderedTools.push({ ...tool, isPinned: false });
+      }
+    });
+    let Q = -1;
+    orderedTools.forEach((S, Y) => {
+      const row = Fe("div", {
+        display: "grid",
+        gridTemplateColumns: H,
+        gap: "8px",
+        alignItems: "center",
+        padding: "10px 12px",
+        borderTop: Y === 0 ? "none" : `1px solid ${n.divider}`,
+        opacity: S.isPinned ? "1" : "0.55",
+      });
+      row.draggable = true;
+      row.addEventListener("dragstart", (je) => {
+        Q = Y;
+        row.style.opacity = "0.4";
+        try {
+          je.dataTransfer.effectAllowed = "move";
+          je.dataTransfer.setData("text/plain", S.id);
+        } catch {}
+      });
+      row.addEventListener("dragend", () => {
+        row.style.opacity = S.isPinned ? "1" : "0.55";
+        row.style.boxShadow = "none";
+        Q = -1;
+      });
+      row.addEventListener("dragover", (je) => {
+        je.preventDefault();
+        if (Q === -1 || Q === Y) {
+          row.style.boxShadow = "none";
+          return;
+        }
+        const Ge = row.getBoundingClientRect();
+        const J = je.clientY > Ge.top + Ge.height / 2;
+        row.style.boxShadow = J
+          ? `inset 0 -2px 0 ${n.accent}`
+          : `inset 0 2px 0 ${n.accent}`;
+      });
+      row.addEventListener("dragleave", () => {
+        row.style.boxShadow = "none";
+      });
+      row.addEventListener("drop", (je) => {
+        je.preventDefault();
+        row.style.boxShadow = "none";
+        if (Q === -1 || Q === Y) return;
+        const Ge = row.getBoundingClientRect();
+        const J = je.clientY > Ge.top + Ge.height / 2;
+        const reordered = [...orderedTools];
+        const [movedItem] = reordered.splice(Q, 1);
+        let destIdx = reordered.findIndex(t => t.id === S.id);
+        if (J) destIdx += 1;
+        reordered.splice(destIdx, 0, movedItem);
+        const newPinned = reordered.filter(t => t.isPinned).map(t => t.id);
+        N({ pinnedTools: newPinned });
+      });
+      const leftControls = Fe("div", { display: "flex", flexDirection: "column" });
+      const upArrow = Fe(
+        "button",
+        {
+          background: "transparent",
+          border: "none",
+          cursor: Y === 0 ? "default" : "pointer",
+          color: n.muted,
+          padding: "0",
+          lineHeight: "1",
+          opacity: Y === 0 ? "0.4" : "1",
+          fontSize: "11px",
+        },
+        "▲",
+      );
+      const downArrow = Fe(
+        "button",
+        {
+          background: "transparent",
+          border: "none",
+          cursor: Y === orderedTools.length - 1 ? "default" : "pointer",
+          color: n.muted,
+          padding: "0",
+          lineHeight: "1",
+          opacity: Y === orderedTools.length - 1 ? "0.4" : "1",
+          fontSize: "11px",
+        },
+        "▼",
+      );
+      upArrow.addEventListener("click", () => {
+        if (Y === 0) return;
+        const reordered = [...orderedTools];
+        [reordered[Y - 1], reordered[Y]] = [reordered[Y], reordered[Y - 1]];
+        const newPinned = reordered.filter(t => t.isPinned).map(t => t.id);
+        N({ pinnedTools: newPinned });
+      });
+      downArrow.addEventListener("click", () => {
+        if (Y === orderedTools.length - 1) return;
+        const reordered = [...orderedTools];
+        [reordered[Y + 1], reordered[Y]] = [reordered[Y], reordered[Y + 1]];
+        const newPinned = reordered.filter(t => t.isPinned).map(t => t.id);
+        N({ pinnedTools: newPinned });
+      });
+      leftControls.appendChild(upArrow);
+      leftControls.appendChild(downArrow);
+      row.appendChild(leftControls);
+      const middleContainer = Fe("div", {
+        display: "flex",
+        alignItems: "center",
+        gap: "9px",
+        fontSize: "13.5px",
+        fontWeight: "700",
+      });
+      const dragHandle = Fe(
+        "span",
+        {
+          color: n.faint,
+          cursor: "grab",
+          fontSize: "13px",
+          letterSpacing: "-1px",
+          userSelect: "none",
+        },
+        "⠿",
+      );
+      dragHandle.title = "Drag to reorder";
+      middleContainer.appendChild(dragHandle);
+      middleContainer.appendChild(Fe("span", void 0, S.icon || "🛠️"));
+      const textContainer = Fe("div", { display: "flex", flexDirection: "column", fontWeight: "normal" });
+      textContainer.appendChild(Fe("span", { fontWeight: "700", color: n.text }, S.label || S.id));
+      textContainer.appendChild(Fe("span", { fontSize: "11px", color: n.muted }, S.desc || ""));
+      middleContainer.appendChild(textContainer);
+      row.appendChild(middleContainer);
+      const rightContainer = Fe("div", { display: "flex", justifyContent: "flex-end" });
+      const viewButton = Fe(
+        "button",
+        {
+          background: "transparent",
+          border: `1px solid ${n.border}`,
+          borderRadius: "8px",
+          padding: "6px 9px",
+          cursor: "pointer",
+          color: S.isPinned ? n.accent : n.faint,
+          fontSize: "13px",
+        },
+        S.isPinned ? "👁" : "🚫",
+      );
+      viewButton.title = S.isPinned ? "Hide from Quick Actions" : "Show in Quick Actions";
+      viewButton.addEventListener("click", () => {
+        let newPinned = [...pinned];
+        if (S.isPinned) {
+          newPinned = newPinned.filter(id => id !== S.id);
+        } else {
+          newPinned.push(S.id);
+        }
+        N({ pinnedTools: newPinned });
+      });
+      rightContainer.appendChild(viewButton);
+      row.appendChild(rightContainer);
+      A.appendChild(row);
+    });
+    const browseRow = Fe("div", {
+      display: "grid",
+      gridTemplateColumns: H,
+      gap: "8px",
+      alignItems: "center",
+      padding: "10px 12px",
+      borderTop: `1px solid ${n.divider}`,
+      opacity: "0.85",
+    });
+    const browseLeftControls = Fe("div", { display: "flex", flexDirection: "column", opacity: "0.3" });
+    browseLeftControls.appendChild(Fe("span", { fontSize: "11px", textAlign: "center" }, "▲"));
+    browseLeftControls.appendChild(Fe("span", { fontSize: "11px", textAlign: "center" }, "▼"));
+    browseRow.appendChild(browseLeftControls);
+    const browseMiddle = Fe("div", {
+      display: "flex",
+      alignItems: "center",
+      gap: "9px",
+      fontSize: "13.5px",
+      fontWeight: "700",
+    });
+    const browseDragHandle = Fe("span", { color: n.faint, userSelect: "none", fontSize: "13px", letterSpacing: "-1px" }, "⠿");
+    browseDragHandle.style.cursor = "not-allowed";
+    browseMiddle.appendChild(browseDragHandle);
+    browseMiddle.appendChild(Fe("span", void 0, "🛠️"));
+    const browseTextContainer = Fe("div", { display: "flex", flexDirection: "column", fontWeight: "normal" });
+    browseTextContainer.appendChild(Fe("span", { fontWeight: "700", color: n.text }, "Browse all tools"));
+    browseTextContainer.appendChild(Fe("span", { fontSize: "11px", color: n.muted }, "Access the full tools directory"));
+    browseMiddle.appendChild(browseTextContainer);
+    browseRow.appendChild(browseMiddle);
+    const browseRight = Fe("div", { display: "flex", justifyContent: "flex-end" });
+    const browseViewButton = Fe(
+      "button",
+      {
+        background: "transparent",
+        border: `1px solid ${n.border}`,
+        borderRadius: "8px",
+        padding: "6px 9px",
+        cursor: "not-allowed",
+        color: n.faint,
+        fontSize: "13px",
+        opacity: "0.6",
+      },
+      "🚫",
+    );
+    browseViewButton.title = "Cannot hide this action";
+    browseRight.appendChild(browseViewButton);
+    browseRow.appendChild(browseRight);
+    A.appendChild(browseRow);
+    w.appendChild(A);
+    w.appendChild(
+      Fe(
+        "div",
+        { fontSize: "12px", color: n.muted, marginTop: "12px" },
+        "Drag rows (or use the arrows) to reorder. Applies to the overlay panel and takes effect next time you open it.",
+      ),
+    );
+    T(w);
+  }
   function be() {
     if (!c) return;
     c.innerHTML = "";
@@ -24828,6 +27901,8 @@ function uu(o, t) {
         return ye(T);
       case "tabs":
         return te(T);
+      case "quickactions":
+        return quickactions(T);
       case "notification":
         return Le(T);
       case "privacy":
@@ -24860,6 +27935,14 @@ function uu(o, t) {
           (S) => N({ cacheAutoUpdate: S }),
           "Auto update cache",
           "Keeps cached data fresh in the background.",
+        ),
+      ),
+      H.appendChild(
+        C(
+          l.ctrlShiftRReload !== !1,
+          (S) => N({ ctrlShiftRReload: S }),
+          "Ctrl+Shift+R hard reload shortcut",
+          "Hard reload the page (clear cache and reload) when you press Ctrl+Shift+R.",
         ),
       ));
     const p = Fe("div", { marginTop: "16px" });
@@ -25045,6 +28128,25 @@ function uu(o, t) {
         Be("Vertical position", s.verticalPosition, 0, 100, "%", (p) =>
           u({ verticalPosition: p }),
         ),
+      ),
+      w.appendChild(L()),
+      w.appendChild(X("Spotlight size")),
+      w.appendChild(
+        Fe(
+          "div",
+          { fontSize: "12px", color: n.muted, margin: "-2px 0 6px" },
+          "Size of the Spotlight popup. You can also drag its bottom-right corner. Applies the next time it opens.",
+        ),
+      ),
+      w.appendChild(
+        Be("Width", s.spotlightWidth ?? 1280, 600, 1600, "px", (p) =>
+          u({ spotlightWidth: p }),
+        ),
+      ),
+      w.appendChild(
+        Be("Height", s.spotlightHeight ?? 1200, 280, 1200, "px", (p) =>
+          u({ spotlightHeight: p }),
+        ),
       ));
     const H = x();
     (H.appendChild(
@@ -25057,6 +28159,14 @@ function uu(o, t) {
           (p) => u({ minimalView: p }),
           "Minimal view",
           "Show only the universal search strip instead of the full tabbed panel.",
+        ),
+      ),
+      H.appendChild(
+        C(
+          s.orgTabGroups === !0,
+          (p) => u({ orgTabGroups: p }),
+          "Group browser tabs by org",
+          "Put each org's Salesforce tabs into its own Chrome tab group (e.g. \"☁ acme · uat\"). Turning it off ungroups them.",
         ),
       ),
       H.appendChild(
@@ -25083,6 +28193,180 @@ function uu(o, t) {
           "Add an auto-fill button to Lightning new-record modals.",
         ),
       ),
+      H.appendChild(
+        C(
+          a.orgFaviconEnabled !== false,
+          (p) => {
+            b({ orgFaviconEnabled: p });
+            globalThis.chrome?.storage?.local?.set({
+              sf_spotlight_org_brand: { ...(a || {}), orgFaviconEnabled: p },
+            });
+          },
+          "Org Color Favicon",
+          "Color-code the browser tab favicon and display Org initials to easily differentiate orgs.",
+        ),
+      ),
+      H.appendChild(
+        C(
+          a.orgTitleEnabled !== false,
+          (p) => {
+            b({ orgTitleEnabled: p });
+            globalThis.chrome?.storage?.local?.set({
+              sf_spotlight_org_brand: { ...(a || {}), orgTitleEnabled: p },
+            });
+          },
+          "Org Name in Tab Title",
+          "Prepend the Salesforce Org name/label in browser tab titles (e.g. [Acme Corp]).",
+        ),
+      ),
+      (() => {
+        const brandBox = Fe("div", {
+          marginTop: "12px",
+          marginLeft: "30px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "14px",
+          padding: "16px 18px",
+          borderRadius: "12px",
+          background: n.inputBg || "rgba(0,0,0,0.03)",
+          border: `1px solid ${n.border}`,
+        });
+
+        // Custom Tab Title Prefix Input
+        const titleRow = Fe("div", {
+          display: "flex",
+          flexDirection: "column",
+          gap: "5px",
+        });
+        titleRow.appendChild(
+          Fe("div", { fontSize: "12.5px", fontWeight: "700", color: n.text }, "Custom Tab Title Prefix"),
+        );
+        titleRow.appendChild(
+          Fe("div", { fontSize: "11.5px", color: n.muted }, "Override the org tag shown in tab titles (e.g. Acme, DEV, UAT). Leave blank for default."),
+        );
+        const titleInput = Fe("input", {
+          maxWidth: "320px",
+          padding: "8px 12px",
+          borderRadius: "8px",
+          border: `1px solid ${n.border}`,
+          background: n.card,
+          color: n.text,
+          fontSize: "13px",
+          fontFamily: "inherit",
+          outline: "none",
+        });
+        titleInput.placeholder = "e.g. Acme DEV or Production";
+        titleInput.value = a.orgCustomLabel || "";
+        titleInput.addEventListener("keydown", (e) => {
+          e.stopPropagation();
+        });
+        titleInput.addEventListener("input", (e) => {
+          const val = e.target.value;
+          b({ orgCustomLabel: val });
+          globalThis.chrome?.storage?.local?.set({
+            sf_spotlight_org_brand: { ...(a || {}), orgCustomLabel: val },
+          });
+        });
+        titleRow.appendChild(titleInput);
+        brandBox.appendChild(titleRow);
+
+        // Custom Color Picker & Palette
+        const colorRow = Fe("div", {
+          display: "flex",
+          flexDirection: "column",
+          gap: "6px",
+        });
+        colorRow.appendChild(
+          Fe("div", { fontSize: "12.5px", fontWeight: "700", color: n.text }, "Custom Org Color"),
+        );
+        colorRow.appendChild(
+          Fe("div", { fontSize: "11.5px", color: n.muted }, "Choose a custom color for this org's tab favicon badge."),
+        );
+        
+        const paletteContainer = Fe("div", {
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          flexWrap: "wrap",
+          marginTop: "4px",
+        });
+
+        const presetColors = [
+          "#ef4444", "#f97316", "#f59e0b", "#10b981", "#06b6d4",
+          "#3b82f6", "#6366f1", "#8b5cf6", "#ec4899", "#14b8a6", "#475569"
+        ];
+
+        const activeColor = a.orgCustomColor || "";
+
+        presetColors.forEach((hex) => {
+          const isSelected = activeColor.toLowerCase() === hex.toLowerCase();
+          const swatch = Fe("button", {
+            width: "24px",
+            height: "24px",
+            borderRadius: "50%",
+            background: hex,
+            border: isSelected ? "2.5px solid #fff" : "1px solid rgba(0,0,0,0.15)",
+            outline: isSelected ? `2.5px solid ${hex}` : "none",
+            cursor: "pointer",
+            padding: "0",
+            flexShrink: "0",
+            transition: "transform .12s",
+          });
+          swatch.title = hex;
+          swatch.addEventListener("click", () => {
+            b({ orgCustomColor: hex });
+            globalThis.chrome?.storage?.local?.set({
+              sf_spotlight_org_brand: { ...(a || {}), orgCustomColor: hex },
+            });
+          });
+          paletteContainer.appendChild(swatch);
+        });
+
+        const nativeColorPicker = Fe("input", {
+          width: "30px",
+          height: "30px",
+          borderRadius: "7px",
+          border: `1px solid ${n.border}`,
+          cursor: "pointer",
+          padding: "1px 2px",
+          background: "transparent",
+        });
+        nativeColorPicker.type = "color";
+        nativeColorPicker.value = activeColor || "#3b82f6";
+        nativeColorPicker.title = "Pick any custom color";
+        nativeColorPicker.addEventListener("change", (e) => {
+          const hex = e.target.value;
+          b({ orgCustomColor: hex });
+          globalThis.chrome?.storage?.local?.set({
+            sf_spotlight_org_brand: { ...(a || {}), orgCustomColor: hex },
+          });
+        });
+        paletteContainer.appendChild(nativeColorPicker);
+
+        if (activeColor) {
+          const resetColorBtn = Fe("button", {
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "12px",
+            color: n.muted,
+            textDecoration: "underline",
+            marginLeft: "8px",
+          }, "Reset to Auto Color");
+          resetColorBtn.addEventListener("click", () => {
+            b({ orgCustomColor: "" });
+            globalThis.chrome?.storage?.local?.set({
+              sf_spotlight_org_brand: { ...(a || {}), orgCustomColor: "" },
+            });
+          });
+          paletteContainer.appendChild(resetColorBtn);
+        }
+
+        colorRow.appendChild(paletteContainer);
+        brandBox.appendChild(colorRow);
+
+        H.appendChild(brandBox);
+      })(),
       H.appendChild(
         Fe(
           "div",
@@ -25348,7 +28632,7 @@ function uu(o, t) {
         D(
           "Privacy & data",
           "Everything stays in your browser",
-          "SF Spotlight has no servers, no accounts, and no analytics. It runs entirely on your machine and talks only to your Salesforce org, using the session you're already logged in with.",
+          "SFPilot has no servers, no accounts, and no analytics. It runs entirely on your machine and talks only to your Salesforce org, using the session you're already logged in with.",
           p,
         ),
       ),
@@ -25484,8 +28768,170 @@ function uu(o, t) {
           { fontSize: "12.5px", color: n.muted, marginTop: "12px" },
           "ℹ  This version is used for new Salesforce API requests made by the extension.",
         ),
-      ),
-      T(w));
+      ));
+    const aiCard = x();
+    aiCard.appendChild(
+      D(
+        "AI Assistant",
+        "AI Provider Configuration",
+        "Choose Claude, OpenAI, Gemini, Qwen or OpenRouter and enter the matching API key to enable AI-powered code generation, optimization, and explanation features.",
+      )
+    );
+    aiCard.appendChild(L());
+    const aiState = {
+      provider: AI_PROVIDERS[l.aiProvider] ? l.aiProvider : "gemini",
+      model: l.aiModel || "",
+      keys: {
+        gemini: l.geminiApiKey || "",
+        anthropic: l.anthropicApiKey || "",
+        openai: l.openaiApiKey || "",
+        qwen: l.qwenApiKey || "",
+        openrouter: l.openrouterApiKey || "",
+      },
+    };
+    const aiSelectStyle = {
+      padding: "9px 12px",
+      fontSize: "13.5px",
+      fontWeight: "600",
+      borderRadius: "9px",
+      border: `1px solid ${n.border}`,
+      background: n.card,
+      color: n.text,
+      fontFamily: "inherit",
+      cursor: "pointer",
+      minWidth: "220px",
+    };
+    aiCard.appendChild(X("Provider"));
+    const providerSel = Fe("select", aiSelectStyle);
+    Object.entries(AI_PROVIDERS).forEach(([id, p]) => {
+      const o = Fe("option", void 0, p.name);
+      ((o.value = id), providerSel.appendChild(o));
+    });
+    providerSel.value = aiState.provider;
+    aiCard.appendChild(providerSel);
+
+    const modelLabel = X("Model");
+    modelLabel.style.marginTop = "14px";
+    aiCard.appendChild(modelLabel);
+    const modelSel = Fe("select", aiSelectStyle);
+    aiCard.appendChild(modelSel);
+    const customModelInput = Fe("input", {
+      display: "block",
+      marginTop: "8px",
+      width: "100%",
+      boxSizing: "border-box",
+      padding: "8px 12px",
+      fontSize: "13px",
+      borderRadius: "9px",
+      border: `1px solid ${n.border}`,
+      background: n.inputBg,
+      color: n.text,
+      fontFamily: "monospace",
+      outline: "none",
+    });
+    customModelInput.placeholder = "Custom model ID (optional, overrides the list)";
+    customModelInput.value = l.aiCustomModel || "";
+    customModelInput.addEventListener("change", () => N({ aiCustomModel: customModelInput.value.trim() }));
+    aiCard.appendChild(customModelInput);
+
+    const keyLabel = X("API Key");
+    keyLabel.style.marginTop = "14px";
+    aiCard.appendChild(keyLabel);
+    const keyRow = Fe("div", { display: "flex", gap: "8px", alignItems: "center" });
+    const apiKeyInput = Fe("input", {
+      flex: "1",
+      boxSizing: "border-box",
+      padding: "9px 12px",
+      fontSize: "13.5px",
+      borderRadius: "9px",
+      border: `1px solid ${n.border}`,
+      background: n.inputBg,
+      color: n.text,
+      fontFamily: "monospace",
+      outline: "none",
+    });
+    apiKeyInput.type = "password";
+    const testBtn = Fe(
+      "button",
+      {
+        padding: "9px 14px",
+        fontSize: "13px",
+        fontWeight: "600",
+        borderRadius: "9px",
+        border: `1px solid ${n.border}`,
+        background: n.card,
+        color: n.text,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      },
+      "Test key",
+    );
+    keyRow.appendChild(apiKeyInput);
+    keyRow.appendChild(testBtn);
+    aiCard.appendChild(keyRow);
+    const aiHint = Fe("div", { fontSize: "12.5px", color: n.muted, marginTop: "12px" });
+    aiCard.appendChild(aiHint);
+
+    const renderAiFields = () => {
+      const p = AI_PROVIDERS[aiState.provider];
+      const models = aiModelsFor(aiState.provider);
+      modelSel.innerHTML = "";
+      models.forEach((m) => {
+        const o = Fe("option", void 0, m.name);
+        ((o.value = m.id), modelSel.appendChild(o));
+      });
+      if (!models.some((m) => m.id === aiState.model)) {
+        if (p.liveModels && aiState.model && !aiOpenRouterModels) {
+          // Saved live model, catalogue not loaded yet: keep it visible.
+          const o = Fe("option", void 0, aiState.model);
+          ((o.value = aiState.model), modelSel.appendChild(o));
+        } else aiState.model = p.models[0].id;
+      }
+      modelSel.value = aiState.model;
+      if (p.liveModels && !aiOpenRouterModels)
+        loadOpenRouterModels().then((ok) => ok && AI_PROVIDERS[aiState.provider].liveModels && renderAiFields());
+      keyLabel.textContent = `${p.name} API Key`;
+      apiKeyInput.placeholder = `Enter ${p.name} API key...`;
+      apiKeyInput.value = aiState.keys[aiState.provider] || "";
+      aiHint.textContent = `ℹ Get a key at ${p.keyUrl} — keys are stored locally in your browser and sent only to ${p.name}.`;
+    };
+    providerSel.addEventListener("change", () => {
+      aiState.provider = providerSel.value;
+      renderAiFields();
+      customModelInput.value = "";
+      N({ aiProvider: aiState.provider, aiModel: aiState.model, aiCustomModel: "" });
+    });
+    modelSel.addEventListener("change", () => {
+      aiState.model = modelSel.value;
+      N({ aiModel: aiState.model });
+    });
+    apiKeyInput.addEventListener("change", () => {
+      const v = apiKeyInput.value.trim();
+      aiState.keys[aiState.provider] = v;
+      N({ [AI_PROVIDERS[aiState.provider].prefKey]: v });
+    });
+    testBtn.addEventListener("click", async () => {
+      const key = apiKeyInput.value.trim();
+      if (!key) return (aiHint.textContent = "⚠ Enter an API key first.");
+      testBtn.disabled = !0;
+      testBtn.textContent = "Testing…";
+      try {
+        await callAIProvider("Reply with OK.", {
+          provider: aiState.provider,
+          model: customModelInput.value.trim() || aiState.model,
+          apiKey: key,
+          maxTokens: 16,
+        });
+        aiHint.textContent = "✅ Key works.";
+      } catch (err) {
+        aiHint.textContent = `❌ ${err.message}`;
+      } finally {
+        testBtn.disabled = !1;
+        testBtn.textContent = "Test key";
+      }
+    });
+    renderAiFields();
+    T(w, aiCard);
   }
   function K(T) {
     const w = x();
@@ -25544,14 +28990,6 @@ function uu(o, t) {
           (S) => k({ typoFix: S }),
           "Auto-fix SOQL typos",
           "Correct common keyword typos (e.g. SELCT → SELECT) when a query runs.",
-        ),
-      ),
-      H.appendChild(
-        C(
-          r.sobjectContext,
-          (S) => k({ sobjectContext: S }),
-          "Seed from current record/object",
-          "Pre-fill the first query from the object or record you opened the panel on.",
         ),
       ),
       H.appendChild(
@@ -25943,11 +29381,6 @@ function uu(o, t) {
         ),
       ),
     ),
-      A.appendChild(
-        Z("🐛  Report a bug", "ghost", () =>
-          ks("https://forms.gle/ed2VcwQTJXTDaMUv6"),
-        ),
-      ),
       w.appendChild(A),
       T(w));
   }
@@ -26592,6 +30025,212 @@ function bu(o, t) {
   );
 }
 const yu = "2147483600";
+// ---------- Inspect Components: "Page info" (page type, layouts, Lightning page…) ----------
+function sfRest(path) {
+  return new Promise((res) =>
+    it().then((n) => {
+      if (!n?.instanceUrl || !n?.sessionId) return res(null);
+      globalThis.chrome.runtime.sendMessage(
+        { type: "REST_EXPLORE", instanceUrl: n.instanceUrl, sessionId: n.sessionId, endpoint: path, method: "GET" },
+        (r) => {
+          try {
+            res(r?.success && r.data?.ok ? JSON.parse(r.data.body) : null);
+          } catch {
+            res(null);
+          }
+        },
+      );
+    }),
+  );
+}
+function sfTooling(query) {
+  return new Promise((res) =>
+    it().then((n) => {
+      if (!n?.instanceUrl || !n?.sessionId) return res(null);
+      globalThis.chrome.runtime.sendMessage(
+        { type: "METADATA_QUERY", tooling: !0, instanceUrl: n.instanceUrl, sessionId: n.sessionId, query },
+        (r) => res(r?.success ? r.data || [] : null),
+      );
+    }),
+  );
+}
+// What kind of Lightning page is this, from the address alone
+function describePageFromUrl(loc = location) {
+  const path = loc.pathname,
+    m = (re) => path.match(re),
+    q = new URLSearchParams(loc.search);
+  let r;
+  if (/\/s\//.test(path) && !/\/lightning\//.test(path)) return { type: "Experience Cloud site page" };
+  if ((r = m(/\/lightning\/r\/(\w+)\/(\w{15,18})\/related\/(\w+)\/view/)))
+    return { type: "Related list", object: r[1], recordId: r[2], relationship: r[3] };
+  if ((r = m(/\/lightning\/r\/(\w+)\/(\w{15,18})\/(\w+)/)))
+    return { type: r[3] === "edit" ? "Record edit" : "Record page", object: r[1], recordId: r[2] };
+  if ((r = m(/\/lightning\/r\/(\w{15,18})\/view/))) return { type: "Record page", recordId: r[1] };
+  if ((r = m(/\/lightning\/o\/(\w+)\/list/)))
+    return { type: "List view", object: r[1], listView: q.get("filterName") || "Recently viewed" };
+  if ((r = m(/\/lightning\/o\/(\w+)\/new/))) return { type: "New record", object: r[1] };
+  if ((r = m(/\/lightning\/o\/(\w+)\/home/))) return { type: "Object home", object: r[1] };
+  if ((r = m(/\/lightning\/n\/(\w+)/))) return { type: "App page / custom tab", tab: r[1] };
+  if ((r = m(/\/lightning\/setup\/(\w+)/))) return { type: "Setup", setupPage: r[1] };
+  if (/\/lightning\/page\/home/.test(path)) return { type: "Home page" };
+  if ((r = m(/\/lightning\/app\/(\w+)/))) return { type: "App home", appId: r[1] };
+  if ((r = m(/\/lightning\/cmp\/([\w:]+)/))) return { type: "Lightning component URL", component: r[1] };
+  if (/\/apex\//.test(path)) return { type: "Visualforce page", vfPage: path.split("/apex/")[1] };
+  return { type: "Other", path };
+}
+async function collectPageInfo() {
+  const page = describePageFromUrl(),
+    base = bt(),
+    rows = [{ label: "Page type", value: page.type }];
+  page.setupPage && rows.push({ label: "Setup page", value: page.setupPage });
+  page.listView && rows.push({ label: "List view", value: page.listView });
+  page.relationship && rows.push({ label: "Related list", value: page.relationship });
+  page.component && rows.push({ label: "Component", value: page.component });
+  page.vfPage && rows.push({ label: "Visualforce page", value: page.vfPage });
+
+  // Current Lightning app
+  const app = await sfRest("/services/data/v60.0/ui-api/apps/selected?formFactor=Large");
+  app?.label && rows.push({ label: "Lightning app", value: `${app.label} (${app.developerName})` });
+
+  let object = page.object;
+  // Record: record type, page layout, compact layout
+  if (page.recordId && page.type !== "Related list") {
+    const ui = await sfRest(
+      `/services/data/v60.0/ui-api/record-ui/${page.recordId}?layoutTypes=Full&modes=View`,
+    );
+    const rec = ui?.records?.[page.recordId];
+    object = object || rec?.apiName;
+    rows.push({ label: "Record", value: `${page.recordId}${object ? ` · ${object}` : ""}` });
+    if (rec) {
+      const rt = rec.recordTypeInfo;
+      rows.push({ label: "Record type", value: rt ? `${rt.name} (${rt.recordTypeId})` : "Master (no record types)" });
+      const rtId = rec.recordTypeId || rt?.recordTypeId || "012000000000000AAA",
+        layout = ui.layouts?.[rec.apiName]?.[rtId]?.Full?.View || Object.values(ui.layouts?.[rec.apiName] || {})[0]?.Full?.View;
+      if (layout?.id) {
+        const nm = (await sfTooling(`SELECT Name FROM Layout WHERE Id = '${layout.id}'`))?.[0]?.Name;
+        rows.push({
+          label: "Page layout",
+          value: nm || layout.id,
+          note: nm ? layout.id : "",
+          href: `${base}/lightning/setup/ObjectManager/${rec.apiName}/PageLayouts/${layout.id}/view`,
+        });
+      }
+      const cl = await sfRest(`/services/data/v60.0/sobjects/${rec.apiName}/describe/compactLayouts`);
+      if (cl) {
+        const map = (cl.recordTypeCompactLayoutMappings || []).find((x) => x.recordTypeId === rtId),
+          id = map?.compactLayoutId || cl.defaultCompactLayoutId,
+          name = map?.compactLayoutName || (cl.compactLayouts || []).find((x) => x.id === id)?.label;
+        rows.push({
+          label: "Compact layout",
+          value: name || (id ? id : "System Default"),
+          href: `${base}/lightning/setup/ObjectManager/${rec.apiName}/CompactLayouts/view`,
+        });
+      }
+    } else rows.push({ label: "Record type / layout", value: "Could not load (no access or not a UI-API object)" });
+  } else if (object) rows.push({ label: "Object", value: object });
+
+  // Lightning page (FlexiPage)
+  const flexiLink = (id) => `${base}/lightning/setup/FlexiPageList/page?address=${encodeURIComponent("/" + id)}`;
+  if (page.tab) {
+    const tab = (await sfTooling(`SELECT Id, DeveloperName, Type FROM CustomTab WHERE DeveloperName = '${page.tab}'`))?.[0];
+    tab?.Type && rows.push({ label: "Tab type", value: tab.Type });
+    const fp = (await sfTooling(`SELECT Id, DeveloperName, MasterLabel, Type FROM FlexiPage WHERE DeveloperName = '${page.tab}'`))?.[0];
+    fp
+      ? rows.push({ label: "Lightning page", value: `${fp.MasterLabel} (${fp.DeveloperName})`, note: fp.Type, href: flexiLink(fp.Id) })
+      : rows.push({ label: "Lightning page", value: "Not a Lightning page tab (LWC, Visualforce or web tab)" });
+  } else if (object && /Record page|Record edit/.test(page.type)) {
+    const ent = (await sfTooling(`SELECT DurableId FROM EntityDefinition WHERE QualifiedApiName = '${object}'`))?.[0];
+    const ids = [object, ent?.DurableId].filter(Boolean).map((x) => `'${x}'`).join(", ");
+    const pages = await sfTooling(
+      `SELECT Id, DeveloperName, MasterLabel FROM FlexiPage WHERE Type = 'RecordPage' AND EntityDefinitionId IN (${ids})`,
+    );
+    pages?.length
+      ? rows.push({
+          label: "Lightning record pages",
+          value: pages.map((x) => x.MasterLabel).join(", "),
+          note: "Candidates for this object — the one shown depends on app, record type and profile assignment.",
+          links: pages.map((x) => ({ text: x.MasterLabel, href: flexiLink(x.Id) })),
+        })
+      : rows.push({ label: "Lightning record page", value: "System default (no custom record pages)" });
+  } else if (page.type === "Home page") {
+    const pages = await sfTooling(`SELECT Id, MasterLabel FROM FlexiPage WHERE Type = 'HomePage'`);
+    pages?.length &&
+      rows.push({
+        label: "Lightning home pages",
+        value: pages.map((x) => x.MasterLabel).join(", "),
+        note: "Candidates — the one shown depends on app and profile assignment.",
+        links: pages.map((x) => ({ text: x.MasterLabel, href: flexiLink(x.Id) })),
+      });
+  }
+  rows.push({ label: "URL path", value: location.pathname });
+  return rows;
+}
+function renderPageInfoPanel(isDark) {
+  const c = {
+    bg: isDark ? "#0e1626" : "#ffffff",
+    text: isDark ? "#e2e8f0" : "#1f2937",
+    muted: isDark ? "#94a3b8" : "#64748b",
+    border: isDark ? "rgba(148,163,184,0.25)" : "rgba(0,0,0,0.12)",
+    accent: "#3b82f6",
+  };
+  const panel = document.createElement("div");
+  Object.assign(panel.style, {
+    position: "fixed",
+    top: "64px",
+    right: "16px",
+    width: "380px",
+    maxHeight: "calc(100vh - 96px)",
+    overflowY: "auto",
+    background: c.bg,
+    color: c.text,
+    border: `1px solid ${c.border}`,
+    borderRadius: "12px",
+    boxShadow: "0 12px 32px rgba(0,0,0,0.28)",
+    padding: "12px 14px",
+    pointerEvents: "auto",
+    fontSize: "12.5px",
+  });
+  panel.innerHTML = `<div style="font-weight:800;font-size:13px;margin-bottom:8px">ℹ Page info</div><div style="color:${c.muted}">Loading…</div>`;
+  collectPageInfo()
+    .then((rows) => {
+      panel.lastChild.remove();
+      rows.forEach((r) => {
+        const row = document.createElement("div");
+        Object.assign(row.style, { padding: "7px 0", borderTop: `1px solid ${c.border}` });
+        const lb = document.createElement("div");
+        ((lb.textContent = r.label),
+          Object.assign(lb.style, { fontSize: "10.5px", fontWeight: "800", textTransform: "uppercase", letterSpacing: "0.05em", color: c.muted }));
+        const val = document.createElement("div");
+        ((val.textContent = r.value),
+          Object.assign(val.style, { fontWeight: "600", wordBreak: "break-word", marginTop: "2px" }));
+        (row.appendChild(lb), row.appendChild(val));
+        const links = r.links || (r.href ? [{ text: "Open in Setup ↗", href: r.href }] : []);
+        if (links.length) {
+          const lw = document.createElement("div");
+          (Object.assign(lw.style, { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "3px" }),
+            links.forEach((x) => {
+              const a = document.createElement("a");
+              ((a.textContent = r.links ? `${x.text} ↗` : x.text),
+                (a.href = x.href),
+                (a.target = "_blank"),
+                (a.rel = "noopener"),
+                Object.assign(a.style, { color: c.accent, fontSize: "12px", textDecoration: "none" }),
+                lw.appendChild(a));
+            }),
+            row.appendChild(lw));
+        }
+        if (r.note) {
+          const nt = document.createElement("div");
+          ((nt.textContent = r.note), Object.assign(nt.style, { fontSize: "11px", color: c.muted, marginTop: "2px" }), row.appendChild(nt));
+        }
+        panel.appendChild(row);
+      });
+    })
+    .catch((e) => {
+      panel.lastChild.textContent = `Could not load page info: ${e?.message || e}`;
+    });
+  return panel;
+}
 function Cu(o, t) {
   const e = "#3b82f6",
     n = t.isDark ? "#94a3b8" : "#64748b",
@@ -26648,6 +30287,29 @@ function Cu(o, t) {
     s.appendChild(d),
     i.appendChild(s),
     l === 0 && s.insertBefore(Os("No editable custom LWCs detected here."), d));
+  // "Page info": page type, app, record type, layouts, Lightning page
+  const infoBtn = document.createElement("button");
+  let infoPanel = null;
+  (Object.assign(infoBtn.style, {
+    background: "transparent",
+    color: "inherit",
+    border: `1px solid ${t.isDark ? "rgba(148,163,184,0.35)" : "rgba(0,0,0,0.18)"}`,
+    borderRadius: "8px",
+    padding: "5px 11px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: "12.5px",
+    fontWeight: "700",
+  }),
+    (infoBtn.textContent = "ℹ Page info"),
+    infoBtn.addEventListener("click", () => {
+      if (infoPanel) {
+        (infoPanel.remove(), (infoPanel = null));
+        return;
+      }
+      ((infoPanel = renderPageInfoPanel(t.isDark)), i.appendChild(infoPanel));
+    }),
+    s.insertBefore(infoBtn, d));
   const y = [];
   o.forEach((F) => {
     F.elements.forEach((k) => {
@@ -28067,7 +31729,27 @@ let mt = "light",
   Kn = "default",
   Vi = !1,
   Do = 100,
+  spW = 960,
+  spH = 640,
+  spMax = !1,
   zt = !1;
+// Popup box size: maximized fills the viewport, otherwise the saved size
+function spotlightBox(minimal) {
+  return spMax
+    ? { w: "calc(100vw - 48px)", h: minimal ? "calc(88vh - 250px)" : "calc(100vh - 240px)" }
+    : { w: `min(${spW}px, calc(100vw - 32px))`, h: `min(${spH}px, calc(100vh - 120px))` };
+}
+// Persist the Spotlight popup size into the shared settings object
+function saveSpotlightSize(w, h) {
+  ((spW = w), (spH = h));
+  try {
+    globalThis.chrome?.storage?.local?.get([Un], (o) => {
+      globalThis.chrome.storage.local.set({
+        [Un]: { ...Jn, ...(o?.[Un] || {}), spotlightWidth: w, spotlightHeight: h, spotlightMaximized: spMax },
+      });
+    });
+  } catch {}
+}
 const Si = "sf_spotlight_sidebar_collapsed";
 try {
   globalThis.chrome?.storage?.local?.get([Si], (o) => {
@@ -28140,92 +31822,99 @@ function to(o, t, e, n) {
       (t.style.display = "none"));
 }
 const Hn = [
-    { id: "home", label: "Home", placeholder: "", icon: "🏠" },
+    { id: "home", label: "Home", placeholder: "", icon: "" },
     {
       id: "tools",
       label: "Tools",
       placeholder: "Search tools & actions...",
-      icon: "🛠️",
+      icon: "",
     },
     {
       id: "setup",
       label: "Setup",
       placeholder: "Search Salesforce Setup...",
-      icon: "🏠",
+      icon: "",
     },
-    { id: "users", label: "Users", placeholder: "Search Users...", icon: "👤" },
-    { id: "flows", label: "Flows", placeholder: "Search Flows...", icon: "⚡" },
+    {
+      id: "export",
+      label: "Export Data / Query",
+      placeholder: "Search objects & SOQL...",
+      icon: "",
+      isTool: true,
+    },
+    { id: "users", label: "Users", placeholder: "Search Users...", icon: "" },
+    { id: "flows", label: "Flows", placeholder: "Search Flows...", icon: "" },
     {
       id: "metadata",
       label: "Metadata Explorer",
       placeholder: "Search metadata types...",
-      icon: "🧩",
+      icon: "",
     },
     {
       id: "security",
       label: "Security",
       placeholder: "Search Permission Sets, Groups & Profiles...",
-      icon: "🔑",
+      icon: "",
     },
     {
       id: "debug",
       label: "Log Explorer",
       placeholder: "Search your debug logs...",
-      icon: "🐞",
+      icon: "",
     },
     {
       id: "objects",
       label: "Objects",
       placeholder: "Search Objects...",
-      icon: "📦",
+      icon: "",
     },
     {
       id: "apextests",
       label: "Apex Tests",
       placeholder: "Search tests...",
-      icon: "🧪",
+      icon: "",
     },
     {
       id: "access",
       label: "Access Explorer",
       placeholder: "Access map...",
-      icon: "🗺️",
+      icon: "",
     },
     {
       id: "recent",
       label: "Recent",
       placeholder: "Search recently opened...",
-      icon: "🕘",
+      icon: "",
     },
     {
       id: "apps",
       label: "Apps & Tabs",
       placeholder: "Search apps & tabs...",
-      icon: "🚀",
+      icon: "",
     },
 ],
   Fa = ["apps"],
   $s = [
-    { kind: "tab", id: "home", label: "Home", icon: "🏠" },
-    { kind: "tab", id: "tools", label: "Apps & Tools", icon: "🛠️" },
-    { kind: "tab", id: "setup", label: "Quick Access", icon: "🔧" },
-    { kind: "tool", id: "export", label: "Query Editor", icon: "📝" },
-    { kind: "tab", id: "debug", label: "Log Explorer", icon: "🐞" },
-    { kind: "tab", id: "apextests", label: "Apex Tests", icon: "🧪" },
-    { kind: "tab", id: "access", label: "Access Explorer", icon: "🗺️" },
-    { kind: "tool", id: "restexplorer", label: "REST Console", icon: "🔌" },
-    { kind: "tool", id: "eventmonitor", label: "Event Console", icon: "📡" },
-    { kind: "tool", id: "executeanonymous", label: "Code Editor", icon: "⚡" },
-    { kind: "tool", id: "flowmanager", label: "Flow Manager", icon: "🌊" },
+    { kind: "tab", id: "home", label: "Home", icon: "" },
+    { kind: "tab", id: "tools", label: "Apps & Tools", icon: "" },
+    { kind: "tab", id: "setup", label: "Quick Access", icon: "" },
+    { kind: "tool", id: "export", label: "Query Editor", icon: "" },
+    { kind: "tab", id: "debug", label: "Log Explorer", icon: "" },
+    { kind: "tab", id: "apextests", label: "Apex Tests", icon: "" },
+    { kind: "tab", id: "access", label: "Access Explorer", icon: "" },
+    { kind: "tool", id: "restexplorer", label: "REST Console", icon: "" },
+    { kind: "tool", id: "eventmonitor", label: "Event Console", icon: "" },
+    { kind: "tool", id: "executeanonymous", label: "Code Editor", icon: "" },
+    { kind: "tool", id: "flowmanager", label: "Flow Manager", icon: "" },
     {
       kind: "tool",
       id: "validationrules",
       label: "Validation Rules",
-      icon: "✅",
+      icon: "",
     },
-    { kind: "tool", id: "automationmap", label: "Automation Map", icon: "🧭" },
-    { kind: "tool", id: "orglimits", label: "Org Status", icon: "📈" },
-    { kind: "tool", id: "objectdetails", label: "Object Details", icon: "📦" },
+    { kind: "tool", id: "automationmap", label: "Automation Map", icon: "" },
+    { kind: "tool", id: "orglimits", label: "Org Status", icon: "" },
+    { kind: "tool", id: "objectdetails", label: "Object Details", icon: "" },
   ],
   ao = "sf_spotlight_tab_config";
 function $a() {
@@ -28288,13 +31977,82 @@ function $u(o) {
     } catch {}
 }
 Fu();
+// Export Data drafts, kept locally per org + object: { "<host>|<object>": { active, tabs } }
+const Dk = "sf_spotlight_soql_drafts";
+let soqlDrafts = {},
+  soqlDraftTimer = null;
+try {
+  globalThis.chrome?.storage?.local?.get([Dk], (o) => {
+    const v = o?.[Dk];
+    soqlDrafts = v && typeof v == "object" ? v : {};
+  });
+} catch {}
+function saveSoqlDraft(key, draft) {
+  ((soqlDrafts[key] = { ...draft, ts: Date.now() }), clearTimeout(soqlDraftTimer));
+  soqlDraftTimer = setTimeout(() => {
+    // Keep the 100 most recent drafts
+    const keys = Object.keys(soqlDrafts).sort((a, b) => (soqlDrafts[b].ts || 0) - (soqlDrafts[a].ts || 0));
+    keys.slice(100).forEach((k) => delete soqlDrafts[k]);
+    try {
+      globalThis.chrome?.storage?.local?.set({ [Dk]: soqlDrafts });
+    } catch {}
+  }, 400);
+}
+// Query Builder templates: [{ id, name, object, soql, state, ts }]
+const QBT_KEY = "sf_spotlight_qb_templates";
+let qbTemplates = [];
+try {
+  globalThis.chrome?.storage?.local?.get([QBT_KEY], (o) => {
+    qbTemplates = Array.isArray(o?.[QBT_KEY]) ? o[QBT_KEY] : [];
+  });
+  // Stay in sync with templates saved from other tabs
+  globalThis.chrome?.storage?.onChanged?.addListener((ch, area) => {
+    area === "local" && Array.isArray(ch[QBT_KEY]?.newValue) && (qbTemplates = ch[QBT_KEY].newValue);
+  });
+} catch {}
+function saveQbTemplates() {
+  try {
+    globalThis.chrome?.storage?.local?.set({ [QBT_KEY]: qbTemplates });
+  } catch {}
+}
+// "Group by category" for the Apps & Tools grid — off by default, remembered per org
+const Gk = "sf_spotlight_tools_grouped";
+let toolsGroupedByOrg = {};
+try {
+  globalThis.chrome?.storage?.local?.get([Gk], (o) => {
+    const v = o?.[Gk];
+    toolsGroupedByOrg = v && typeof v == "object" ? v : {};
+  });
+} catch {}
+function isToolsGrouped() {
+  return toolsGroupedByOrg[Vt(en())] === !0;
+}
+function setToolsGrouped(on) {
+  const k = Vt(en());
+  (on ? (toolsGroupedByOrg[k] = !0) : delete toolsGroupedByOrg[k]);
+  try {
+    globalThis.chrome?.storage?.local?.set({ [Gk]: toolsGroupedByOrg });
+  } catch {}
+}
+const toolCategories = [
+  { label: "Data", ids: ["export", "querybuilder", "dataimport", "sampledata", "magicfill"] },
+  { label: "Schema & Objects", ids: ["objectmanager", "objectdetails", "bulkfieldcreator", "fieldapi", "whereused"] },
+  { label: "Automation", ids: ["automationmap", "flowmanager", "validationrules"] },
+  { label: "Developer", ids: ["executeanonymous", "aiagent", "aicodeeditor", "restexplorer", "eventmonitor", "inspectlwc", "webconsole", "webconsolesetup"] },
+  { label: "Security & Users", ids: ["permcompare", "permclone", "userclone", "accessmap"] },
+  { label: "Org Health", ids: ["orgdetails", "orglimits", "apiusage", "storage", "speedtest", "release"] },
+  { label: "Navigation & Utilities", ids: ["sfhome", "classic", "settings", "shortcuts", "clearsession", "ghost", "whatsnew"] },
+];
 Ni((o) => {
   ((mt = o.spotlightTheme),
     (qi = o.showObjectExplorer !== !1),
     (Kn = o.uiSkin || "default"),
     Pi(Kn),
     (Vi = o.minimalView === !0),
-    (Do = typeof o.opacity == "number" ? o.opacity : 100));
+    (Do = typeof o.opacity == "number" ? o.opacity : 100),
+    typeof o.spotlightWidth == "number" && (spW = o.spotlightWidth),
+    typeof o.spotlightHeight == "number" && (spH = o.spotlightHeight),
+    (spMax = o.spotlightMaximized === !0));
 });
 try {
   globalThis.chrome?.storage?.onChanged?.addListener((o, t) => {
@@ -28306,7 +32064,10 @@ try {
           (Kn = e.uiSkin || "default"),
           Pi(Kn),
           (Vi = e.minimalView === !0),
-          typeof e.opacity == "number" && (Do = e.opacity));
+          typeof e.opacity == "number" && (Do = e.opacity),
+          typeof e.spotlightWidth == "number" && (spW = e.spotlightWidth),
+          typeof e.spotlightHeight == "number" && (spH = e.spotlightHeight),
+          (spMax = e.spotlightMaximized === !0));
       }
       (o[ao]?.newValue && (Yn = wo(o[ao].newValue)),
         o.sf_spotlight_tools_state?.newValue && xa(() => Ea()),
@@ -28344,6 +32105,7 @@ if (pn) {
   }
   try {
     Mo = new URLSearchParams(location.search).get("tab");
+    if (Mo === "settings") Mo = "__settings";
   } catch {
     Mo = null;
   }
@@ -28378,7 +32140,7 @@ function Ws() {
   const o = globalThis.chrome?.runtime;
   if (!o?.getURL) return;
   const t = Vt(en()),
-    e = `${o.getURL("spotlight.html")}?host=${encodeURIComponent(t)}&tab=__settings`;
+    e = `${o.getURL("sfpilot.html")}?host=${encodeURIComponent(t)}&tab=__settings`;
   o.sendMessage
     ? o.sendMessage({ type: "OPEN_TAB", url: e })
     : window.open(e, "_blank");
@@ -29251,7 +33013,7 @@ function Xn(o, t, e) {
 function Bu(o, t, e) {
   o.innerHTML = "";
   const n = kt(t);
-  o.appendChild(Xn(t, "🏢  Org Details", e));
+  o.appendChild(Xn(t, "Org Details", e));
   const i = document.createElement("div");
   (Object.assign(i.style, { padding: "4px 28px 20px" }), o.appendChild(i));
   const s = (a) => {
@@ -29362,7 +33124,7 @@ function Bu(o, t, e) {
 function Wu(o, t, e) {
   o.innerHTML = "";
   const n = kt(t);
-  o.appendChild(Xn(t, "✨  Magic Fill", e));
+  o.appendChild(Xn(t, "Magic Fill", e));
   const i = document.createElement("div");
   (Object.assign(i.style, { padding: "6px 28px 24px" }), o.appendChild(i));
   const s = document.createElement("div");
@@ -29437,7 +33199,7 @@ function Wu(o, t, e) {
 function Uu(o, t, e) {
   o.innerHTML = "";
   const n = kt(t);
-  o.appendChild(Xn(t, "🚀  Salesforce Release", e));
+  o.appendChild(Xn(t, "Salesforce Release", e));
   const i = document.createElement("div");
   (Object.assign(i.style, { padding: "8px 28px 20px" }), o.appendChild(i));
   const s = document.createElement("div");
@@ -30082,7 +33844,7 @@ function renderObjectDetails(container, isDark, onBack) {
     flex: "1",
     minHeight: "0",
     overflowY: "auto",
-    padding: "24px 28px"
+    padding: "16px 20px"
   });
   mainDiv.appendChild(body);
 
@@ -30093,7 +33855,7 @@ function renderObjectDetails(container, isDark, onBack) {
     display: "flex",
     gap: "12px",
     alignItems: "center",
-    marginBottom: "20px"
+    marginBottom: "12px"
   });
   body.appendChild(selectSection);
 
@@ -30123,7 +33885,7 @@ function renderObjectDetails(container, isDark, onBack) {
   const detailsContainer = $e("div", {
     display: "none",
     flexDirection: "column",
-    gap: "20px"
+    gap: "12px"
   });
   body.appendChild(detailsContainer);
 
@@ -30193,8 +33955,8 @@ function renderObjectDetails(container, isDark, onBack) {
 
     const summaryRow = $e("div", {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-      gap: "16px"
+      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+      gap: "10px"
     });
     detailsContainer.appendChild(summaryRow);
 
@@ -30202,14 +33964,14 @@ function renderObjectDetails(container, isDark, onBack) {
       const card = $e("div", {
         background: e.panel,
         border: `1px solid ${e.border}`,
-        borderRadius: "12px",
-        padding: "14px 18px",
+        borderRadius: "10px",
+        padding: "8px 12px",
         display: "flex",
         flexDirection: "column",
-        gap: "4px"
+        gap: "2px"
       });
-      card.appendChild($e("div", { fontSize: "11px", color: e.faint, fontWeight: "700", textTransform: "uppercase" }, title));
-      card.appendChild($e("div", { fontSize: "15px", fontWeight: "800", color: e.text }, val));
+      card.appendChild($e("div", { fontSize: "10px", color: e.faint, fontWeight: "700", textTransform: "uppercase" }, title));
+      card.appendChild($e("div", { fontSize: "13.5px", fontWeight: "800", color: e.text }, val));
       return card;
     };
 
@@ -30222,7 +33984,7 @@ function renderObjectDetails(container, isDark, onBack) {
       display: "flex",
       gap: "8px",
       flexWrap: "wrap",
-      marginTop: "4px"
+      marginTop: "0px"
     });
     detailsContainer.appendChild(capabilities);
 
@@ -30247,8 +34009,8 @@ function renderObjectDetails(container, isDark, onBack) {
     const statsRow = $e("div", {
       display: "grid",
       gridTemplateColumns: "repeat(3, 1fr)",
-      gap: "16px",
-      marginTop: "8px"
+      gap: "10px",
+      marginTop: "0px"
     });
     detailsContainer.appendChild(statsRow);
     statsRow.appendChild(createCard("Total Fields", String(fields.length)));
@@ -30259,7 +34021,7 @@ function renderObjectDetails(container, isDark, onBack) {
       display: "flex",
       gap: "12px",
       alignItems: "center",
-      marginTop: "12px"
+      marginTop: "4px"
     });
     detailsContainer.appendChild(actionRow);
 
@@ -30391,6 +34153,701 @@ function renderObjectDetails(container, isDark, onBack) {
   }
 }
 
+
+function renderAICodeEditor(container, isDark, onBack, executeApex, renderAnalyzer, flashToast) {
+  container.innerHTML = "";
+  const e = kt(isDark);
+
+  const mainDiv = $e("div", {
+    height: "100%",
+    minHeight: "0",
+    display: "flex",
+    flexDirection: "column",
+    background: e.bg,
+    color: e.text
+  });
+  container.appendChild(mainDiv);
+
+  const { head: header } = Wo(e, "🤖 AI Code Editor", onBack, "Tools");
+  mainDiv.appendChild(header);
+
+  const layout = $e("div", {
+    flex: "1",
+    minHeight: "0",
+    display: "flex",
+    background: e.bg,
+  });
+  mainDiv.appendChild(layout);
+
+  // Left Column: Editor & Console (flex: 1.4)
+  const leftCol = $e("div", {
+    flex: "1.4",
+    display: "flex",
+    flexDirection: "column",
+    borderRight: `1px solid ${e.divider}`,
+    padding: "10px",
+    minWidth: "0"
+  });
+  layout.appendChild(leftCol);
+
+  // Editor toolbar
+  const editorToolbar = $e("div", {
+    display: "flex",
+    gap: "6px",
+    alignItems: "center",
+    marginBottom: "6px",
+    flexShrink: "0"
+  });
+  leftCol.appendChild(editorToolbar);
+
+  // File Selector dropdown
+  const fileSelect = $e("select", {
+    padding: "5px 8px",
+    fontSize: "12px",
+    borderRadius: "6px",
+    border: `1px solid ${e.border}`,
+    background: e.inputBg,
+    color: e.text,
+    fontFamily: "inherit",
+    outline: "none",
+    maxWidth: "180px",
+    cursor: "pointer"
+  });
+  editorToolbar.appendChild(fileSelect);
+
+  const executeBtn = $e("button", {
+    background: e.accent,
+    color: "#fff",
+    border: "none",
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer"
+  }, "▶ Execute");
+  editorToolbar.appendChild(executeBtn);
+
+  // Save to Org button
+  const saveBtn = $e("button", {
+    background: "#10b981", // modern green
+    color: "#fff",
+    border: "none",
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+    opacity: "0.5",
+    disabled: true
+  }, "💾 Save to Org");
+  editorToolbar.appendChild(saveBtn);
+
+  const formatBtn = $e("button", {
+    background: "transparent",
+    border: `1px solid ${e.border}`,
+    color: e.text,
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer"
+  }, "✨ Format");
+  editorToolbar.appendChild(formatBtn);
+
+  const clearBtn = $e("button", {
+    background: "transparent",
+    border: `1px solid ${e.border}`,
+    color: e.text,
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer"
+  }, "🗑 Clear");
+  editorToolbar.appendChild(clearBtn);
+
+  // Show/Hide AI Toggle Button
+  const toggleAiBtn = $e("button", {
+    background: "transparent",
+    border: `1px solid ${e.border}`,
+    color: e.text,
+    borderRadius: "6px",
+    padding: "5px 10px",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer",
+    marginLeft: "auto"
+  }, "🤖 Show AI");
+  editorToolbar.appendChild(toggleAiBtn);
+
+  let aiVisible = false;
+  toggleAiBtn.addEventListener("click", () => {
+    aiVisible = !aiVisible;
+    rightCol.style.display = aiVisible ? "flex" : "none";
+    toggleAiBtn.textContent = aiVisible ? "🤖 Hide AI" : "🤖 Show AI";
+    if (monacoEditor) {
+      setTimeout(() => monacoEditor.layout(), 50);
+    }
+  });
+
+  // Editor container
+  const editorContainer = $e("div", {
+    flex: "1",
+    minHeight: "200px",
+    border: `1px solid ${e.border}`,
+    borderRadius: "8px",
+    overflow: "hidden",
+    position: "relative",
+    background: isDark ? "#1e1e1e" : "#ffffff"
+  });
+  leftCol.appendChild(editorContainer);
+
+  // Output container for execution logs
+  const outputContainer = $e("div", {
+    height: "110px",
+    marginTop: "6px",
+    border: `1px solid ${e.border}`,
+    borderRadius: "8px",
+    background: isDark ? "#0f172a" : "#f8fafc",
+    overflowY: "auto",
+    padding: "8px",
+    fontSize: "12px",
+    fontFamily: "monospace",
+    flexShrink: "0"
+  });
+  outputContainer.textContent = "Results and debug logs will be displayed here.";
+  leftCol.appendChild(outputContainer);
+
+  // Right Column: AI Assistant (flex: 1)
+  const rightCol = $e("div", {
+    flex: "1",
+    display: "none",
+    flexDirection: "column",
+    background: e.side || e.surface,
+    padding: "10px",
+    minWidth: "0"
+  });
+  layout.appendChild(rightCol);
+
+  // AI Title
+  rightCol.appendChild($e("div", {
+    fontSize: "12px",
+    fontWeight: "800",
+    marginBottom: "6px",
+    color: e.text
+  }, "AI CODE ASSISTANT"));
+
+  // AI Actions Grid
+  const aiActionsGrid = $e("div", {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "4px",
+    marginBottom: "6px",
+    flexShrink: "0"
+  });
+  rightCol.appendChild(aiActionsGrid);
+
+  const createAiBtn = (label, promptPrefix) => {
+    const btn = $e("button", {
+      background: e.surface,
+      border: `1px solid ${e.border}`,
+      color: e.text,
+      borderRadius: "6px",
+      padding: "5px",
+      fontSize: "11px",
+      fontWeight: "600",
+      cursor: "pointer",
+      textAlign: "center"
+    }, label);
+    btn.addEventListener("click", () => triggerAiAction(promptPrefix));
+    return btn;
+  };
+
+  aiActionsGrid.appendChild(createAiBtn("Explain Code", "Explain the following Apex code concisely:"));
+  aiActionsGrid.appendChild(createAiBtn("Optimize", "Optimize the following Apex code for CPU usage, heap limits, and DML bulkification:"));
+  aiActionsGrid.appendChild(createAiBtn("Fix Errors", "Find any compile errors, bugs, or exceptions in this Apex code and write the corrected code:"));
+  aiActionsGrid.appendChild(createAiBtn("Generate Test", "Write a complete Salesforce Apex Test Class for the following code:"));
+
+  // Chat/Response box
+  const chatBox = $e("div", {
+    flex: "1",
+    border: `1px solid ${e.border}`,
+    borderRadius: "8px",
+    background: isDark ? "#0f172a" : "#fff",
+    overflowY: "auto",
+    padding: "8px",
+    fontSize: "12px",
+    lineHeight: "1.4",
+    marginBottom: "6px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px"
+  });
+  rightCol.appendChild(chatBox);
+
+  // Chat Input Row
+  const chatInputRow = $e("div", {
+    display: "flex",
+    gap: "8px",
+    flexShrink: "0"
+  });
+  rightCol.appendChild(chatInputRow);
+
+  const chatInput = $e("textarea", {
+    flex: "1",
+    padding: "8px 12px",
+    fontSize: "12.5px",
+    borderRadius: "8px",
+    border: `1px solid ${e.border}`,
+    background: e.inputBg,
+    color: e.text,
+    outline: "none",
+    resize: "none",
+    height: "38px",
+    fontFamily: "inherit"
+  });
+  chatInput.placeholder = "Ask AI to generate or modify code…  (Enter to send, Shift+Enter for new line)";
+  chatInputRow.appendChild(chatInput);
+
+  const sendBtn = $e("button", {
+    background: e.accent,
+    color: "#fff",
+    border: "none",
+    borderRadius: "8px",
+    padding: "0 14px",
+    fontSize: "12.5px",
+    fontWeight: "700",
+    cursor: "pointer"
+  }, "Send");
+  chatInputRow.appendChild(sendBtn);
+
+  // Editor setup variables
+  let monacoEditor = null;
+  let fallbackTextarea = null;
+  let selectedFile = null;
+  let filesList = [];
+
+  // Load Monaco or Textarea
+  // MV3 forbids remotely hosted code, so Monaco can only be used if it is bundled
+  // and already on the page; otherwise fall back to the plain textarea editor.
+  function loadMonaco(onSuccess, onError) {
+    if (window.monaco) onSuccess();
+    else onError();
+  }
+
+  loadMonaco(() => {
+    editorContainer.innerHTML = "";
+    monacoEditor = monaco.editor.create(editorContainer, {
+      value: `// Write your Apex code here\npublic class TempCode {\n    public static void run() {\n        System.debug('Hello World');\n    }\n}`,
+      language: "apex",
+      theme: isDark ? "vs-dark" : "vs",
+      automaticLayout: true,
+      minimap: { enabled: false },
+      fontSize: 12.5
+    });
+  }, () => {
+    editorContainer.innerHTML = "";
+    fallbackTextarea = $e("textarea", {
+      width: "100%",
+      height: "100%",
+      boxSizing: "border-box",
+      border: "none",
+      background: "transparent",
+      color: e.text,
+      fontFamily: "monospace",
+      fontSize: "12.5px",
+      padding: "12px",
+      outline: "none",
+      resize: "none"
+    });
+    fallbackTextarea.value = `// Write your Apex code here\npublic class TempCode {\n    public static void run() {\n        System.debug('Hello World');\n    }\n}`;
+    fallbackTextarea.spellcheck = false;
+    fallbackTextarea.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Tab") return;
+      ev.preventDefault();
+      const t = fallbackTextarea, st = t.selectionStart, en = t.selectionEnd;
+      t.value = t.value.slice(0, st) + "    " + t.value.slice(en);
+      t.selectionStart = t.selectionEnd = st + 4;
+    });
+    editorContainer.appendChild(fallbackTextarea);
+  });
+
+  const getCodeValue = () => {
+    if (monacoEditor) return monacoEditor.getValue();
+    if (fallbackTextarea) return fallbackTextarea.value;
+    return "";
+  };
+
+  const setCodeValue = (val) => {
+    if (monacoEditor) monacoEditor.setValue(val);
+    else if (fallbackTextarea) fallbackTextarea.value = val;
+  };
+
+  // Populate Apex Classes List
+  async function loadOrgFiles() {
+    fileSelect.innerHTML = "<option>Loading files...</option>";
+    try {
+      const session = await it();
+      if (!session?.instanceUrl || !session?.sessionId) {
+        fileSelect.innerHTML = "<option>Session error</option>";
+        return;
+      }
+      const response = await fetch(`${session.instanceUrl}/services/data/v60.0/tooling/query/?q=SELECT+Id,+Name,+Body+FROM+ApexClass+ORDER+BY+Name+LIMIT+1000`, {
+        headers: { Authorization: `Bearer ${session.sessionId}` }
+      });
+      const data = await response.json();
+      filesList = data.records || [];
+      
+      fileSelect.innerHTML = '<option value="">-- Execute Anonymous / New --</option>';
+      filesList.forEach(file => {
+        const opt = $e("option", {}, file.Name);
+        opt.value = file.Id;
+        fileSelect.appendChild(opt);
+      });
+    } catch (err) {
+      fileSelect.innerHTML = "<option>Failed to load files</option>";
+    }
+  }
+
+  loadOrgFiles();
+
+  fileSelect.addEventListener("change", () => {
+    const fileId = fileSelect.value;
+    if (!fileId) {
+      selectedFile = null;
+      setCodeValue(`// Write your Apex code here\npublic class TempCode {\n    public static void run() {\n        System.debug('Hello World');\n    }\n}`);
+      saveBtn.disabled = true;
+      saveBtn.style.opacity = "0.5";
+      return;
+    }
+    const file = filesList.find(f => f.Id === fileId);
+    if (file) {
+      selectedFile = file;
+      setCodeValue(file.Body || "");
+      saveBtn.disabled = false;
+      saveBtn.style.opacity = "1";
+    }
+  });
+
+  clearBtn.addEventListener("click", () => setCodeValue(""));
+
+  formatBtn.addEventListener("click", () => {
+    if (monacoEditor) {
+      monacoEditor.getAction('editor.action.formatDocument').run();
+    } else {
+      flashToast("Formatting only supported in Monaco Editor mode.");
+    }
+  });
+
+  executeBtn.addEventListener("click", async () => {
+    const code = getCodeValue();
+    if (!code.trim()) {
+      flashToast("Nothing to execute");
+      return;
+    }
+    executeBtn.textContent = "Running...";
+    executeBtn.disabled = true;
+    outputContainer.textContent = "Executing Apex anonymously...";
+    try {
+      const res = await executeApex(code, "standard");
+      executeBtn.textContent = "▶ Execute";
+      executeBtn.disabled = false;
+      outputContainer.innerHTML = "";
+      renderAnalyzer(outputContainer, res, "AICodeEditor.log", onBack);
+    } catch (err) {
+      executeBtn.textContent = "▶ Execute";
+      executeBtn.disabled = false;
+      outputContainer.textContent = "Error: " + err.message;
+    }
+  });
+
+  // Save/Deploy Apex Class to Org
+  saveBtn.addEventListener("click", async () => {
+    if (!selectedFile) return;
+    saveBtn.textContent = "Saving...";
+    saveBtn.disabled = true;
+    outputContainer.textContent = "Deploying code updates to Salesforce...";
+    try {
+      const session = await it();
+      const res = await fetch(`${session.instanceUrl}/services/data/v60.0/tooling/sobjects/ApexClass/${selectedFile.Id}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.sessionId}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ Body: getCodeValue() })
+      });
+      saveBtn.textContent = "💾 Save to Org";
+      saveBtn.disabled = false;
+      if (res.ok) {
+        outputContainer.textContent = "Saved successfully! Compiled in org.";
+        flashToast("Saved successfully!");
+        selectedFile.Body = getCodeValue();
+      } else {
+        const errData = await res.json();
+        if (Array.isArray(errData) && errData[0]) {
+          outputContainer.innerHTML = `<span style="color:${e.danger}"><b>Compilation Error:</b> ${errData[0].message}</span>`;
+        } else {
+          outputContainer.innerHTML = `<span style="color:${e.danger}"><b>Deployment Error:</b> ${JSON.stringify(errData)}</span>`;
+        }
+      }
+    } catch (err) {
+      saveBtn.textContent = "💾 Save to Org";
+      saveBtn.disabled = false;
+      outputContainer.textContent = "Save failed: " + err.message;
+    }
+  });
+
+  async function triggerAiAction(prefix) {
+    const code = getCodeValue();
+    const fullPrompt = `${prefix}\n\n\`\`\`apex\n${code}\n\`\`\``;
+    await askAI(fullPrompt);
+  }
+
+  chatInput.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" || ev.shiftKey || ev.isComposing || ev.keyCode === 229) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    sendBtn.click();
+  });
+
+  sendBtn.addEventListener("click", async () => {
+    const text = chatInput.value.trim();
+    if (!text) return;
+    chatInput.value = "";
+    const code = getCodeValue();
+    const fullPrompt = `${text}\n\nCode context:\n\`\`\`apex\n${code}\n\`\`\``;
+    await askAI(fullPrompt);
+  });
+
+  async function askAI(promptText) {
+    const provider = AI_PROVIDERS[globalPrefs.aiProvider] ? globalPrefs.aiProvider : "gemini";
+    const providerName = AI_PROVIDERS[provider].name;
+    if (!globalPrefs[AI_PROVIDERS[provider].prefKey]) {
+      chatBox.innerHTML = `<div style="color:${e.danger};font-weight:700">${providerName} API Key is not configured. Please go to Settings (☁️ Salesforce) and add your key first!</div>`;
+      return;
+    }
+
+    const messageDiv = $e("div", {
+      padding: "8px",
+      borderRadius: "6px",
+      background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+      marginBottom: "8px",
+      color: e.text
+    });
+    messageDiv.innerHTML = `<b>Thinking...</b>`;
+    chatBox.appendChild(messageDiv);
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    try {
+      const text = await callAIProvider(promptText);
+
+      messageDiv.innerHTML = text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\`\`\`(\w*)\n([\s\S]*?)\`\`\`/g, '<pre style="background:rgba(0,0,0,0.05);padding:8px;border-radius:6px;overflow-x:auto">$2</pre>')
+        .replace(/\`([^\`]+)\`/g, '<code>$1</code>')
+        .replace(/\n/g, "<br>");
+        
+      chatBox.scrollTop = chatBox.scrollHeight;
+    } catch (err) {
+      messageDiv.innerHTML = `<span style="color:${e.danger}">Error: ${err.message}</span>`;
+    }
+  }
+}
+
+
+
+// ---- Shared AI provider layer (Claude / OpenAI / Gemini / Qwen / OpenRouter) ----
+// "compat" providers speak the OpenAI chat-completions format at `url`.
+const AI_PROVIDERS = {
+  anthropic: {
+    name: "Anthropic Claude",
+    prefKey: "anthropicApiKey",
+    keyUrl: "console.anthropic.com/settings/keys",
+    models: [
+      { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+      { id: "claude-opus-5-5", name: "Claude Opus 5.5" },
+      { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5" },
+    ],
+  },
+  openai: {
+    name: "OpenAI",
+    prefKey: "openaiApiKey",
+    keyUrl: "platform.openai.com/api-keys",
+    compat: { url: "https://api.openai.com/v1/chat/completions", tokenParam: "max_completion_tokens" },
+    models: [
+      { id: "gpt-5-mini", name: "GPT-5 mini" },
+      { id: "gpt-5", name: "GPT-5" },
+    ],
+  },
+  gemini: {
+    name: "Google Gemini",
+    prefKey: "geminiApiKey",
+    keyUrl: "aistudio.google.com/apikey",
+    models: [
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    ],
+  },
+  qwen: {
+    name: "Alibaba Qwen",
+    prefKey: "qwenApiKey",
+    keyUrl: "Alibaba Cloud Model Studio → API Keys",
+    compat: { url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", tokenParam: "max_tokens" },
+    models: [
+      { id: "qwen-plus", name: "Qwen Plus" },
+      { id: "qwen-max", name: "Qwen Max" },
+      { id: "qwen-turbo", name: "Qwen Turbo" },
+    ],
+  },
+  openrouter: {
+    name: "OpenRouter",
+    prefKey: "openrouterApiKey",
+    keyUrl: "openrouter.ai/keys (\":free\" models need no credit)",
+    compat: { url: "https://openrouter.ai/api/v1/chat/completions", tokenParam: "max_tokens" },
+    models: [{ id: "openrouter/auto", name: "Auto (OpenRouter picks)" }],
+    liveModels: !0,
+  },
+};
+
+// Model actually used: custom model id wins, then the picked model, then the provider default.
+function resolveAIModel(provider) {
+  const cfg = AI_PROVIDERS[provider];
+  if (provider === globalPrefs.aiProvider) {
+    const custom = String(globalPrefs.aiCustomModel || "").trim();
+    if (custom) return custom;
+    if (globalPrefs.aiModel && (cfg.liveModels || cfg.models.some((m) => m.id === globalPrefs.aiModel)))
+      return globalPrefs.aiModel;
+  }
+  return cfg.models[0].id;
+}
+
+// OpenRouter's public model catalogue (no key needed), loaded once per page. Free models first.
+let aiOpenRouterModels = null;
+let aiOpenRouterLoading = null;
+function loadOpenRouterModels() {
+  if (aiOpenRouterModels) return Promise.resolve(!0);
+  if (aiOpenRouterLoading) return aiOpenRouterLoading;
+  const rt = globalThis.chrome?.runtime;
+  if (!rt?.id) return Promise.resolve(!1);
+  aiOpenRouterLoading = new Promise((resolve) =>
+    rt.sendMessage({ type: "AI_FETCH", method: "GET", url: "https://openrouter.ai/api/v1/models", headers: {} }, (r) => {
+      aiOpenRouterLoading = null;
+      if (globalThis.chrome?.runtime?.lastError || !r?.ok) return resolve(!1);
+      try {
+        const list = (JSON.parse(r.text).data || []).map((m) => ({ id: m.id, name: m.name || m.id }));
+        list.sort((a, b) => b.id.endsWith(":free") - a.id.endsWith(":free") || a.name.localeCompare(b.name));
+        aiOpenRouterModels = list;
+        resolve(!0);
+      } catch {
+        resolve(!1);
+      }
+    }),
+  );
+  return aiOpenRouterLoading;
+}
+
+// Every selectable model for a provider (static list + live catalogue where supported).
+function aiModelsFor(provider) {
+  const cfg = AI_PROVIDERS[provider];
+  const extra = cfg.liveModels ? aiOpenRouterModels || [] : [];
+  const seen = new Set();
+  return [...cfg.models, ...extra].filter((m) => !seen.has(m.id) && seen.add(m.id));
+}
+
+// POST through the background service worker (host_permissions -> no CORS / page CSP issues).
+function aiPost(url, headers, body) {
+  const rt = globalThis.chrome?.runtime;
+  const direct = () =>
+    fetch(url, { method: "POST", headers, body: JSON.stringify(body) }).then(async (r) => ({
+      ok: r.ok,
+      status: r.status,
+      text: await r.text(),
+    }));
+  const send = rt?.id
+    ? new Promise((resolve, reject) =>
+        rt.sendMessage({ type: "AI_FETCH", url, headers, body: JSON.stringify(body) }, (r) => {
+          if (globalThis.chrome?.runtime?.lastError || !r) return direct().then(resolve, reject);
+          r.error ? reject(new Error(r.error)) : resolve(r);
+        }),
+      )
+    : direct();
+  return send.then((r) => {
+    let data = {};
+    try {
+      data = JSON.parse(r.text || "{}");
+    } catch {}
+    if (!r.ok) throw new Error(data.error?.message || data.message || `HTTP ${r.status}: ${String(r.text).slice(0, 200)}`);
+    return data;
+  });
+}
+
+async function callAIProvider(prompt, opts = {}) {
+  const provider = opts.provider || (AI_PROVIDERS[globalPrefs.aiProvider] ? globalPrefs.aiProvider : "gemini");
+  const cfg = AI_PROVIDERS[provider];
+  const model = opts.model || resolveAIModel(provider);
+  const apiKey = opts.apiKey || globalPrefs[cfg.prefKey];
+  const maxTokens = opts.maxTokens || 4096;
+  if (!apiKey) throw new Error(`${cfg.name} API key is not configured.`);
+
+  if (provider === "anthropic") {
+    const data = await aiPost(
+      "https://api.anthropic.com/v1/messages",
+      {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "Content-Type": "application/json",
+      },
+      {
+        model,
+        max_tokens: maxTokens,
+        ...(opts.system ? { system: opts.system } : {}),
+        messages: [{ role: "user", content: prompt }],
+      },
+    );
+    return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+  }
+  if (cfg.compat) {
+    const data = await aiPost(
+      cfg.compat.url,
+      { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      {
+        model,
+        [cfg.compat.tokenParam]: maxTokens,
+        messages: [
+          ...(opts.system ? [{ role: "system", content: opts.system }] : []),
+          { role: "user", content: prompt },
+        ],
+      },
+    );
+    const choice = data.choices?.[0];
+    const text = choice?.message?.content || "";
+    if (!text) {
+      const why =
+        choice?.finish_reason === "length"
+          ? "the model ran out of output tokens (reasoning models often do) — pick a non-reasoning model or retry"
+          : choice?.message?.refusal || data.error?.message || (choice?.finish_reason ? `finish_reason: ${choice.finish_reason}` : "empty reply");
+      throw new Error(`No response from ${model}: ${why}`);
+    }
+    return text;
+  }
+  const data = await aiPost(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+    {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: maxTokens },
+      ...(opts.system ? { systemInstruction: { parts: [{ text: opts.system }] } } : {}),
+    },
+  );
+  const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+  if (!text) throw new Error(data.promptFeedback?.blockReason ? `Blocked: ${data.promptFeedback.blockReason}` : "No response received");
+  return text;
+}
+
 const Lo = "sf_soql_saved",
   Ao = "sf_soql_history";
 let cn = [],
@@ -30463,19 +34920,52 @@ function uo(o) {
         sessionId: t.sessionId,
       },
       (e) => {
-        ((So =
+        const n =
           e?.success && e.data
-            ? e.data.map((n) => ({
-                name: n.QualifiedApiName,
-                label: n.Label || n.QualifiedApiName,
+            ? e.data.map((s) => ({
+                name: s.QualifiedApiName,
+                label: s.Label || s.QualifiedApiName,
               }))
-            : []),
-          o(So || []));
+            : [];
+        // Only cache a successful load so a transient failure can be retried
+        (n.length && (So = n), o(n));
       },
     );
   });
 }
 
+
+// Polymorphic lookups (e.g. OwnerId -> [Group, User]) resolve to User when possible
+function pickRefTarget(f) {
+  const refs = f.referenceTo || [];
+  return refs.includes("User") ? "User" : refs[0];
+}
+
+// Map describe fields to autocomplete items. Lookups yield two entries: the Id
+// field itself, and a "Rel." entry that drills into the parent's fields.
+function toFieldSuggestions(fields, prefix = "") {
+  return fields.flatMap((f) => {
+    const item = {
+      insert: prefix + f.name,
+      label: prefix + f.name,
+      sub: `${f.label} · ${f.type}`,
+      kind: "field",
+    };
+    if (!(f.relationshipName && f.referenceTo && f.referenceTo.length > 0)) return [item];
+    return [
+      item,
+      {
+        insert: prefix + f.relationshipName,
+        label: `${prefix}${f.relationshipName}.`,
+        sub: `${pickRefTarget(f)} fields`,
+        kind: "field",
+        isRelationship: true,
+        relationshipName: f.relationshipName,
+        referenceTo: [pickRefTarget(f)],
+      },
+    ];
+  });
+}
 
 function loadAllFieldsIncludingRelationships(objectName, baseFields, callback, progressCallback) {
   const refFields = baseFields.filter(f => f.relationshipName && f.referenceTo && f.referenceTo.length > 0);
@@ -30488,7 +34978,7 @@ function loadAllFieldsIncludingRelationships(objectName, baseFields, callback, p
   const combinedFields = [...baseFields];
 
   refFields.forEach(f => {
-    const parentObj = f.referenceTo[0];
+    const parentObj = pickRefTarget(f);
     const relName = f.relationshipName;
 
     Ti(parentObj, (parentFields) => {
@@ -30536,10 +35026,10 @@ function resolveRelationshipFields(objectName, pathParts, callback) {
     // Try matching by relationshipName, then by name prefix
     const relField = fields.find(f =>
       (f.relationshipName && f.relationshipName.toLowerCase() === relName) ||
-      (f.name && f.name.toLowerCase().replace('id', '') === relName)
+      (f.name && f.name.toLowerCase().replace(/id$/, '') === relName)
     );
     if (relField && relField.referenceTo && relField.referenceTo.length > 0) {
-      resolveRelationshipFields(relField.referenceTo[0], pathParts.slice(1), callback);
+      resolveRelationshipFields(pickRefTarget(relField), pathParts.slice(1), callback);
     } else {
       // Fallback: treat pathPart as an object name directly
       Ti(pathParts[0], callback);
@@ -30547,6 +35037,104 @@ function resolveRelationshipFields(objectName, pathParts, callback) {
   });
 }
 
+// Full sObject describe (picklist values, child relationships), cached per object
+const describeCache = {};
+function loadDescribe(obj, cb) {
+  if (!obj) return cb(null);
+  const k = obj.toLowerCase();
+  if (describeCache[k]) return cb(describeCache[k]);
+  it().then((n) => {
+    if (!n?.instanceUrl || !n?.sessionId) return cb(null);
+    globalThis.chrome.runtime.sendMessage(
+      {
+        type: "REST_EXPLORE",
+        instanceUrl: n.instanceUrl,
+        sessionId: n.sessionId,
+        endpoint: `/services/data/v60.0/sobjects/${encodeURIComponent(obj)}/describe`,
+        method: "GET",
+      },
+      (res) => {
+        let d = null;
+        try {
+          res?.success && res.data?.ok && (d = describeCache[k] = JSON.parse(res.data.body));
+        } catch {}
+        cb(d);
+      },
+    );
+  });
+}
+// Child relationships of an object (for "(SELECT … FROM Contacts)" subqueries)
+function loadChildRelationships(obj, cb) {
+  loadDescribe(obj, (d) =>
+    cb(
+      (d?.childRelationships || [])
+        .filter((r) => r.relationshipName)
+        .map((r) => ({ relationshipName: r.relationshipName, childSObject: r.childSObject, field: r.field }))
+        .sort((a, b) => a.relationshipName.localeCompare(b.relationshipName)),
+    ),
+  );
+}
+// Object that owns the last field of a path, e.g. (Contact, ["Account","Owner"]) → User
+function resolvePathOwner(obj, parts, cb) {
+  if (!obj) return cb(null);
+  if (!parts.length) return cb(obj);
+  Ti(obj, (fs) => {
+    const rel = parts[0].toLowerCase(),
+      f = fs.find((x) => (x.relationshipName || "").toLowerCase() === rel);
+    f && f.referenceTo?.length ? resolvePathOwner(pickRefTarget(f), parts.slice(1), cb) : cb(null);
+  });
+}
+const SOQL_DATE_LITERALS = [
+  "TODAY", "YESTERDAY", "TOMORROW", "THIS_WEEK", "LAST_WEEK", "NEXT_WEEK",
+  "THIS_MONTH", "LAST_MONTH", "NEXT_MONTH", "LAST_90_DAYS", "THIS_QUARTER",
+  "LAST_QUARTER", "THIS_YEAR", "LAST_YEAR", "LAST_N_DAYS:7", "LAST_N_DAYS:30", "NEXT_N_DAYS:30",
+];
+// Suggested filter values for a field path: picklist values, booleans, date literals, null
+function soqlValueSuggestions(obj, path, cb) {
+  const parts = (path || "").split(".").filter(Boolean);
+  if (!obj || !parts.length) return cb([]);
+  const fieldName = parts.pop().toLowerCase();
+  resolvePathOwner(obj, parts, (owner) =>
+    loadDescribe(owner, (d) => {
+      const f = (d?.fields || []).find((x) => x.name.toLowerCase() === fieldName);
+      if (!f) return cb([{ value: "null" }]);
+      const out =
+        f.type === "picklist" || f.type === "multipicklist"
+          ? (f.picklistValues || []).filter((v) => v.active).map((v) => ({ value: v.value, label: v.label }))
+          : f.type === "boolean"
+            ? [{ value: "true" }, { value: "false" }]
+            : f.type === "date" || f.type === "datetime"
+              ? SOQL_DATE_LITERALS.map((v) => ({ value: v }))
+              : [];
+      cb([...out, { value: "null" }]);
+    }),
+  );
+}
+// Index of the "(" opening the SELECT subquery the cursor is in, or -1
+function soqlSubqueryOpen(text, pos) {
+  let depth = 0;
+  for (let i = pos - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === ")") depth++;
+    else if (ch === "(") {
+      if (depth === 0) return /^\(\s*SELECT\b/i.test(text.slice(i)) ? i : -1;
+      depth--;
+    }
+  }
+  return -1;
+}
+function soqlMatchingClose(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) return i;
+  }
+  return text.length;
+}
+// Blank out "(SELECT …)" bodies (same length) so outer-query parsing ignores them
+function soqlMaskSubqueries(text) {
+  return text.replace(/\(\s*SELECT\b[^()]*(\([^()]*\)[^()]*)*\)/gi, (m) => "(" + " ".repeat(m.length - 2) + ")");
+}
 function Ti(o, t) {
   const e = o.toLowerCase();
   if (si[e]) {
@@ -30567,17 +35155,128 @@ function Ti(o, t) {
       },
       (i) => {
         const s = i?.success && i.data ? i.data : [];
-        ((si[e] = s), t(s));
+        (i?.success && (si[e] = s), t(s));
       },
     );
   });
 }
 function Gu(o) {
-  return o
-    .replace(/,\s*,/g, ",")
-    .replace(/,\s*FROM\s+/gi, " FROM ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return soqlSyntaxFix(o).query;
+}
+// Offline SOQL repair: keyword typos, missing WHERE/BY, stray commas, quotes.
+// Returns the repaired query and a human-readable list of what changed.
+function soqlSyntaxFix(q) {
+  const fixes = [];
+  let s = q;
+  const step = (re, rep, label) => {
+    const n = s.replace(re, rep);
+    n !== s && ((s = n), fixes.push(label));
+  };
+  const has = (kw) => new RegExp(`\\b${kw}\\b`, "i").test(s);
+  step(/\b(SELCT|SLECT|SELET|SEELCT|SELETC|SELEC)\b/gi, "SELECT", "SELECT spelled correctly");
+  has("FROM") || step(/\b(FORM|FRM|FOM|FRMO)\b/gi, "FROM", "FROM spelled correctly");
+  has("WHERE") || step(/\b(WHRE|WERE|WHER|WEHRE|WHEER|WHRERE)\b/gi, "WHERE", "WHERE spelled correctly");
+  step(/\b(ODER|ORDR|OREDR|ORDE)\s+BY\b/gi, "ORDER BY", "ORDER BY spelled correctly");
+  step(/\b(GRUOP|GROPU|GORUP|GRUP)\s+BY\b/gi, "GROUP BY", "GROUP BY spelled correctly");
+  step(/\b(LIMT|LIMTI|LIMMIT|LIMI)\b(?=\s*\d)/gi, "LIMIT", "LIMIT spelled correctly");
+  step(/(?<!\bFROM\s+)\bORDER\s+(?!BY\b)/gi, "ORDER BY ", "Added missing BY after ORDER");
+  step(/(?<!\bFROM\s+)\bGROUP\s+(?!BY\b)/gi, "GROUP BY ", "Added missing BY after GROUP");
+  step(/"([^"']*)"/g, "'$1'", "Text values use single quotes");
+  step(/==/g, "=", "Use = instead of ==");
+  step(/\s*&&\s*/g, " AND ", "Use AND instead of &&");
+  step(/\s*\|\|\s*/g, " OR ", "Use OR instead of ||");
+  step(/,\s*,/g, ",", "Removed duplicate comma");
+  step(/,\s*FROM\b/gi, " FROM", "Removed trailing comma before FROM");
+  // Fix missing commas between fields in SELECT clause (e.g. "SELECT Id Name CreatedDate FROM")
+  step(
+    /(\bSELECT\s+)([\w.,\s]+?)(\s+FROM\b)/gi,
+    (match, selectKw, fieldsStr, fromKw) => {
+      const fixedFields = fieldsStr.replace(/([a-zA-Z0-9_.]+(?:\([^)]*\))?)\s+([a-zA-Z0-9_.]+(?:\([^)]*\))?)/g, "$1, $2");
+      return selectKw + fixedFields + fromKw;
+    },
+    "Added missing comma between fields"
+  );
+  step(/\bSELECT\s+FROM\b/gi, "SELECT Id FROM", "Selected at least one field (Id)");
+  // "FROM Account Name = 'x'" → "FROM Account WHERE Name = 'x'"
+  step(
+    /(\bFROM\s+[A-Za-z0-9_]+)\s+(?!(?:WHERE|WITH|USING|GROUP|ORDER|LIMIT|OFFSET|FOR|UPDATE|HAVING|AND|OR|NOT)\b)([A-Za-z_][\w.]*\s*(?:!=|<>|<=|>=|=|<|>|\s(?:LIKE|IN|NOT\s+IN|INCLUDES|EXCLUDES)\b))/i,
+    "$1 WHERE $2",
+    "Added missing WHERE",
+  );
+  step(/\s+(AND|OR)(\s+(?:ORDER BY|GROUP BY|LIMIT|OFFSET)\b)/gi, "$2", "Removed dangling AND/OR");
+  step(/\s+(AND|OR|WHERE)\s*$/i, "", "Removed dangling keyword at the end");
+  return { query: s.replace(/\s+/g, " ").trim(), fixes };
+}
+function soqlLevenshtein(a, b) {
+  ((a = a.toLowerCase()), (b = b.toLowerCase()));
+  const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = d[0];
+    d[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = d[j];
+      ((d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1))), (prev = tmp));
+    }
+  }
+  return d[b.length];
+}
+function soqlClosest(word, candidates) {
+  let best = null,
+    bestD = 1 / 0;
+  candidates.forEach((c) => {
+    const dist = soqlLevenshtein(word, c);
+    dist < bestD && ((bestD = dist), (best = c));
+  });
+  return best && bestD > 0 && bestD <= Math.max(2, Math.floor(word.length / 3)) ? best : null;
+}
+// Uses the Salesforce error to repair unknown fields/objects/relationships.
+// Calls back with { query, fixes } or null when nothing sensible was found.
+function soqlSemanticFix(q, err, cb) {
+  const replaceWord = (word, repl) =>
+    q.replace(new RegExp(`(^|[\\s,.(])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[\\s,)=<>!]|$)`, "i"), `$1${repl}`);
+  let m = err.match(/No such column '([\w]+)' on entity '(\w+)'/i);
+  if (m) {
+    const [, col, entity] = m;
+    return Ti(entity, (fields) => {
+      const hit = soqlClosest(col, fields.map((f) => f.name));
+      cb(hit ? { query: replaceWord(col, hit), fixes: [`${col} → ${hit} (field on ${entity})`] } : null);
+    });
+  }
+  m = err.match(/sObject type '(\w+)' is not supported/i);
+  if (m) {
+    const [, obj] = m;
+    return uo((objs) => {
+      const hit = soqlClosest(obj, objs.map((o) => o.name));
+      cb(hit ? { query: q.replace(new RegExp(`(\\bFROM\\s+)${obj}\\b`, "i"), `$1${hit}`), fixes: [`${obj} → ${hit} (object)`] } : null);
+    });
+  }
+  m = err.match(/Didn't understand relationship '(\w+)'/i);
+  const from = (q.match(/\bFROM\s+(\w+)/i) || [])[1];
+  if (m && from) {
+    const [, rel] = m;
+    return Ti(from, (fields) => {
+      const hit = soqlClosest(rel, fields.map((f) => f.relationshipName).filter(Boolean));
+      cb(hit ? { query: replaceWord(rel, hit), fixes: [`${rel} → ${hit} (relationship on ${from})`] } : null);
+    });
+  }
+  // Auto-fix for aggregate expressions missing alias:
+  // e.g. "field expression cannot be used without an alias" or "Duplicate field selected" or missing alias on aggregate
+  m = err.match(/(?:duplicate field|field expression|aggregate expression).*alias|must use an alias/i);
+  if (m || /expr\d+/i.test(err)) {
+    let fixedQuery = q;
+    let count = 0;
+    const aggRegex = /\b(COUNT|SUM|AVG|MIN|MAX)\s*\(([^)]+)\)(?!\s+AS\s+\w+)(?!\s+\w+)/gi;
+    fixedQuery = fixedQuery.replace(aggRegex, (full, fn, fld) => {
+      count++;
+      const cleanFld = fld.replace(/[^a-zA-Z0-9_]/g, "");
+      const aliasName = `${fn.toLowerCase()}_${cleanFld || count}`;
+      return `${fn}(${fld}) ${aliasName}`;
+    });
+    if (count > 0 && fixedQuery !== q) {
+      return cb({ query: fixedQuery, fixes: [`Added alias for ${count} aggregate expression(s)`] });
+    }
+  }
+  cb(null);
 }
 function Qu(o) {
   if (typeof o == "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(o)) {
@@ -30669,26 +35368,42 @@ function Ku(o, t, e, n) {
     flexDirection: "column",
   }),
     o.appendChild(a));
-  const l = Xn(t, "📤  Export Data", e);
+  const l = Xn(t, "Export Data", e);
   a.appendChild(l);
   const d =
       "SELECT Id, Name, CreatedDate FROM Account ORDER BY CreatedDate DESC LIMIT 50",
-    y = Tt.sobjectContext ? Gi() : null,
+    // Always start from the object of the page the panel was opened on.
+    // Related-list pages (/r/Parent/Id/related/Rel/view) resolve to the child object below.
+    relPage = location.pathname.match(/\/lightning\/r\/(\w+)\/\w+\/related\/(\w+)\/view/),
+    y = relPage ? null : Gi(),
     g = Ei,
     r = ki;
   ((Ei = null), (ki = !1));
-  const u = [
-    {
-      name: "Query 1",
-      query: g || (y ? `SELECT Id, Name FROM ${y} LIMIT 50` : d),
-      cols: [],
-      rows: [],
-      status: "",
-      tooling: Tt.defaultTooling,
-      queryAll: !1,
-    },
-  ];
-  let b = 0;
+  const draftKey = `${Vt(en())}|${(relPage ? `${relPage[1]}.${relPage[2]}` : y || "_").toLowerCase()}`,
+    draft = g ? null : soqlDrafts[draftKey],
+    seedQuery = y ? `SELECT Id, Name FROM ${y} LIMIT 50` : d;
+  const u = draft?.tabs?.length
+    ? draft.tabs.map((t, idx) => ({
+        name: t.name || `Query ${idx + 1}`,
+        query: t.query || seedQuery,
+        cols: [],
+        rows: [],
+        status: "",
+        tooling: !!t.tooling,
+        queryAll: !!t.queryAll,
+      }))
+    : [
+        {
+          name: "Query 1",
+          query: g || seedQuery,
+          cols: [],
+          rows: [],
+          status: "",
+          tooling: Tt.defaultTooling,
+          queryAll: !1,
+        },
+      ];
+  let b = draft ? Math.min(Math.max(0, draft.active | 0), u.length - 1) : 0;
   const N = document.createElement("div");
   (Object.assign(N.style, {
     flexShrink: "0",
@@ -30711,11 +35426,14 @@ function Ku(o, t, e, n) {
     a.appendChild(F));
   const k = document.createElement("div");
   k.style.position = "relative";
+  k.style.width = "100%";
+  
   const c = document.createElement("textarea");
   ((c.value =
     "SELECT Id, Name, CreatedDate FROM Account ORDER BY CreatedDate DESC LIMIT 50"),
     (c.spellcheck = !1),
     Object.assign(c.style, {
+      position: "relative",
       width: "100%",
       minHeight: "76px",
       resize: "vertical",
@@ -30732,11 +35450,12 @@ function Ku(o, t, e, n) {
       transition: "border-color 0.15s, box-shadow 0.15s",
     }),
     c.addEventListener("focus", () => {
-      ((c.style.borderColor = i.accent),
-        (c.style.boxShadow = `0 0 0 3px ${t ? "rgba(37,99,235,0.35)" : "rgba(37,99,235,0.18)"}`));
+      c.style.borderColor = i.accent;
+      c.style.boxShadow = `0 0 0 3px ${t ? "rgba(37,99,235,0.35)" : "rgba(37,99,235,0.18)"}`;
     }),
     c.addEventListener("blur", () => {
-      ((c.style.borderColor = i.borderStrong), (c.style.boxShadow = "none"));
+      c.style.borderColor = i.borderStrong;
+      c.style.boxShadow = "none";
     }),
     k.appendChild(c));
   const O = document.createElement("div");
@@ -30811,7 +35530,7 @@ function Ku(o, t, e, n) {
     border: "1px solid #ef4444",
     color: "#ef4444",
   });
-  const V = L("🧱 Builder");
+  const V = L("Builder");
   V.addEventListener("click", n);
   const C = L("Query Plan"),
     Z = L("Save"),
@@ -30908,7 +35627,7 @@ function Ku(o, t, e, n) {
   });
   const De = D("Tooling API"),
     Be = D("Query All (deleted)");
-  De.cb.checked = u[b].tooling;
+  ((De.cb.checked = u[b].tooling), (Be.cb.checked = u[b].queryAll));
   const be = document.createElement("input");
   ((be.type = "text"),
     (be.placeholder = "Filter results…"),
@@ -31310,6 +36029,114 @@ function Ku(o, t, e, n) {
       }),
       P.appendChild(v));
   };
+  let fixSeq = 0;
+  // After a failed run, propose a repaired query (offline rules first, then
+  // field/object name matching driven by the Salesforce error message)
+  const offerFix = (q, err) => {
+    const seq = ++fixSeq,
+      norm = q.replace(/\s+/g, " ").trim();
+    const render = (fix) => {
+      if (seq !== fixSeq || !fix || fix.query === norm) return;
+      const box = document.createElement("div");
+      Object.assign(box.style, {
+        margin: "0 24px 14px",
+        padding: "12px 14px",
+        borderRadius: "10px",
+        border: `1px solid ${i.borderStrong}`,
+        background: i.headerBg,
+        fontSize: "12.5px",
+        color: i.textPrimary,
+      });
+      const title = document.createElement("div");
+      ((title.textContent = "💡 Suggested fix"),
+        Object.assign(title.style, { fontWeight: "800", marginBottom: "6px" }),
+        box.appendChild(title));
+      const list = document.createElement("ul");
+      (Object.assign(list.style, { margin: "0 0 8px", paddingLeft: "18px", color: i.textMuted }),
+        fix.fixes.forEach((t) => {
+          const li = document.createElement("li");
+          ((li.textContent = t), list.appendChild(li));
+        }),
+        box.appendChild(list));
+      const code = document.createElement("div");
+      ((code.textContent = fix.query),
+        Object.assign(code.style, {
+          fontFamily: "Fira Code, monospace",
+          fontSize: "12px",
+          padding: "8px 10px",
+          borderRadius: "8px",
+          background: i.inputBg,
+          border: `1px solid ${i.divider}`,
+          wordBreak: "break-word",
+          marginBottom: "10px",
+        }),
+        box.appendChild(code));
+      const run = L("Apply & Run", !0),
+        apply = L("Apply"),
+        aiFixBtn = document.createElement("button");
+
+      (Object.assign(aiFixBtn.style, {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "5px",
+        padding: "6px 12px",
+        fontSize: "12px",
+        fontWeight: "600",
+        borderRadius: "8px",
+        border: "none",
+        background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+        color: "#ffffff",
+        cursor: "pointer",
+        marginLeft: "8px",
+        transition: "opacity 0.2s",
+      }),
+        (aiFixBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Ask AI Fixer`),
+        aiFixBtn.addEventListener("click", async () => {
+          aiFixBtn.disabled = true;
+          aiFixBtn.style.opacity = "0.7";
+          aiFixBtn.textContent = "AI fixing...";
+          try {
+            const prompt = `Fix this invalid Salesforce SOQL query and reply ONLY with the corrected SOQL query string and nothing else (no markdown formatting, no explanation):\n\nQuery: ${q}\nError: ${err}`;
+            const resText = await callAIProvider(prompt);
+            const cleanedQuery = (typeof resText === "string" ? resText : "").replace(/```sql|```soql|```/gi, "").trim();
+            if (cleanedQuery) {
+              c.value = cleanedQuery;
+              ot("AI successfully fixed your query!");
+              Te();
+              box.remove();
+            } else {
+              ot("AI could not fix this query.");
+            }
+          } catch (e) {
+            ot(`AI Fix Error: ${e.message}`);
+          } finally {
+            aiFixBtn.disabled = false;
+            aiFixBtn.style.opacity = "1";
+            aiFixBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Ask AI Fixer`;
+          }
+        }));
+
+      ((run.style.padding = apply.style.padding = "6px 12px"),
+        (run.style.fontSize = apply.style.fontSize = "12px"),
+        (apply.style.marginLeft = "8px"),
+        run.addEventListener("click", () => {
+          ((c.value = fix.query), Te());
+        }),
+        apply.addEventListener("click", () => {
+          ((c.value = fix.query), box.remove(), c.focus());
+        }),
+        box.appendChild(run),
+        box.appendChild(apply),
+        box.appendChild(aiFixBtn),
+        P.appendChild(box));
+
+      // Auto-apply fix into textarea immediately
+      c.value = fix.query;
+      ot(`Auto-applied fix: ${fix.fixes.join(", ")}`);
+    };
+    const syn = soqlSyntaxFix(q);
+    syn.fixes.length ? render(syn) : soqlSemanticFix(q, err, render);
+  };
   let oe = null;
   const we = () => {
       ((oe = null),
@@ -31323,8 +36150,9 @@ function Ku(o, t, e, n) {
       let h = c.value.trim();
       if (!h) return;
       if ((fo("soql"), Tt.typoFix)) {
-        const ne = Gu(h);
-        ne !== h && ((h = ne), (c.value = h));
+        const ne = soqlSyntaxFix(h);
+        ne.fixes.length &&
+          ((h = ne.query), (c.value = h), ot(`Auto-fixed: ${ne.fixes.join(", ")}`));
       }
       ((u[b].query = h),
         (u[b].tooling = De.cb.checked),
@@ -31360,7 +36188,9 @@ function Ku(o, t, e, n) {
               return;
             }
             if (!B?.success) {
-              ((ge.textContent = ""), Se(B?.error || "Query failed."));
+              ((ge.textContent = ""),
+                Se(B?.error || "Query failed."),
+                offerFix(h, B?.error || ""));
               return;
             }
             Vu(h);
@@ -31738,7 +36568,46 @@ function Ku(o, t, e, n) {
       h.addEventListener("click", fe),
       N.appendChild(h));
   }
-  ((c.value = u[0].query), Re());
+  ((c.value = u[b].query), Re());
+  // Auto-save every tab as a local draft for this org + object
+  const persistDraft = () => {
+    ((u[b].query = c.value),
+      (u[b].tooling = De.cb.checked),
+      (u[b].queryAll = Be.cb.checked),
+      saveSoqlDraft(draftKey, {
+        active: b,
+        tabs: u.map((t) => ({ name: t.name, query: t.query, tooling: t.tooling, queryAll: t.queryAll })),
+      }));
+  };
+  (c.addEventListener("input", persistDraft),
+    De.cb.addEventListener("change", persistDraft),
+    Be.cb.addEventListener("change", persistDraft),
+    N.addEventListener("click", () => setTimeout(persistDraft, 0)),
+    // Run, suggestion picks and "Apply fix" change the text without an input event
+    U.addEventListener("click", persistDraft),
+    c.addEventListener("keyup", persistDraft),
+    c.addEventListener("blur", persistDraft),
+    P.addEventListener("click", () => setTimeout(persistDraft, 0)),
+    g && persistDraft());
+  relPage &&
+    !draft &&
+    !g &&
+    loadChildRelationships(relPage[1], (rels) => {
+      const rel = rels.find((x) => x.relationshipName.toLowerCase() === relPage[2].toLowerCase());
+      rel &&
+        c.value === seedQuery &&
+        ((c.value = u[0].query = `SELECT Id, Name FROM ${rel.childSObject} LIMIT 50`), persistDraft());
+    });
+  // Objects without a Name field: fall back to Id so the seed query runs
+  !draft &&
+    !g &&
+    y &&
+    Ti(y, (fs) => {
+      fs.length &&
+        !fs.some((f) => f.name === "Name") &&
+        c.value === seedQuery &&
+        ((c.value = u[0].query = `SELECT Id FROM ${y} LIMIT 50`), persistDraft());
+    });
   const Ie = [
     { insert: "FIELDS(ALL)", sub: "all fields" },
     { insert: "FIELDS(STANDARD)", sub: "standard fields" },
@@ -31854,7 +36723,7 @@ function Ku(o, t, e, n) {
             textOverflow: "ellipsis",
             background: v === ke ? i.hover : "transparent",
           });
-          const ne = h.kind === "func" ? "ƒ" : h.kind === "object" ? "▦" : h.isRelationship ? "⇢" : "◇",
+          const ne = h.kind === "func" ? "ƒ" : h.kind === "keyword" ? "⌗" : h.kind === "object" ? "▦" : h.isRelationship ? "⇢" : "◇",
             B = Ne?.word || "",
             xe = B ? h.label.toLowerCase().indexOf(B.toLowerCase()) : -1,
             ze =
@@ -31940,11 +36809,12 @@ function Ku(o, t, e, n) {
       if (!h || !Ne) return;
       const v = c.selectionStart,
         R = c.value,
-        ne = h.insert;
+        // Field picked straight after "FROM Obj " — the WHERE was forgotten
+        ne = (Ne.needWhere && h.kind === "field" ? "WHERE " : "") + h.insert;
       let B = "",
         xe = null;
       if (h.kind === "func") ne.endsWith("()") && (xe = ne.length - 1);
-      else if (h.kind === "object") B = " ";
+      else if (h.kind === "object" || h.kind === "keyword") B = " ";
       else if (Ne.clause === "where") B = " ";
       else {
         const He = R.slice(v).replace(/^\s*/, "");
@@ -31970,6 +36840,14 @@ function Ku(o, t, e, n) {
         I();
         return;
       }
+      // Field picked from the page's object with no FROM yet: complete the query
+      if (h.kind === "field" && Ne.inferredFrom && !/\bFROM\b/i.test(R)) {
+        const tail = R.slice(v).replace(/[\s,]+$/, "");
+        c.value = R.slice(0, Ne.wordStart) + ne + tail + ` FROM ${Ne.inferredFrom}`;
+        const pos = Ne.wordStart + ne.length;
+        (c.setSelectionRange(pos, pos), f(), c.focus());
+        return;
+      }
       c.value = R.slice(0, Ne.wordStart) + ne + B + R.slice(v);
       const ze =
         xe != null ? Ne.wordStart + xe : Ne.wordStart + ne.length + B.length;
@@ -31977,8 +36855,80 @@ function Ku(o, t, e, n) {
     },
     I = () => {
       const h = c.selectionStart,
-        v = je(c.value, h),
-        R = { word: v.word, wordStart: v.wordStart, clause: v.clause };
+        text = c.value,
+        open = soqlSubqueryOpen(text, h);
+      if (open < 0) {
+        // Outer query: ignore subquery bodies when finding clause/object
+        suggestFor(je(soqlMaskSubqueries(text), h));
+        return;
+      }
+      // Inside "(SELECT … FROM <ChildRelationship> …)"
+      const close = soqlMatchingClose(text, open),
+        inner = text.slice(open + 1, close),
+        vi = je(inner, h - open - 1),
+        outerObj = (soqlMaskSubqueries(text.slice(0, open) + " " + text.slice(close + 1)).match(/\bFROM\s+(\w+)/i) || [])[1],
+        abs = { ...vi, wordStart: vi.wordStart + open + 1, inSub: !0 };
+      if (!outerObj) {
+        suggestFor({ ...abs, object: "" });
+        return;
+      }
+      loadChildRelationships(outerObj, (rels) => {
+        if (vi.clause === "object") {
+          const w = vi.word.toLowerCase();
+          W(
+            rels
+              .filter((r) => !w || r.relationshipName.toLowerCase().includes(w) || r.childSObject.toLowerCase().includes(w))
+              .slice(0, 20)
+              .map((r) => ({
+                insert: r.relationshipName,
+                label: r.relationshipName,
+                sub: `${r.childSObject} · child of ${outerObj}`,
+                kind: "object",
+              })),
+            { word: vi.word, wordStart: abs.wordStart, clause: "object" },
+          );
+          return;
+        }
+        const rel = rels.find((r) => r.relationshipName.toLowerCase() === (vi.object || "").toLowerCase());
+        suggestFor({ ...abs, object: rel ? rel.childSObject : "" });
+      });
+    },
+    suggestFor = (v) => {
+      const R = { word: v.word, wordStart: v.wordStart, clause: v.clause };
+      // Clause keywords that fit what's been typed so far
+      const before = c.value.slice(0, v.wordStart),
+        afterObj = /\bFROM\s+\w+\s+$/i.test(before),
+        afterCond =
+          v.clause === "where" && /\bWHERE\b/i.test(before) &&
+          // "<field> <op> <value> " — a finished condition
+          /(!=|<>|<=|>=|=|<|>|\bLIKE|\bIN|\bINCLUDES|\bEXCLUDES)\s*('[^']*'|-?\d[\w.:+-]*|true|false|null|[A-Z_]+(:\d+)?|\([^)]*\))\s+$/i.test(before),
+        afterOrderField = v.clause === "orderGroup" && /\bORDER BY\s+[\w.]+\s+$/i.test(before),
+        afterDir = /\b(ASC|DESC|NULLS (FIRST|LAST))\s+$/i.test(before),
+        kwList = afterObj
+          ? ["WHERE", "ORDER BY", "GROUP BY", "LIMIT", "OFFSET", "WITH SECURITY_ENFORCED"]
+          : afterCond
+            ? ["AND", "OR", "ORDER BY", "GROUP BY", "LIMIT"]
+            : afterOrderField
+              ? ["ASC", "DESC", "NULLS FIRST", "NULLS LAST", "LIMIT"]
+              : afterDir
+                ? ["LIMIT", "OFFSET", "NULLS FIRST", "NULLS LAST"]
+                : [],
+        kwItems = kwList
+          .filter((k) => k.toLowerCase().startsWith(v.word.toLowerCase()))
+          .map((k) => ({ insert: k, label: k, sub: "keyword", kind: "keyword" }));
+      afterObj && (R.needWhere = !0);
+      if (kwItems.length && (!v.word || !afterObj)) {
+        W(kwItems, R);
+        return;
+      }
+      if (afterObj && v.object) {
+        // Partial word after the object: matching keywords, then fields (auto-WHERE)
+        Ti(v.object, (ne) => {
+          const B = Tt.includeFormula ? ne : ne.filter((xe) => !xe.calculated);
+          W([...kwItems, ...toFieldSuggestions(Ge(B, v.word))].slice(0, 16), R);
+        });
+        return;
+      }
       if (v.clause === "object")
         uo((ne) =>
           W(
@@ -31993,89 +36943,36 @@ function Ku(o, t, e, n) {
         );
       else if (v.clause === "selectList") {
         const ne = J(v.word);
-        if (!v.object) {
+        // No FROM typed yet — fall back to the object of the record/list page we're on
+        const obj = v.object || (v.inSub ? null : Gi());
+        if (!obj) {
           W(ne, R);
           return;
         }
+        v.object || (R.inferredFrom = obj);
         const parts = v.word.split('.');
         const lastPart = parts[parts.length - 1];
         const pathParts = parts.slice(0, parts.length - 1);
-        if (pathParts.length > 0) {
-          resolveRelationshipFields(v.object, pathParts, (B) => {
-            const xe = Tt.includeFormula ? B : B.filter((He) => !He.calculated);
-            const prefix = pathParts.join('.') + '.';
-            const ze = Ge(xe, lastPart).map((He) => ({
-              insert: prefix + He.name,
-              label: prefix + He.name,
-              sub: `${He.label} · ${He.type}`,
-              kind: "field",
-            }));
-            W([...ne, ...ze].slice(0, 14), R);
-          });
-        } else {
-          Ti(v.object, (B) => {
-            const xe = Tt.includeFormula ? B : B.filter((He) => !He.calculated);
-            const ze = Ge(xe, v.word).map((He) => ({
-              insert: (He.relationshipName && He.referenceTo && He.referenceTo.length > 0)
-                ? He.relationshipName
-                : He.name,
-              label: He.name,
-              sub: He.relationshipName
-                ? `${He.label} · ${He.type} · ↳ ${He.relationshipName}`
-                : `${He.label} · ${He.type}`,
-              kind: "field",
-              isRelationship: !!(He.relationshipName && He.referenceTo && He.referenceTo.length > 0),
-              relationshipName: He.relationshipName || null,
-              referenceTo: He.referenceTo || [],
-            }));
-            W([...ne, ...ze].slice(0, 14), R);
-          });
-        }
+        const prefix = pathParts.length > 0 ? pathParts.join('.') + '.' : '';
+        resolveRelationshipFields(obj, pathParts, (B) => {
+          const xe = Tt.includeFormula ? B : B.filter((He) => !He.calculated);
+          const ze = toFieldSuggestions(Ge(xe, lastPart), prefix);
+          // Fields first; functions still reachable by typing their name
+          W([...ze, ...ne].slice(0, 20), R);
+        });
       } else
         (v.clause === "where" || v.clause === "orderGroup") && v.object
           ? (() => {
               const parts = v.word.split('.');
               const lastPart = parts[parts.length - 1];
               const pathParts = parts.slice(0, parts.length - 1);
-              if (pathParts.length > 0) {
-                resolveRelationshipFields(v.object, pathParts, (ne) => {
-                  const B = Tt.includeFormula
-                    ? ne
-                    : ne.filter((xe) => !xe.calculated);
-                  const prefix = pathParts.join('.') + '.';
-                  W(
-                    Ge(B, lastPart).map((xe) => ({
-                      insert: prefix + xe.name,
-                      label: prefix + xe.name,
-                      sub: `${xe.label} · ${xe.type}`,
-                      kind: "field",
-                    })),
-                    R,
-                  );
-                });
-              } else {
-                Ti(v.object, (ne) => {
-                  const B = Tt.includeFormula
-                    ? ne
-                    : ne.filter((xe) => !xe.calculated);
-                  W(
-                    Ge(B, v.word).map((xe) => ({
-                      insert: (xe.relationshipName && xe.referenceTo && xe.referenceTo.length > 0)
-                        ? xe.relationshipName
-                        : xe.name,
-                      label: xe.name,
-                      sub: xe.relationshipName
-                        ? `${xe.label} · ${xe.type} · ↳ ${xe.relationshipName}`
-                        : `${xe.label} · ${xe.type}`,
-                      kind: "field",
-                      isRelationship: !!(xe.relationshipName && xe.referenceTo && xe.referenceTo.length > 0),
-                      relationshipName: xe.relationshipName || null,
-                      referenceTo: xe.referenceTo || [],
-                    })),
-                    R,
-                  );
-                });
-              }
+              const prefix = pathParts.length > 0 ? pathParts.join('.') + '.' : '';
+              resolveRelationshipFields(v.object, pathParts, (ne) => {
+                const B = Tt.includeFormula
+                  ? ne
+                  : ne.filter((xe) => !xe.calculated);
+                W(toFieldSuggestions(Ge(B, lastPart), prefix).slice(0, 14), R);
+              });
             })()
           : f();
     };
@@ -32131,7 +37028,7 @@ function Xu(o, t, e, n) {
     textFaint: t ? "rgba(148,163,184,0.6)" : "rgba(31,41,55,0.45)",
     accent: "#2563eb",
   };
-  o.appendChild(Xn(t, "🧱  Query Builder", e));
+  o.appendChild(Xn(t, "Query Builder", e));
   const s = document.createElement("div");
   (Object.assign(s.style, {
     height: "100%",
@@ -32185,7 +37082,33 @@ function Xu(o, t, e, n) {
       const de = document.createElement("select");
       return (Object.assign(de.style, { ...l, cursor: "pointer" }), de);
     },
+    // Searchable field box: type to filter the list, or enter any field path by hand
+    yc = (ph) => {
+      const inp = document.createElement("input"),
+        dl = document.createElement("datalist");
+      return (
+        (dl.id = `sf-qb-combo-${Math.random().toString(36).slice(2)}`),
+        inp.setAttribute("list", dl.id),
+        (inp.placeholder = ph),
+        (inp.spellcheck = !1),
+        (inp.autocomplete = "off"),
+        Object.assign(inp.style, { ...l, width: "220px", fontFamily: "Fira Code, monospace", fontSize: "12.5px" }),
+        (inp._dl = dl),
+        a.appendChild(dl),
+        inp.addEventListener("input", () => inp.dispatchEvent(new Event("change"))),
+        inp
+      );
+    },
     g = (de, ke, Ne = !0) => {
+      if (de._dl) {
+        de._dl.innerHTML = "";
+        ke.forEach((Ge) => {
+          if (!Ge.value) return;
+          const J = document.createElement("option");
+          ((J.value = Ge.value), Ge.hint && (J.label = Ge.hint), de._dl.appendChild(J));
+        });
+        return;
+      }
       const je = de.value;
       ((de.innerHTML = ""),
         ke.forEach((Ge) => {
@@ -32236,7 +37159,7 @@ function Xu(o, t, e, n) {
       const filtered = relCheckbox.checked ? E : E.filter(de => !de.name.includes('.'));
       return [
         { value: "", label: "— field —" },
-        ...filtered.map((de) => ({ value: de.name, label: `${de.name}` })),
+        ...filtered.map((de) => ({ value: de.name, label: `${de.name}`, hint: `${de.label || ""} · ${de.type}` })),
       ];
     },
     c = d("Object"),
@@ -32369,6 +37292,158 @@ function Xu(o, t, e, n) {
     });
   };
   U.addEventListener("input", se);
+  // --- Related records: child-relationship subqueries ---
+  const subSec = d("Related records (subqueries)"),
+    subList = document.createElement("div"),
+    subs = [];
+  subSec.appendChild(subList);
+  const subBtn = document.createElement("button");
+  ((subBtn.textContent = "+ Add related list"),
+    Object.assign(subBtn.style, {
+      fontSize: "12px",
+      fontWeight: "700",
+      padding: "7px 12px",
+      borderRadius: "7px",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      border: `1px solid ${i.border}`,
+      background: "transparent",
+      color: i.textPrimary,
+    }));
+  subSec.appendChild(subBtn);
+  const addSub = (preset) => {
+    if (!r) {
+      ot("Pick an object first");
+      return;
+    }
+    const st = { rel: "", fields: new Set(["Id"]), where: "", limit: "", childFields: [] },
+      box = document.createElement("div");
+    Object.assign(box.style, {
+      border: `1px solid ${i.border}`,
+      borderRadius: "8px",
+      padding: "10px",
+      marginBottom: "8px",
+      display: "flex",
+      flexDirection: "column",
+      gap: "8px",
+    });
+    const top = document.createElement("div");
+    Object.assign(top.style, { display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" });
+    const relSel = y();
+    (g(relSel, [{ value: "", label: "Loading related lists…" }]), (relSel.style.minWidth = "240px"));
+    const flt = document.createElement("input");
+    ((flt.placeholder = "Filter fields…"), (flt.spellcheck = !1), Object.assign(flt.style, { ...l, width: "150px" }));
+    const del = document.createElement("button");
+    ((del.textContent = "×"),
+      (del.title = "Remove subquery"),
+      Object.assign(del.style, {
+        marginLeft: "auto",
+        fontSize: "16px",
+        fontWeight: "700",
+        padding: "2px 10px",
+        borderRadius: "7px",
+        cursor: "pointer",
+        border: `1px solid ${i.border}`,
+        background: "transparent",
+        color: i.textMuted,
+      }),
+      del.addEventListener("click", () => {
+        (subs.splice(subs.indexOf(st), 1), box.remove(), Re());
+      }));
+    (top.appendChild(relSel), top.appendChild(flt), top.appendChild(del));
+    const grid = document.createElement("div");
+    Object.assign(grid.style, {
+      maxHeight: "140px",
+      overflow: "auto",
+      border: `1px solid ${i.divider}`,
+      borderRadius: "6px",
+      padding: "4px",
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+      gap: "2px",
+    });
+    const drawFields = () => {
+      grid.innerHTML = "";
+      const q = flt.value.trim().toLowerCase();
+      if (!st.rel) {
+        grid.appendChild(Object.assign(document.createElement("div"), { textContent: "Choose a related list." }));
+        return;
+      }
+      st.childFields
+        .filter((f) => !q || f.name.toLowerCase().includes(q) || (f.label || "").toLowerCase().includes(q))
+        .forEach((f) => {
+          const lb = document.createElement("label");
+          Object.assign(lb.style, { display: "flex", alignItems: "center", gap: "6px", padding: "3px 6px", fontSize: "12px", cursor: "pointer", color: i.textPrimary });
+          const cb = document.createElement("input");
+          ((cb.type = "checkbox"),
+            (cb.checked = st.fields.has(f.name)),
+            cb.addEventListener("change", () => {
+              (cb.checked ? st.fields.add(f.name) : st.fields.delete(f.name), Re());
+            }));
+          const sp = document.createElement("span");
+          ((sp.innerHTML = `<span style="font-family:Fira Code,monospace">${f.name}</span> <span style="color:${i.textFaint}">${f.type}</span>`),
+            lb.appendChild(cb),
+            lb.appendChild(sp),
+            grid.appendChild(lb));
+        });
+    };
+    flt.addEventListener("input", drawFields);
+    const bottom = document.createElement("div");
+    Object.assign(bottom.style, { display: "flex", gap: "8px", alignItems: "center" });
+    const wh = document.createElement("input");
+    ((wh.placeholder = "WHERE (optional), e.g. IsClosed = false"),
+      (wh.spellcheck = !1),
+      Object.assign(wh.style, { ...l, flex: "1", fontFamily: "Fira Code, monospace", fontSize: "12px" }),
+      wh.addEventListener("input", () => {
+        ((st.where = wh.value.trim()), Re());
+      }));
+    const lim = document.createElement("input");
+    ((lim.type = "number"),
+      (lim.min = "1"),
+      (lim.placeholder = "LIMIT"),
+      Object.assign(lim.style, { ...l, width: "90px" }),
+      lim.addEventListener("input", () => {
+        ((st.limit = lim.value), Re());
+      }));
+    (bottom.appendChild(wh), bottom.appendChild(lim));
+    (box.appendChild(top), box.appendChild(grid), box.appendChild(bottom), subList.appendChild(box));
+    const pickRel = (relName, fields) => {
+      ((st.rel = relName), (st.fields = new Set(fields || ["Id"])), (st.childFields = []), drawFields(), Re());
+      const rel = (st.rels || []).find((x) => x.relationshipName === st.rel);
+      rel &&
+        Ti(rel.childSObject, (fs) => {
+          st.rel === rel.relationshipName && ((st.childFields = fs), drawFields());
+        });
+    };
+    relSel.addEventListener("change", () => pickRel(relSel.value));
+    (drawFields(),
+      loadChildRelationships(r, (rels) => {
+        ((st.rels = rels),
+          g(relSel, [
+            { value: "", label: rels.length ? "— related list —" : "No related lists" },
+            ...rels.map((x) => ({ value: x.relationshipName, label: `${x.relationshipName} (${x.childSObject})` })),
+          ]));
+        // Restoring from a template
+        preset?.rel &&
+          ((relSel.value = preset.rel),
+          (wh.value = st.where = preset.where || ""),
+          (lim.value = st.limit = preset.limit || ""),
+          pickRel(preset.rel, preset.fields));
+      }),
+      subs.push(st),
+      Re());
+  };
+  subBtn.addEventListener("click", () => addSub());
+  const clearSubs = () => {
+    ((subs.length = 0), (subList.innerHTML = ""));
+  };
+  const subSoql = () =>
+    subs
+      .filter((st) => st.rel)
+      .map(
+        (st) =>
+          `(SELECT ${Array.from(st.fields).join(", ") || "Id"} FROM ${st.rel}${st.where ? ` WHERE ${st.where}` : ""}${st.limit && Number(st.limit) > 0 ? ` LIMIT ${parseInt(st.limit, 10)}` : ""})`,
+      );
   const De = d("Functions (aggregate)"),
     Be = document.createElement("div");
   Object.assign(Be.style, {
@@ -32385,7 +37460,7 @@ function Xu(o, t, e, n) {
       label: de,
     })),
   );
-  const ge = y(),
+  const ge = yc("field (optional)"),
     ue = document.createElement("button");
   ((ue.textContent = "Add"),
     Object.assign(ue.style, {
@@ -32483,7 +37558,7 @@ function Xu(o, t, e, n) {
         alignItems: "center",
         flexWrap: "wrap",
       });
-      const ke = y();
+      const ke = yc("field — pick or type, e.g. CreatedBy.City");
       (g(ke, k()), ke.addEventListener("change", Re));
       const Ne = y();
       (g(
@@ -32491,10 +37566,31 @@ function Xu(o, t, e, n) {
         K.map((J) => ({ value: J, label: J })),
       ),
         Ne.addEventListener("change", Re));
-      const je = document.createElement("input");
-      ((je.placeholder = "value"),
+      const je = document.createElement("input"),
+        vdl = document.createElement("datalist");
+      ((vdl.id = `sf-qb-val-${Math.random().toString(36).slice(2)}`),
+        a.appendChild(vdl),
+        je.setAttribute("list", vdl.id),
+        (je.autocomplete = "off"),
+        (je.placeholder = "value — pick a suggestion or type"),
         Object.assign(je.style, { ...l, flex: "1", minWidth: "120px" }),
         je.addEventListener("input", Re));
+      // Refresh value suggestions whenever the field changes
+      let lastField = null;
+      const refreshVals = () => {
+        const fp = ke.value.trim();
+        if (fp === lastField) return;
+        ((lastField = fp),
+          soqlValueSuggestions(r, fp, (vals) => {
+            fp === ke.value.trim() &&
+              ((vdl.innerHTML = ""),
+              vals.forEach((v) => {
+                const o = document.createElement("option");
+                ((o.value = v.value), v.label && v.label !== v.value && (o.label = v.label), vdl.appendChild(o));
+              }));
+          }));
+      };
+      ke.addEventListener("change", refreshVals);
       const Ge = document.createElement("button");
       ((Ge.textContent = "×"),
         Object.assign(Ge.style, {
@@ -32510,7 +37606,7 @@ function Xu(o, t, e, n) {
         }),
         Ge.addEventListener("click", () => {
           const J = F.findIndex((_e) => _e.field === ke);
-          (J >= 0 && F.splice(J, 1), de.remove(), Re());
+          (J >= 0 && F.splice(J, 1), de.remove(), ke._dl.remove(), vdl.remove(), Re());
         }),
         de.appendChild(ke),
         de.appendChild(Ne),
@@ -32544,7 +37640,7 @@ function Xu(o, t, e, n) {
     flexWrap: "wrap",
     alignItems: "center",
   });
-  const G = y();
+  const G = yc("— field —");
   (g(G, k()), G.addEventListener("change", Re));
   const T = y();
   (g(T, [
@@ -32577,7 +37673,7 @@ function Xu(o, t, e, n) {
         g(G, k()),
         g(ge, [
           { value: "", label: "— field —" },
-          ...filtered.map((de) => ({ value: de.name, label: de.name })),
+          ...filtered.map((de) => ({ value: de.name, label: de.name, hint: `${de.label || ""} · ${de.type}` })),
         ]));
     },
     loadRelationalFields = (baseFields) => {
@@ -32614,24 +37710,32 @@ function Xu(o, t, e, n) {
         }));
     };
   O.addEventListener("change", () => {
-    ((r = O.value.trim()), u.clear(), (b.length = 0), ye(), A());
+    ((r = O.value.trim()), u.clear(), (b.length = 0), clearSubs(), ye(), A());
   });
   const Q = (de, ke) => {
       const Ne = ke.trim();
       if (Ne === "") return "''";
-      const Ge = E.find((J) => J.name === de)?.type || "string";
-      return ["int", "double", "currency", "percent", "long"].includes(Ge)
-        ? Ne
-        : Ge === "boolean"
-          ? Ne.toLowerCase()
-          : /^(null|true|false)$/i.test(Ne) ||
-              /^'.*'$/.test(Ne) ||
-              /^-?\d+(\.\d+)?$/.test(Ne) ||
-              /^[A-Z_]+(:\-?\d+)?$/.test(Ne) ||
-              (["date", "datetime"].includes(Ge) &&
-                /^\d{4}-\d{2}-\d{2}/.test(Ne))
-            ? Ne
-            : `'${Ne.replace(/'/g, "\\'")}'`;
+      const fdef = E.find((J) => J.name === de),
+        Ge = fdef?.type || "string";
+      if (/^null$/i.test(Ne) || /^'.*'$/.test(Ne)) return Ne;
+      // Hand-typed field paths have no known type: keep literals unquoted
+      if (
+        !fdef &&
+        (/^(true|false)$/i.test(Ne) ||
+          SOQL_DATE_LITERALS.includes(Ne.toUpperCase()) ||
+          /^(LAST|NEXT)_N_[A-Z_]+:\d+$/i.test(Ne))
+      )
+        return /^(true|false)$/i.test(Ne) ? Ne.toLowerCase() : Ne.toUpperCase();
+      if (["int", "double", "currency", "percent", "long"].includes(Ge)) return Ne;
+      if (Ge === "boolean") return Ne.toLowerCase();
+      if (Ge === "date" || Ge === "datetime") {
+        // Date literals (TODAY, LAST_N_DAYS:30) and ISO dates stay unquoted
+        if (/^[A-Z_]+(:-?\d+)?$/i.test(Ne)) return Ne.toUpperCase();
+        if (Ge === "datetime" && /^\d{4}-\d{2}-\d{2}$/.test(Ne)) return `${Ne}T00:00:00Z`;
+        if (/^\d{4}-\d{2}-\d{2}/.test(Ne)) return Ne;
+      }
+      // Text, picklist, id, etc. are always quoted — even "123" or "NEW"
+      return `'${Ne.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
     },
     S = (de) => {
       const ke = de.field.value,
@@ -32653,11 +37757,15 @@ function Xu(o, t, e, n) {
       (N !== "fields"
         ? (de = [`FIELDS(${N})`])
         : (de = [...b, ...Array.from(u)]),
-        de.length === 0 && (de = ["Id"]));
+        de.length === 0 && (de = ["Id"]),
+        (de = [...de, ...subSoql()]));
       let ke = `SELECT ${de.join(", ")} FROM ${r || "ObjectName"}`;
       const Ne = F.map(S).filter(Boolean);
+      // Plain fields selected alongside aggregates must be grouped
+      const grouped = N === "fields" && b.length ? Array.from(u) : [];
       return (
         Ne.length && (ke += ` WHERE ${Ne.join(` ${z.value} `)}`),
+        grouped.length && (ke += ` GROUP BY ${grouped.join(", ")}`),
         G.value && (ke += ` ORDER BY ${G.value} ${T.value}`),
         w.value &&
           Number(w.value) > 0 &&
@@ -32761,8 +37869,164 @@ function Xu(o, t, e, n) {
     Ve.appendChild(fe),
     Ve.appendChild(me),
     Se.appendChild(Ve));
+  // --- Templates: save the whole builder setup and reopen it later ---
+  const captureState = () => ({
+    object: r,
+    mode: N,
+    fields: Array.from(u),
+    aggregates: [...b],
+    relational: relCheckbox.checked,
+    logic: z.value,
+    filters: F.map((f) => ({ field: f.field.value, op: f.op.value, val: f.val.value })).filter((f) => f.field.trim()),
+    orderField: G.value,
+    orderDir: T.value,
+    limit: w.value,
+    subs: subs.filter((x) => x.rel).map((x) => ({ rel: x.rel, fields: Array.from(x.fields), where: x.where, limit: x.limit })),
+  });
+  const restoreState = (st) => {
+    ((r = st.object || ""),
+      (O.value = r),
+      u.clear(),
+      (st.fields || []).forEach((f) => u.add(f)),
+      (N = st.mode || "fields"),
+      X(),
+      (b.length = 0),
+      (st.aggregates || []).forEach((x) => b.push(x)),
+      ye(),
+      clearSubs(),
+      (relCheckbox.checked = !!st.relational));
+    // Replace the filter rows
+    (F.forEach((f) => (f.field.parentElement?.remove(), f.field._dl?.remove())), (F.length = 0));
+    ((z.value = st.logic || "AND"),
+      (st.filters?.length ? st.filters : [null]).forEach((f) => {
+        j();
+        const row = F[F.length - 1];
+        f &&
+          ((row.field.value = f.field),
+          (row.op.value = f.op),
+          (row.val.value = f.val),
+          row.field.dispatchEvent(new Event("change")));
+      }),
+      (G.value = st.orderField || ""),
+      (T.value = st.orderDir || "ASC"),
+      (w.value = st.limit ?? "50"),
+      A(),
+      (st.subs || []).forEach((x) => addSub(x)),
+      Re());
+  };
+  const tplHead = document.createElement("div");
+  (Object.assign(tplHead.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    margin: "18px 0 8px",
+  }),
+    (tplHead.innerHTML = `<span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;color:${i.textFaint}">Templates</span>`));
+  const tplSave = document.createElement("button");
+  ((tplSave.textContent = "💾 Save as template"),
+    Object.assign(tplSave.style, {
+      fontSize: "12px",
+      fontWeight: "700",
+      padding: "6px 10px",
+      borderRadius: "7px",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      border: `1px solid ${i.border}`,
+      background: "transparent",
+      color: i.textPrimary,
+    }),
+    tplHead.appendChild(tplSave),
+    Se.appendChild(tplHead));
+  const tplList = document.createElement("div");
+  (Object.assign(tplList.style, {
+    flex: "1",
+    minHeight: "60px",
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  }),
+    Se.appendChild(tplList));
+  const drawTemplates = () => {
+    if (((tplList.innerHTML = ""), !qbTemplates.length)) {
+      const em = document.createElement("div");
+      ((em.textContent = "No templates yet. Build a query and click “Save as template”."),
+        Object.assign(em.style, { fontSize: "12px", color: i.textMuted, padding: "4px 2px" }),
+        tplList.appendChild(em));
+      return;
+    }
+    qbTemplates.forEach((t) => {
+      const row = document.createElement("div");
+      Object.assign(row.style, {
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "6px 8px",
+        borderRadius: "8px",
+        border: `1px solid ${i.divider}`,
+        background: i.inputBg,
+        cursor: "pointer",
+      });
+      row.title = t.soql || "";
+      const txt = document.createElement("div");
+      Object.assign(txt.style, { flex: "1", minWidth: "0" });
+      const nm = document.createElement("div"),
+        sub = document.createElement("div");
+      ((nm.textContent = t.name),
+        Object.assign(nm.style, { fontSize: "12.5px", fontWeight: "700", color: i.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }),
+        (sub.textContent = `${t.object || "—"} · ${new Date(t.ts).toLocaleDateString()}`),
+        Object.assign(sub.style, { fontSize: "11px", color: i.textFaint }),
+        txt.appendChild(nm),
+        txt.appendChild(sub));
+      const del = document.createElement("button");
+      ((del.textContent = "×"),
+        (del.title = "Delete template"),
+        Object.assign(del.style, {
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          fontSize: "16px",
+          color: i.textFaint,
+          padding: "0 4px",
+        }),
+        del.addEventListener("click", (ev) => {
+          (ev.stopPropagation(),
+            confirm(`Delete template “${t.name}”?`) &&
+              ((qbTemplates = qbTemplates.filter((x) => x.id !== t.id)), saveQbTemplates(), drawTemplates()));
+        }),
+        row.addEventListener("click", () => {
+          (restoreState(t.state || {}), ot(`Opened template “${t.name}”`));
+        }),
+        row.appendChild(txt),
+        row.appendChild(del),
+        tplList.appendChild(row));
+    });
+  };
+  (tplSave.addEventListener("click", () => {
+    if (!r) {
+      ot("Pick an object first");
+      return;
+    }
+    const name = window.prompt("Template name:", `${r} query`)?.trim();
+    if (!name) return;
+    const existing = qbTemplates.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    if (existing && !confirm(`Replace the existing template “${existing.name}”?`)) return;
+    const tpl = {
+      id: existing?.id || `t${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      object: r,
+      soql: Y(),
+      state: captureState(),
+      ts: Date.now(),
+    };
+    ((qbTemplates = [tpl, ...qbTemplates.filter((x) => x.id !== tpl.id)]),
+      saveQbTemplates(),
+      drawTemplates(),
+      ot(`Template “${name}” saved`));
+  }),
+    drawTemplates());
   function Re() {
-    we.textContent = Y();
+    we.innerHTML = highlightSOQL(Y(), t);
   }
   (j(), se(), X(), Re());
   const Ie = Gi();
@@ -32877,12 +38141,59 @@ function Wa(o) {
       (g.style.flexDirection = "column"),
       (g.style.borderRadius = "0"));
   else {
-    ((g.style.maxWidth = "768px"),
-      (g.style.borderRadius = "24px"),
-      (g.style.boxShadow = "0 25px 50px rgba(0, 0, 0, 0.5)"),
-      (g.style.border = `1px solid ${s.modalBorder}`));
+    ((g.style.maxWidth = spotlightBox(n).w),
+      (g.style.borderRadius = "20px"),
+      (g.style.backgroundColor = t ? "rgba(22, 28, 36, 0.78)" : "rgba(255, 255, 255, 0.78)"),
+      (g.style.backdropFilter = "blur(40px) saturate(200%)"),
+      (g.style.webkitBackdropFilter = "blur(40px) saturate(200%)"),
+      (g.style.boxShadow = t
+        ? "0 40px 80px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.15) inset, 0 1px 0 rgba(255, 255, 255, 0.1) inset"
+        : "0 40px 80px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.7) inset, 0 1px 2px rgba(255, 255, 255, 0.9) inset"),
+      (g.style.border = `1px solid ${t ? "rgba(255, 255, 255, 0.14)" : "rgba(209, 213, 219, 0.5)"}`));
     const f = typeof Do == "number" ? Do : 100;
     f < 100 && (g.style.opacity = String(Math.max(0.2, f / 100)));
+    // Bottom-right grip: drag to resize, size is saved to Panel appearance
+    const grip = document.createElement("div");
+    ((grip.title = "Drag to resize"),
+      (grip.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="${s.textMuted}" stroke-width="1.8" stroke-linecap="round"><path d="M13 3L3 13M13 7L7 13M13 11L11 13"/></svg>`),
+      Object.assign(grip.style, {
+        position: "absolute",
+        right: "4px",
+        bottom: "4px",
+        width: "20px",
+        height: "20px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "nwse-resize",
+        zIndex: "5",
+        touchAction: "none",
+      }),
+      grip.addEventListener("pointerdown", (ev) => {
+        (ev.preventDefault(), grip.setPointerCapture(ev.pointerId), (spMax = !1), syncMaxBtn());
+        const x0 = ev.clientX,
+          y0 = ev.clientY,
+          w0 = g.offsetWidth,
+          h0 = C.offsetHeight,
+          // Centered popup grows on both sides, so mirror the drag distance
+          ky = n ? 1 : 2;
+        let w = w0,
+          h = h0;
+        const move = (mv) => {
+            ((w = Math.round(Math.min(Math.max(600, w0 + (mv.clientX - x0) * 2), window.innerWidth - 32))),
+              (h = Math.round(Math.min(Math.max(280, h0 + (mv.clientY - y0) * ky), window.innerHeight - 200))),
+              (g.style.maxWidth = `${w}px`),
+              (C.style.height = `${h}px`));
+          },
+          up = () => {
+            (grip.removeEventListener("pointermove", move),
+              grip.removeEventListener("pointerup", up),
+              saveSpotlightSize(w, h));
+          };
+        (grip.addEventListener("pointermove", move),
+          grip.addEventListener("pointerup", up));
+      }),
+      g.appendChild(grip));
   }
   const r = document.createElement("div");
   ((r.style.display = "flex"),
@@ -32940,11 +38251,45 @@ function Wa(o) {
     N.addEventListener("mouseout", () => {
       N.style.backgroundColor = "transparent";
     }));
+  const maxBtn = document.createElement("button");
+  const maxIcon = (on) =>
+    on
+      ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${s.iconStroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/></svg>`
+      : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${s.iconStroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>`;
+  function syncMaxBtn() {
+    ((maxBtn.innerHTML = maxIcon(spMax)),
+      (maxBtn.title = spMax ? "Restore size" : "Maximize"));
+  }
+  (Object.assign(maxBtn.style, {
+    marginLeft: "8px",
+    padding: "8px",
+    backgroundColor: "transparent",
+    border: "none",
+    cursor: "pointer",
+    borderRadius: "8px",
+    transition: "background-color 0.2s",
+  }),
+    syncMaxBtn(),
+    maxBtn.addEventListener("mouseover", () => {
+      maxBtn.style.backgroundColor = s.closeHover;
+    }),
+    maxBtn.addEventListener("mouseout", () => {
+      maxBtn.style.backgroundColor = "transparent";
+    }),
+    maxBtn.addEventListener("click", () => {
+      spMax = !spMax;
+      const box = spotlightBox(n);
+      ((g.style.maxWidth = box.w),
+        (C.style.height = box.h),
+        syncMaxBtn(),
+        saveSpotlightSize(spW, spH));
+    }),
+    e && (maxBtn.style.display = "none"));
   const F = () => {
     const f = globalThis.chrome?.runtime,
       _ = Vt(en()),
       m = f?.getURL
-        ? `${f.getURL("spotlight.html")}?host=${encodeURIComponent(_)}`
+        ? `${f.getURL("sfpilot.html")}?host=${encodeURIComponent(_)}`
         : "";
     (m && f.sendMessage({ type: "OPEN_TAB", url: m }), gt());
   };
@@ -32953,6 +38298,7 @@ function Wa(o) {
     e && (N.style.display = "none"),
     r.appendChild(E),
     r.appendChild(u),
+    r.appendChild(maxBtn),
     r.appendChild(N),
     n)
   ) {
@@ -33006,7 +38352,7 @@ function Wa(o) {
   const C = document.createElement("div");
   (e
     ? ((C.style.flex = "1"), (C.style.minHeight = "0"))
-    : (C.style.height = "420px"),
+    : (C.style.height = spotlightBox(n).h),
     (C.style.overflowY = "auto"),
     (C.style.scrollbarWidth = "thin"),
     (C.style.scrollbarColor = `${s.scrollThumb} transparent`),
@@ -33055,16 +38401,12 @@ function Wa(o) {
     (X.style.borderTop = `1px solid ${a.divider}`),
     (X.style.backgroundColor = a.side));
   const re = document.createElement("a");
-  ((re.href = "https://sfspotlight.vercel.app/index.html"),
-    (re.target = "_blank"),
-    (re.rel = "noopener noreferrer"),
-    (re.title = "Open documentation"),
-    (re.style.display = "flex"),
+  ((re.style.display = "flex"),
     (re.style.alignItems = "center"),
     (re.style.gap = "10px"),
     (re.style.flexShrink = "0"),
     (re.style.textDecoration = "none"),
-    (re.style.cursor = "pointer"),
+    (re.style.cursor = "default"),
     re.addEventListener("mouseover", () => {
       re.style.opacity = "0.7";
     }),
@@ -33090,7 +38432,7 @@ function Wa(o) {
   const De = document.createElement("div");
   ((De.style.fontSize = "13px"),
     (De.style.whiteSpace = "nowrap"),
-    (De.innerHTML = `<span style="font-weight:800;color:${s.textPrimary};letter-spacing:-0.2px;">SF Spotlight</span>`),
+    (De.innerHTML = `<span style="font-weight:800;color:${s.textPrimary};letter-spacing:-0.2px;">SFPilot</span>`),
     re.appendChild(se),
     re.appendChild(De));
   const Be = document.createElement("div");
@@ -33121,49 +38463,7 @@ function Wa(o) {
         _.appendChild(W),
         Be.appendChild(_));
     }));
-  const ge = document.createElement("a");
-  ((ge.href = "https://sfspotlight.vercel.app/docs.html"),
-    (ge.target = "_blank"),
-    (ge.rel = "noopener noreferrer"),
-    (ge.style.display = "flex"),
-    (ge.style.alignItems = "center"),
-    (ge.style.gap = "6px"),
-    (ge.style.fontSize = "13px"),
-    (ge.style.fontWeight = "600"),
-    (ge.style.color = s.textMuted),
-    (ge.style.textDecoration = "none"),
-    (ge.style.whiteSpace = "nowrap"),
-    (ge.innerHTML =
-      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg><span>Docs</span>'),
-    ge.addEventListener("mouseover", () => {
-      ge.style.color = s.textPrimary;
-    }),
-    ge.addEventListener("mouseout", () => {
-      ge.style.color = s.textMuted;
-    }),
-    Be.appendChild(ge));
-  const ue = document.createElement("a");
-  ((ue.href = "https://forms.gle/ed2VcwQTJXTDaMUv6"),
-    (ue.target = "_blank"),
-    (ue.rel = "noopener noreferrer"),
-    (ue.style.display = "flex"),
-    (ue.style.alignItems = "center"),
-    (ue.style.gap = "6px"),
-    (ue.style.fontSize = "13px"),
-    (ue.style.fontWeight = "600"),
-    (ue.style.color = s.textMuted),
-    (ue.style.textDecoration = "none"),
-    (ue.style.whiteSpace = "nowrap"),
-    (ue.innerHTML =
-      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="6" width="8" height="14" rx="4"></rect><path d="m19 7-3 2"></path><path d="m5 7 3 2"></path><path d="M19 19l-3-2"></path><path d="m5 19 3-2"></path><path d="M20 13h-4"></path><path d="M4 13h4"></path><path d="m10 4 1 2"></path><path d="m14 4-1 2"></path></svg><span>Report issue</span>'),
-    ue.addEventListener("mouseover", () => {
-      ue.style.color = s.textPrimary;
-    }),
-    ue.addEventListener("mouseout", () => {
-      ue.style.color = s.textMuted;
-    }),
-    Be.appendChild(ue),
-    e || X.appendChild(re));
+  (e || X.appendChild(re));
   let Me = null;
   if (e) {
     const f = mt === "dark",
@@ -33234,8 +38534,8 @@ function Wa(o) {
             (B) => {
               B?.success &&
                 B.data &&
-                (W(ie, "🏛️", B.data.OrganizationType || ""),
-                W(I, "📍", B.data.InstanceName || ""));
+                (W(ie, "", B.data.OrganizationType || ""),
+                W(I, "", B.data.InstanceName || ""));
             },
           ),
             globalThis.chrome?.runtime?.sendMessage(
@@ -33244,7 +38544,7 @@ function Wa(o) {
                 B?.success &&
                   B.data &&
                   (W(h, "‹›", B.data.version || ""),
-                  W(v, "☁️", B.data.label || ""));
+                  W(v, "", B.data.label || ""));
               },
             ));
         }));
@@ -33494,12 +38794,12 @@ function Wa(o) {
         {
           label: "Open user detail",
           short: "Detail",
-          icon: "👤",
+          icon: "",
           onClick: () => {
             const m = `${bt()}/lightning/setup/ManageUsers/page?address=%2F${f.id}%3Fnoredirect%3D1%26isUserEntityOverride%3D1`;
             (Ut({
               kind: "user",
-              icon: "👤",
+              icon: "",
               title: f.name,
               subtitle: f.email || f.username,
               meta: "User",
@@ -33512,7 +38812,7 @@ function Wa(o) {
         {
           label: "Enable debug mode",
           short: "Debug On",
-          icon: "🐞",
+          icon: "",
           onClick: () => _(!0),
         },
         {
@@ -33837,7 +39137,7 @@ function Wa(o) {
             _.style.background = "transparent";
           })));
       const m = document.createElement("div");
-      ((m.textContent = f.icon),
+      ((m.innerHTML = f.icon),
         (m.style.fontSize = "18px"),
         (m.style.flexShrink = "0"));
       const W = document.createElement("div"),
@@ -33866,14 +39166,14 @@ function Wa(o) {
     getToolsList = () => [
       {
         id: "speedtest",
-        icon: "🏎️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><polyline points=\"12 6 12 12 16 14\"/></svg>',
         label: "Org Speed Test",
         desc: "Run Salesforce speed test",
         run: () => {
           const he = `${bt()}/speedtest.jsp`;
           (Ut({
             kind: "tool",
-            icon: "🏎️",
+            icon: "",
             title: "Org Speed Test",
             subtitle: "speedtest.jsp",
             meta: "Tool",
@@ -33885,14 +39185,14 @@ function Wa(o) {
       },
       {
         id: "sfhome",
-        icon: "🏠",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-9.5z\"/></svg>',
         label: "Salesforce Home",
         desc: "Open Lightning home",
         run: () => {
           const he = `${bt()}/lightning/page/home`;
           (Ut({
             kind: "tool",
-            icon: "🏠",
+            icon: "",
             title: "Salesforce Home",
             subtitle: "Lightning home",
             meta: "Tool",
@@ -33904,14 +39204,14 @@ function Wa(o) {
       },
       {
         id: "webconsole",
-        icon: "🖥️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"4 17 10 11 4 5\"/><line x1=\"12\" y1=\"19\" x2=\"20\" y2=\"19\"/></svg>',
         label: "Web Console (Beta)",
         desc: "Open /webconsole — requires Web Console (Beta) enabled in Setup → Development",
         run: () => {
           const he = `${bt()}/webconsole`;
           (Ut({
             kind: "tool",
-            icon: "🖥️",
+            icon: "",
             title: "Web Console (Beta)",
             subtitle: "/webconsole",
             meta: "Tool",
@@ -33923,14 +39223,14 @@ function Wa(o) {
       },
       {
         id: "webconsolesetup",
-        icon: "⚙️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z\"/></svg>',
         label: "Enable Web Console (Beta)",
         desc: "Open the Web Console (Beta) setup page to turn it on",
         run: () => {
           const he = `${bt()}/lightning/setup/PlatformWebIdeSetup/home`;
           (Ut({
             kind: "tool",
-            icon: "⚙️",
+            icon: "",
             title: "Enable Web Console (Beta)",
             subtitle: "PlatformWebIdeSetup",
             meta: "Setup",
@@ -33942,7 +39242,7 @@ function Wa(o) {
       },
       {
         id: "settings",
-        icon: "⚙️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z\"/></svg>',
         label: "Settings",
         desc: "Open the extension settings page",
         run: () => {
@@ -33951,7 +39251,7 @@ function Wa(o) {
       },
       {
         id: "classic",
-        icon: "🕹️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"2\" y=\"6\" width=\"20\" height=\"12\" rx=\"2\"/><path d=\"M6 12h4M8 10v4\"/><circle cx=\"15\" cy=\"11\" r=\"1\" fill=\"#0077B6\"/><circle cx=\"18\" cy=\"13\" r=\"1\" fill=\"#0077B6\"/></svg>',
         label: "Switch to Classic",
         desc: "Open Salesforce Classic",
         run: () => {
@@ -33961,7 +39261,7 @@ function Wa(o) {
       },
       {
         id: "export",
-        icon: "📤",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"16 8 12 4 8 8\"/><line x1=\"12\" y1=\"16\" x2=\"12\" y2=\"4\"/><path d=\"M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2\"/></svg>',
         label: "Export Data",
         desc: "Run SOQL & export CSV",
         run: () => {
@@ -33970,7 +39270,7 @@ function Wa(o) {
       },
       {
         id: "querybuilder",
-        icon: "🧱",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/></svg>',
         label: "Query Builder",
         desc: "Build SOQL visually",
         run: () => {
@@ -33979,7 +39279,7 @@ function Wa(o) {
       },
       {
         id: "orgdetails",
-        icon: "🏢",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 21h18M9 8h1M9 12h1M9 16h1M14 8h1M14 12h1M14 16h1M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16\"/></svg>',
         label: "Org Details",
         desc: "View this org’s info",
         run: () => {
@@ -33988,7 +39288,7 @@ function Wa(o) {
       },
       {
         id: "objectmanager",
-        icon: "🛠️",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/><polyline points=\"3.27 6.96 12 12.01 20.73 6.96\"/><line x1=\"12\" y1=\"22.08\" x2=\"12\" y2=\"12\"/></svg>',
         label: "Object Manager",
         desc: "Create objects & fields with FLS",
         run: () => {
@@ -33997,7 +39297,7 @@ function Wa(o) {
       },
       {
         id: "objectdetails",
-        icon: "📦",
+        icon: '<svg viewBox=\"0 0 24 24\" width=\"28\" height=\"28\" stroke=\"#0077B6\" stroke-width=\"1.8\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/></svg>',
         label: "Object Details",
         desc: "View fields, CRUDQ and export to CSV",
         run: () => {
@@ -34006,7 +39306,7 @@ function Wa(o) {
       },
       {
         id: "bulkfieldcreator",
-        icon: "✨",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/></svg>',
         label: "Bulk Field Creator",
         desc: "Create custom fields in bulk and set FLS",
         run: () => {
@@ -34015,7 +39315,7 @@ function Wa(o) {
       },
       {
         id: "automationmap",
-        icon: "🧭",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
         label: "Automation Map",
         desc: "What fires on save, in order",
         run: () => {
@@ -34024,7 +39324,7 @@ function Wa(o) {
       },
       {
         id: "flowmanager",
-        icon: "🌊",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><path d="M10 6.5h4M6.5 10v7.5a1 1 0 0 0 1 1H14"/></svg>',
         label: "Flow Manager",
         desc: "View, activate, deactivate & open flows",
         run: () => {
@@ -34033,7 +39333,7 @@ function Wa(o) {
       },
       {
         id: "validationrules",
-        icon: "✅",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
         label: "Validation Rules",
         desc: "Activate, deactivate & open validation rules",
         run: () => {
@@ -34042,7 +39342,7 @@ function Wa(o) {
       },
       {
         id: "whereused",
-        icon: "🔎",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
         label: "Where Used",
         desc: "Find what references a component",
         run: () => {
@@ -34051,7 +39351,7 @@ function Wa(o) {
       },
       {
         id: "restexplorer",
-        icon: "🧪",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
         label: "REST Explorer",
         desc: "Call any Salesforce REST endpoint (Beta)",
         run: () => {
@@ -34060,7 +39360,7 @@ function Wa(o) {
       },
       {
         id: "eventmonitor",
-        icon: "📡",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1.8 16 1.8 11 4.9 7.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9c3.1 3.1 3.1 8.2 0 11.3"/></svg>',
         label: "Event Monitor (Beta)",
         desc: "Subscribe to platform events, CDC & push topics live",
         run: () => {
@@ -34069,7 +39369,7 @@ function Wa(o) {
       },
       {
         id: "executeanonymous",
-        icon: "⚡",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
         label: "Execute Anonymous",
         desc: "Run Apex & analyze the debug log",
         run: () => {
@@ -34077,8 +39377,26 @@ function Wa(o) {
         },
       },
       {
+        id: "aiagent",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M12 12 2.1 10a10 10 0 0 1 9.9-8v10z"/></svg>',
+        label: "AI Agent",
+        desc: "Ask in plain language — query, create, update, delete records and edit Apex (with approval)",
+        run: () => {
+          ((u.value = ""), (x = "aiagent"), oe());
+        },
+      },
+      {
+        id: "aicodeeditor",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+        label: "AI Code Editor",
+        desc: "Write Apex, generate tests and ask AI with Monaco Editor",
+        run: () => {
+          ((u.value = ""), (x = "aicodeeditor"), oe());
+        },
+      },
+      {
         id: "permcompare",
-        icon: "🔐",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
         label: "Permission Comparison",
         desc: "Compare profiles & permission sets",
         run: () => {
@@ -34087,7 +39405,7 @@ function Wa(o) {
       },
       {
         id: "permclone",
-        icon: "🧬",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M2 15c6.667-6 13.333 0 20-6"/><path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993"/><path d="M15 2c-1.798 1.998-2.518 3.995-2.807 5.993"/></svg>',
         label: "Profile & Permission Clone",
         desc: "Clone, convert & merge Profiles and Permission Sets with granular control",
         run: () => {
@@ -34095,8 +39413,17 @@ function Wa(o) {
         },
       },
       {
+        id: "userclone",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>',
+        label: "User Clone & Onboarding",
+        desc: "Clone users, replicate permission sets, packages, public groups & queues with Smart Paste",
+        run: () => {
+          ((u.value = ""), (x = "userclone"), oe());
+        },
+      },
+      {
         id: "accessmap",
-        icon: "🗺️",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
         label: "Access Explorer",
         desc: "Object, field & user access map",
         run: () => {
@@ -34105,7 +39432,7 @@ function Wa(o) {
       },
       {
         id: "dataimport",
-        icon: "⬆️",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 12 12 8 16 12"/><line x1="12" y1="8" x2="12" y2="20"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>',
         label: "Data Import",
         desc: "Insert / update / upsert / delete from CSV",
         run: () => {
@@ -34114,8 +39441,8 @@ function Wa(o) {
       },
       {
         id: "sampledata",
-        icon: "🧪",
-        label: "Bulk Sample Data Generator",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.5L4.5 18A2 2 0 0 0 6 21h12a2 2 0 0 0 1.5-3L14 9.5V2"/></svg>',
+        label: "Sample Data Generator",
         desc: "Analyze multiple objects and create realistic test records in bulk",
         run: () => {
           ((u.value = ""), (x = "sampledata"), oe());
@@ -34123,7 +39450,7 @@ function Wa(o) {
       },
       {
         id: "release",
-        icon: "🚀",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 19 21 12 17 5 21 12 2"/></svg>',
         label: "Salesforce Release",
         desc: "Current release & updates",
         run: () => {
@@ -34132,7 +39459,7 @@ function Wa(o) {
       },
       {
         id: "apiusage",
-        icon: "📊",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
         label: "API Usage",
         desc: "Daily API limits",
         run: () => {
@@ -34141,7 +39468,7 @@ function Wa(o) {
       },
       {
         id: "storage",
-        icon: "💾",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
         label: "Storage Insights",
         desc: "Data & file storage",
         run: () => {
@@ -34150,7 +39477,7 @@ function Wa(o) {
       },
       {
         id: "orglimits",
-        icon: "📈",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
         label: "Org Status",
         desc: "All org limits & usage",
         run: () => {
@@ -34159,7 +39486,7 @@ function Wa(o) {
       },
       {
         id: "shortcuts",
-        icon: "🔖",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
         label: "Custom Shortcuts",
         desc: "Save your own Setup links",
         run: () => {
@@ -34168,7 +39495,7 @@ function Wa(o) {
       },
       {
         id: "inspectlwc",
-        icon: "🔍",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
         label: "Inspect Components",
         desc: "Highlight LWCs on this page (Alt/⌥+Z)",
         run: () => {
@@ -34177,7 +39504,7 @@ function Wa(o) {
       },
       {
         id: "clearsession",
-        icon: "🧹",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
         label: "Clear Cache",
         desc: "Clear cached session & reload",
         run: () => {
@@ -34194,7 +39521,7 @@ function Wa(o) {
       },
       {
         id: "ghost",
-        icon: "👻",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10h.01M15 10h.01M12 2a8 8 0 0 0-8 8v11l3-3 3 3 2-2 2 2 3-3 3 3V10a8 8 0 0 0-8-8z"/></svg>',
         label: "Ghost Session",
         desc: "Open your session in Incognito",
         run: () => {
@@ -34215,14 +39542,14 @@ function Wa(o) {
       },
       {
         id: "fieldapi",
-        icon: "🏷️",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
         label: "Show Field API Names",
         desc: "On record pages",
         toggleKey: "showFieldApi",
       },
       {
         id: "magicfill",
-        icon: "✨",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>',
         label: "Magic Fill",
         desc: "Auto-fill new-record modals",
         run: () => {
@@ -34231,7 +39558,7 @@ function Wa(o) {
       },
       {
         id: "whatsnew",
-        icon: "✨",
+        icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
         label: "What's New",
         desc: "See the latest features",
         run: () => {
@@ -34259,7 +39586,7 @@ function Wa(o) {
         if (toolId === "home") {
           ie.push({
             id: "home",
-            icon: "🏠",
+            icon: "",
             title: "Home dashboard",
             desc: "Org health, debug status, quick actions and recents.",
             onClick: () => Ie("home"),
@@ -34273,7 +39600,16 @@ function Wa(o) {
             icon: found.icon,
             title: found.label,
             desc: found.desc,
-            onClick: found.run ? found.run : () => {
+            onClick: found.run ? () => {
+              const nonPanelTools = ["speedtest", "sfhome", "webconsole", "webconsolesetup", "settings", "classic", "clearsession", "ghost", "whatsnew", "inspectlwc"];
+              if (!nonPanelTools.includes(found.id)) {
+                Ie("tools").then(() => {
+                  found.run();
+                });
+              } else {
+                found.run();
+              }
+            } : () => {
               if (found.toggleKey) {
                 const wt = found.toggleKey;
                 ((At[wt] = !At[wt]),
@@ -34287,7 +39623,7 @@ function Wa(o) {
         }
       });
       ie.push({
-        icon: "🛠️",
+        icon: "",
         title: "Browse all tools",
         desc: "Object Manager, Automation Map, Org Status, and more.",
         onClick: () => Ie("tools"),
@@ -34328,7 +39664,7 @@ function Wa(o) {
                 cursor: "pointer",
                 fontFamily: "inherit",
               }),
-              (ne.innerHTML = `<span style="font-size:20px;line-height:1">${R.icon}</span><span style="font-size:11px;font-weight:600;text-align:center;line-height:1.2;color:${s.textMuted}">${R.title}</span>`),
+              (ne.innerHTML = `<span style="display:flex;align-items:center;justify-content:center;height:24px;width:24px">${R.icon || ""}</span><span style="font-size:11px;font-weight:600;text-align:center;line-height:1.2;color:${s.textMuted}">${R.title}</span>`),
               ne.addEventListener("mouseover", () => {
                 ne.style.background = s.surfaceHover;
               }),
@@ -34353,23 +39689,23 @@ function Wa(o) {
         _.appendChild(h),
         [
           {
-            icon: "🔗",
+            icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
             title: "Paste a record Id",
             desc: "Open the record or view all its fields instantly.",
           },
           {
-            icon: "🗂️",
+            icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
             title: `Press ${f ? "Option" : "Alt"}+D on a record`,
             desc: "See every field, its value and type — and edit inline.",
           },
           {
-            icon: "🌓",
+            icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 1 0 10 10"/></svg>',
             title: "Light or dark",
             desc: "Switch the Spotlight theme in Settings.",
             onClick: () => i(),
           },
           {
-            icon: "⚡",
+            icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
             title: "Search everything",
             desc: "Setup, Objects, Users, Flows, Permissions, Apps and more.",
           },
@@ -34447,116 +39783,122 @@ function Wa(o) {
           const xe = globalThis.chrome?.runtime,
             ze = Vt(en()),
             He = xe?.getURL
-              ? `${xe.getURL("spotlight.html")}?host=${encodeURIComponent(ze)}&tool=${encodeURIComponent(B)}`
+              ? `${xe.getURL("sfpilot.html")}?host=${encodeURIComponent(ze)}&tool=${encodeURIComponent(B)}`
               : "";
           (He && xe.sendMessage({ type: "OPEN_TAB", url: He }), gt());
         },
         h = [
           {
             id: "export",
-            icon: "📤",
+            icon: "",
             label: "Export Data",
             desc: "Run SOQL and export CSV",
           },
           {
             id: "querybuilder",
-            icon: "🧱",
+            icon: "",
             label: "Query Builder",
             desc: "Build SOQL visually",
           },
           {
             id: "sampledata",
-            icon: "🧪",
-            label: "Bulk Sample Data Generator",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.5L4.5 18A2 2 0 0 0 6 21h12a2 2 0 0 0 1.5-3L14 9.5V2"/></svg>',
+            label: "Sample Data Generator",
             desc: "Analyze multiple objects and create realistic test records in bulk",
           },
           {
             id: "whereused",
-            icon: "🔎",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
             label: "Where Used",
             desc: "Find what references a component",
           },
           {
             id: "restexplorer",
-            icon: "🧪",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
             label: "REST Explorer",
             desc: "Call any Salesforce REST endpoint",
           },
           {
             id: "eventmonitor",
-            icon: "📡",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1.8 16 1.8 11 4.9 7.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9c3.1 3.1 3.1 8.2 0 11.3"/></svg>',
             label: "Event Monitor (Beta)",
             desc: "Subscribe to platform events & CDC live",
           },
           {
             id: "objectmanager",
-            icon: "🛠️",
+            icon: "",
             label: "Object Manager",
             desc: "Create objects and fields",
           },
           {
             id: "automationmap",
-            icon: "🧭",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
             label: "Automation Map",
             desc: "What fires on save",
           },
           {
             id: "flowmanager",
-            icon: "🌊",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><path d="M10 6.5h4M6.5 10v7.5a1 1 0 0 0 1 1H14"/></svg>',
             label: "Flow Manager",
             desc: "View, activate & open flows",
           },
           {
             id: "validationrules",
-            icon: "✅",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
             label: "Validation Rules",
             desc: "Activate, deactivate & open rules",
           },
           {
             id: "objectdetails",
-            icon: "📦",
+            icon: "",
             label: "Object Details",
             desc: "View fields, CRUDQ and export to CSV",
           },
           {
             id: "executeanonymous",
-            icon: "⚡",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
             label: "Execute Anonymous",
             desc: "Run Apex",
           },
           {
             id: "permcompare",
-            icon: "🔐",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
             label: "Permission Comparison",
             desc: "Compare profiles and permission sets",
           },
           {
             id: "permclone",
-            icon: "🧬",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M2 15c6.667-6 13.333 0 20-6"/><path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993"/><path d="M15 2c-1.798 1.998-2.518 3.995-2.807 5.993"/></svg>',
             label: "Profile & Permission Clone",
             desc: "Clone, convert & merge Profiles and Permission Sets",
           },
           {
+            id: "userclone",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>',
+            label: "User Clone & Onboarding",
+            desc: "Clone user licenses, permission sets, groups & smart onboarding",
+          },
+          {
             id: "accessmap",
-            icon: "🗺️",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
             label: "Access Explorer",
             desc: "Object, field and user access",
           },
           {
             id: "dataimport",
-            icon: "⬆️",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 12 12 8 16 12"/><line x1="12" y1="8" x2="12" y2="20"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>',
             label: "Data Import",
             desc: "Insert / update / upsert / delete",
           },
           {
             id: "orglimits",
-            icon: "📈",
+            icon: '<svg viewBox="0 0 24 24" width="28" height="28" stroke="#0077B6" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
             label: "Org Status",
             desc: "All org limits and usage",
           },
           {
             id: "orgdetails",
-            icon: "🏢",
+            icon: "",
             label: "Org Details",
             desc: "This org’s info",
           },
@@ -34645,7 +39987,7 @@ function Wa(o) {
             )
             .slice(0, 5)
             .map((B) => ({
-              icon: "📦",
+              icon: "",
               title: B.label || B.apiName,
               subtitle: B.apiName,
               url: `${bt()}/lightning/setup/ObjectManager/${encodeURIComponent(B.durableId || B.apiName)}/FieldsAndRelationships/view`,
@@ -34674,7 +40016,7 @@ function Wa(o) {
           )
           .slice(0, 5)
           .map((B) => ({
-            icon: "⚡",
+            icon: "",
             title: B.label,
             subtitle: B.apiName,
             meta: B.isActive ? "Active" : "Inactive",
@@ -34864,7 +40206,7 @@ function Wa(o) {
           m === "005" &&
             C.appendChild(
               M({
-                icon: "⚙️",
+                icon: "",
                 title: "Open in Setup",
                 subtitle: "User detail in Setup",
                 meta: "Setup",
@@ -35127,7 +40469,7 @@ function Wa(o) {
           const v = `${bt()}/lightning/setup/ObjectManager/${encodeURIComponent(I.durableId || I.apiName)}/FieldsAndRelationships/view`,
             R = {
               kind: "object",
-              icon: "📦",
+              icon: "",
               title: I.label || I.apiName,
               subtitle: I.apiName,
               meta: I.keyPrefix ? `Key prefix ${I.keyPrefix}` : void 0,
@@ -35135,7 +40477,7 @@ function Wa(o) {
             };
           ie.appendChild(
             M({
-              icon: "📦",
+              icon: "",
               title: I.label || I.apiName,
               subtitle: I.apiName,
               meta: I.keyPrefix ? `Key prefix ${I.keyPrefix}` : void 0,
@@ -35203,26 +40545,41 @@ function Wa(o) {
             new Promise((at) => {
               it().then((st) => {
                 if (!st?.instanceUrl || !st?.sessionId) {
-                  at({ records: [], error: "Salesforce session not detected" });
+                  at({ records: [], error: "Salesforce session not detected. Please ensure you are logged into Salesforce." });
                   return;
                 }
                 let Ot = I(Ke.soql, W);
-                (Ke.namespace && (Ot = I(Ot, "NamespacePrefix")),
+                Ke.namespace && (Ot = I(Ot, "NamespacePrefix"));
+                const doQuery = (sessionInfo, isRetry = !1) => {
+                  const targetInstance = (sessionInfo.instanceUrl || "").replace(/\.salesforce-setup\./, ".salesforce.").replace(/\.salesforce-setup\.com/, ".salesforce.com");
                   globalThis.chrome.runtime.sendMessage(
                     {
                       type: "METADATA_QUERY",
-                      instanceUrl: st.instanceUrl,
-                      sessionId: st.sessionId,
+                      instanceUrl: targetInstance,
+                      sessionId: sessionInfo.sessionId,
                       query: Ot,
                       tooling: Ke.tooling,
                     },
-                    ($t) =>
+                    ($t) => {
+                      if (!isRetry && $t?.error && ($t.error.includes("401") || $t.error.includes("INVALID_SESSION_ID"))) {
+                        it(3, !0).then((fresh) => {
+                          if (fresh?.sessionId && fresh.sessionId !== sessionInfo.sessionId) {
+                            doQuery(fresh, !0);
+                          } else {
+                            at({ records: [], error: $t.error });
+                          }
+                        });
+                        return;
+                      }
                       at(
                         $t?.success
                           ? { records: $t.data || [] }
                           : { records: [], error: $t?.error || "Query failed" },
-                      ),
-                  ));
+                      );
+                    },
+                  );
+                };
+                doQuery(st);
               });
             }),
           v = (Ke, at) => at.split(".").reduce((st, Ot) => st?.[Ot], Ke),
@@ -35324,15 +40681,37 @@ function Wa(o) {
           if (((Pe.innerHTML = ""), at.error)) {
             const st = document.createElement("div");
             (Object.assign(st.style, {
-              padding: "20px",
+              padding: "20px 20px 10px",
               color: "#ef4444",
               fontSize: "13px",
               whiteSpace: "pre-wrap",
             }),
-              (st.textContent = `Could not load ${m.label}:
-${at.error}`),
+              (st.textContent = `Could not load ${m.label}:\n${at.error}`),
               Pe.appendChild(st),
               (He.textContent = ""));
+            const retryWrap = document.createElement("div");
+            retryWrap.style.padding = "0 20px 20px";
+            const retryBtn = document.createElement("button");
+            retryBtn.textContent = "↻ Reconnect / Retry";
+            Object.assign(retryBtn.style, {
+              padding: "6px 14px",
+              background: "#3b82f6",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontWeight: "600",
+              fontSize: "12px",
+              fontFamily: "inherit",
+            });
+            retryBtn.addEventListener("click", async () => {
+              retryBtn.textContent = "Connecting…";
+              delete U[m.id];
+              await it(4, !0);
+              oe();
+            });
+            retryWrap.appendChild(retryBtn);
+            Pe.appendChild(retryWrap);
             return;
           }
           ((Ue = at.records),
@@ -35742,7 +41121,7 @@ ${at.error}`),
                         Lt = `${ht}/lightning/setup/ManageUsers/page?address=%2F${h.id}%3Fnoredirect%3D1%26isUserEntityOverride%3D1`;
                       (Ut({
                         kind: "user",
-                        icon: "👤",
+                        icon: "",
                         title: h.name,
                         subtitle: h.email || h.username,
                         meta: "User",
@@ -36372,7 +41751,7 @@ ${at.error}`),
               : `${v}/lightning/setup/Flows/home`,
             xe = {
               kind: "flow",
-              icon: "⚡",
+              icon: "",
               title: I.label,
               subtitle: I.apiName,
               meta: `${I.processType || "Flow"} · ${I.isActive ? "Active" : "Inactive"}`,
@@ -36380,7 +41759,7 @@ ${at.error}`),
             };
           ie.appendChild(
             M({
-              icon: "⚡",
+              icon: "",
               title: I.label,
               subtitle: I.apiName,
               meta: `${I.processType || "Flow"} · ${I.isActive ? "Active" : "Inactive"}`,
@@ -36573,6 +41952,35 @@ ${at.error}`),
           }
           if (x === "permclone") {
             renderPermClone(C, {
+              isDark: he,
+              onBack: Pe,
+              flashToast: ot,
+              runQuery: Ue,
+              apiCall: (ce) =>
+                new Promise((pe) => {
+                  it().then((Ee) => {
+                    if (!Ee?.instanceUrl || !Ee?.sessionId) {
+                      pe({
+                        success: false,
+                        error: "Salesforce session not detected",
+                      });
+                      return;
+                    }
+                    globalThis.chrome.runtime.sendMessage(
+                      {
+                        instanceUrl: Ee.instanceUrl,
+                        sessionId: Ee.sessionId,
+                        ...ce,
+                      },
+                      (Ye) => pe(Ye || { success: false, error: "No response" }),
+                    );
+                  });
+                }),
+            });
+            return;
+          }
+          if (x === "userclone") {
+            renderUserClone(C, {
               isDark: he,
               onBack: Pe,
               flashToast: ot,
@@ -36931,6 +42339,47 @@ ${at.error}`),
             });
             return;
           }
+          if (x === "aiagent") {
+            if (typeof renderAIAgent != "function") {
+              C.textContent = "AI Agent failed to load — reload the extension.";
+              return;
+            }
+            renderAIAgent(C, he, Pe, ot);
+            return;
+          }
+          if (x === "aicodeeditor") {
+            const Ce = (ce) =>
+              new Promise((pe) => {
+                it().then((Ee) => {
+                  if (!Ee?.instanceUrl || !Ee?.sessionId) {
+                    pe({
+                      success: !1,
+                      error: "Salesforce session not detected",
+                    });
+                    return;
+                  }
+                  globalThis.chrome.runtime.sendMessage(
+                    {
+                      instanceUrl: Ee.instanceUrl,
+                      sessionId: Ee.sessionId,
+                      ...ce,
+                    },
+                    (Ye) =>
+                      pe(
+                        Ye ?? {
+                          success: !1,
+                          error: "No response from extension",
+                        },
+                      ),
+                  );
+                });
+              });
+            renderAICodeEditor(C, he, Pe, (ce, pe) => Ce({ type: "EXECUTE_ANONYMOUS", apexBody: ce, logLevel: pe }), (ce, pe, Ee, Ye) => {
+              ((ce.innerHTML = ""),
+                ts(ce, pe, { isDark: he, logName: Ee, onBack: Ye }));
+            }, ot);
+            return;
+          }
           if (x === "automationmap") {
             const Ce = (ce) =>
               new Promise((pe) => {
@@ -37194,37 +42643,96 @@ ${at.error}`),
           x = null;
         }
         const ie = getToolsList();
-          I = new Map(lo.map((he, Pe) => [he, Pe])),
-          h = ie
-            .map((he, Pe) => ({ t: he, i: Pe }))
-            .sort((he, Pe) => {
-              const Ue = I.has(he.t.id) ? I.get(he.t.id) : 1 / 0,
-                Ce = I.has(Pe.t.id) ? I.get(Pe.t.id) : 1 / 0;
-              return Ue !== Ce ? Ue - Ce : he.i - Pe.i;
-            })
-            .map(({ t: he }) => he),
-          v = f.length === 0,
-          R =
-            f.length > 0
-              ? h.filter(
-                  (he) =>
-                    he.label.toLowerCase().includes(f) ||
-                    he.desc.toLowerCase().includes(f),
-                )
-              : h;
+        const orderMap = new Map((lo || []).map((he, Pe) => [he, Pe]));
+        const h = ie
+          .map((he, Pe) => ({ t: he, i: Pe }))
+          .sort((he, Pe) => {
+            const Ue = orderMap.has(he.t.id) ? orderMap.get(he.t.id) : 1 / 0,
+              Ce = orderMap.has(Pe.t.id) ? orderMap.get(Pe.t.id) : 1 / 0;
+            return Ue !== Ce ? Ue - Ce : he.i - Pe.i;
+          })
+          .map(({ t: he }) => he);
+        const v = f.length === 0;
+        const R =
+          f.length > 0
+            ? h.filter(
+                (he) =>
+                  he.label.toLowerCase().includes(f) ||
+                  he.desc.toLowerCase().includes(f),
+              )
+            : h;
         if (R.length === 0) {
           z("No tools match your search.");
           return;
         }
+        const grouped = isToolsGrouped();
+        // Reordering by drag only makes sense in the flat, unfiltered grid
+        const canDrag = v && !grouped;
+        const groupBar = document.createElement("div");
+        Object.assign(groupBar.style, {
+          display: "flex",
+          justifyContent: "flex-end",
+          padding: "14px 28px 0",
+        });
+        const groupLbl = document.createElement("label");
+        Object.assign(groupLbl.style, {
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "8px",
+          fontSize: "12px",
+          fontWeight: "600",
+          color: s.textMuted,
+          cursor: "pointer",
+          userSelect: "none",
+        });
+        const groupTrack = document.createElement("span");
+        Object.assign(groupTrack.style, {
+          position: "relative",
+          width: "30px",
+          height: "17px",
+          borderRadius: "999px",
+          background: grouped ? s.accent : (mt === "dark" ? "rgba(148,163,184,0.35)" : "rgba(31,41,55,0.2)"),
+          transition: "background 0.15s",
+        });
+        const groupKnob = document.createElement("span");
+        Object.assign(groupKnob.style, {
+          position: "absolute",
+          top: "2px",
+          left: grouped ? "15px" : "2px",
+          width: "13px",
+          height: "13px",
+          borderRadius: "50%",
+          background: "#fff",
+          transition: "left 0.15s",
+        });
+        groupTrack.appendChild(groupKnob);
+        const groupCb = document.createElement("input");
+        ((groupCb.type = "checkbox"),
+          (groupCb.checked = grouped),
+          (groupCb.style.display = "none"),
+          groupCb.addEventListener("change", () => {
+            (setToolsGrouped(groupCb.checked), oe());
+          }),
+          groupLbl.appendChild(groupCb),
+          groupLbl.appendChild(document.createTextNode("Group by category")),
+          groupLbl.appendChild(groupTrack),
+          groupBar.appendChild(groupLbl),
+          C.appendChild(groupBar));
+        const makeGrid = () => {
+          const g = document.createElement("div");
+          return (
+            Object.assign(g.style, {
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+              gap: "12px",
+              padding: "20px 28px 24px",
+            }),
+            g
+          );
+        };
         const ne =
             mt === "dark" ? "rgba(148,163,184,0.35)" : "rgba(31,41,55,0.18)",
-          B = document.createElement("div");
-        Object.assign(B.style, {
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-          gap: "12px",
-          padding: "20px 28px 24px",
-        });
+          B = makeGrid();
         const xe = () => {
           const he = Array.from(B.children)
             .map((Pe) => Pe.dataset.toolId)
@@ -37233,7 +42741,7 @@ ${at.error}`),
         };
         let ze = null;
         const He = new Set(["inspectlwc", "automationmap", "accessmap"]);
-        (R.forEach((he) => {
+        const buildTile = (he, B) => {
           const Pe = !!he.toggleKey,
             Ue = Pe && At[he.toggleKey],
             Ce = document.createElement("button");
@@ -37274,56 +42782,9 @@ ${at.error}`),
             }),
               Ce.appendChild(wt));
           }
-          const pinBtn = document.createElement("button");
-          const isPinned = globalPrefs.pinnedTools ? globalPrefs.pinnedTools.includes(he.id) : ["sfhome", "export", "sampledata", "whereused"].includes(he.id);
-          Object.assign(pinBtn.style, {
-            position: "absolute",
-            top: "6px",
-            right: Pe ? "24px" : "6px",
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            fontSize: "13px",
-            padding: "4px",
-            borderRadius: "4px",
-            lineHeight: "1",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "opacity 0.15s, transform 0.15s",
-            opacity: isPinned ? "1.0" : "0.0",
-            zIndex: "10",
-          });
-          pinBtn.innerHTML = isPinned ? "⭐" : "☆";
-          pinBtn.title = isPinned ? "Unpin from Quick Actions" : "Pin to Quick Actions";
-          pinBtn.addEventListener("click", (eClick) => {
-            eClick.preventDefault();
-            eClick.stopPropagation();
-            let currentPinned = globalPrefs.pinnedTools || ["sfhome", "export", "sampledata", "whereused"];
-            if (currentPinned.includes(he.id)) {
-              currentPinned = currentPinned.filter(id => id !== he.id);
-              pinBtn.innerHTML = "☆";
-              pinBtn.style.opacity = "0.0";
-            } else {
-              currentPinned = [...currentPinned, he.id];
-              pinBtn.innerHTML = "⭐";
-              pinBtn.style.opacity = "1.0";
-            }
-            saveGlobalPrefs({ pinnedTools: currentPinned });
-            oe();
-          });
-          Ce.appendChild(pinBtn);
-          Ce.addEventListener("mouseover", () => {
-            pinBtn.style.opacity = "1.0";
-          });
-          Ce.addEventListener("mouseout", () => {
-            const stillPinned = globalPrefs.pinnedTools ? globalPrefs.pinnedTools.includes(he.id) : ["sfhome", "export", "sampledata", "whereused"].includes(he.id);
-            if (!stillPinned) {
-              pinBtn.style.opacity = "0.0";
-            }
-          });
+
           let Ee = null;
-          v &&
+          canDrag &&
             ((Ee = document.createElement("span")),
             (Ee.innerHTML =
               '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>'),
@@ -37339,8 +42800,18 @@ ${at.error}`),
             }),
             Ce.appendChild(Ee));
           const Ye = document.createElement("div");
-          ((Ye.textContent = he.icon),
-            Object.assign(Ye.style, { fontSize: "32px", lineHeight: "1" }));
+          ((typeof he.icon === "string" && he.icon.includes("<svg")
+            ? (Ye.innerHTML = he.icon)
+            : (Ye.textContent = he.icon)),
+            Object.assign(Ye.style, {
+              width: "32px",
+              height: "32px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              lineHeight: "1",
+              marginBottom: "4px",
+            }));
           const ht = document.createElement("div");
           ((ht.textContent = he.label),
             Object.assign(ht.style, { fontSize: "13px", fontWeight: "700" }));
@@ -37369,7 +42840,7 @@ ${at.error}`),
                 (Ce.style.background = ce),
                 Ee && (Ee.style.opacity = "0.4"));
             }),
-            v)
+            canDrag)
           ) {
             ((Ce.draggable = !0),
               (Ce.style.cursor = "grab"),
@@ -37427,35 +42898,82 @@ ${at.error}`),
             } else he.run?.();
           }),
             B.appendChild(Ce));
-        }),
-          C.appendChild(B));
+        };
+        if (grouped) {
+          const placed = new Set();
+          const sections = toolCategories.map((cat) => ({
+            label: cat.label,
+            tools: R.filter((t) => cat.ids.includes(t.id) && !placed.has(t.id) && placed.add(t.id)),
+          }));
+          sections.push({ label: "Other", tools: R.filter((t) => !placed.has(t.id)) });
+          sections
+            .filter((sec) => sec.tools.length)
+            .forEach((sec) => {
+              const hdr = document.createElement("div");
+              ((hdr.textContent = `${sec.label} · ${sec.tools.length}`),
+                Object.assign(hdr.style, {
+                  fontSize: "11px",
+                  fontWeight: "800",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  color: s.textFaint,
+                  padding: "16px 28px 0",
+                }),
+                C.appendChild(hdr));
+              const g = makeGrid();
+              ((g.style.paddingTop = "10px"),
+                (g.style.paddingBottom = "4px"),
+                sec.tools.forEach((he) => buildTile(he, g)),
+                C.appendChild(g));
+            });
+        } else {
+          (R.forEach((he) => buildTile(he, B)), C.appendChild(B));
+        }
       }
     },
     we = a.accentSoft,
     Te = (f, _) => {
       const m = document.createElement("button");
-      if (_) {
-        const W = e ? "16px" : "14px",
-          ie = e ? "11px" : "6px";
-        m.innerHTML = `<span style="margin-right:${ie};font-size:${W}">${_}</span><span>${f}</span>`;
-      } else m.textContent = f;
+      const iconMap = {
+        "Home": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+        "Apps & Tools": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
+        "Quick Access": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+        "Query Editor": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+        "Export Data / Query": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+        "Log Explorer": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+        "Apex Tests": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+        "Access Explorer": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+        "REST Console": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+        "Event Console": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9c3.9 3.9 3.9 10.3 0 14.2"/></svg>',
+        "Code Editor": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+        "Flow Manager": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M6 9v3a2 2 0 0 0 2 2h7"/></svg>',
+        "Validation Rules": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+        "Automation Map": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+        "Org Status": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+        "Object Details": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>',
+        "Settings": '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+      };
+      const svgIcon = iconMap[f] || (_ ? `<span style="font-size:${e ? '16px' : '14px'}">${_}</span>` : '');
+      const ie = e ? "10px" : "8px";
+      m.innerHTML = `<span style="margin-right:${ie};display:inline-flex;align-items:center;justify-content:center;opacity:0.85">${svgIcon}</span><span>${f}</span>`;
       return (
         (m.style.color = s.tabInactive),
         (m.style.backgroundColor = "transparent"),
         (m.style.border = "none"),
         (m.style.cursor = "pointer"),
         (m.style.outline = "none"),
-        (m.style.transition = "all 0.15s"),
+        (m.style.transition = "all 0.15s ease"),
         (m.style.fontFamily = "inherit"),
         e
           ? ((m.style.display = "flex"),
             (m.style.alignItems = "center"),
             (m.style.width = "100%"),
             (m.style.textAlign = "left"),
-            (m.style.padding = "9px 11px"),
-            (m.style.borderRadius = "9px"),
-            (m.style.fontWeight = "600"),
-            (m.style.fontSize = "13.5px"))
+            (m.style.padding = "8px 12px"),
+            (m.style.margin = "2px 0"),
+            (m.style.borderRadius = "8px"),
+            (m.style.fontWeight = "550"),
+            (m.style.fontSize = "13px"))
           : ((m.style.display = "inline-flex"),
             (m.style.alignItems = "center"),
             (m.style.borderBottom = "3px solid transparent"),
@@ -37503,6 +43021,7 @@ ${at.error}`),
         }));
     },
     Ie = async (f) => {
+      if (f === "settings") f = "__settings";
       if (
         ((c = f),
         (me = -1),
@@ -37604,7 +43123,7 @@ ${at.error}`),
             document.addEventListener("click", B, !0));
         }, 0));
     },
-    ke = 5,
+    ke = 6,
     Ne = "#9aa1ab",
     je = (f) =>
       `<svg width="${f}" height="${f}" viewBox="0 0 24 24" fill="#ffffff" aria-hidden="true"><path d="M12 12.2a4.4 4.4 0 1 0 0-8.8 4.4 4.4 0 0 0 0 8.8zm0 2.1c-4 0-7.2 2.4-7.2 5.3V21h14.4v-1.4c0-2.9-3.2-5.3-7.2-5.3z"/></svg>`,
@@ -37982,7 +43501,17 @@ ${at.error}`),
                 c !== I && (v.style.backgroundColor = "transparent");
               }));
           }
-          (v.addEventListener("click", () => Ie(I)),
+          (v.addEventListener("click", () => {
+            if (h.isTool) {
+              Ie("tools").then(() => {
+                x = h.id;
+                oe();
+                if (e) Ae();
+              });
+            } else {
+              Ie(I);
+            }
+          }),
             (fe[I] = v),
             k.appendChild(v));
         }),
@@ -38073,6 +43602,7 @@ ${at.error}`),
         });
     }
   }
+  globalThis.getToolsList = getToolsList;
   if (
     (n || Ae(),
     (l.style.display = "flex"),
@@ -38310,7 +43840,11 @@ function Ju() {
                 ((Pn = r.target || null), $n());
               }
             }),
-          window.addEventListener("message", (r) => {
+          window.addEventListener("message", function handleMsg(r) {
+            if (!globalThis.chrome?.runtime?.id) {
+              window.removeEventListener("message", handleMsg);
+              return;
+            }
             r.data.type === "SF_LOG_ANALYZER_TOGGLE"
               ? ((t = r.data.isOpen), to(e, a, o, r.data.isOpen))
               : r.data.type === "SF_LOG_ANALYZER_SETTINGS_CHANGED"
@@ -38322,6 +43856,36 @@ function Ju() {
                   : r.data.type === "SF_OPEN_PANEL" && d();
           }));
         const g = (r) => {
+          if (!globalThis.chrome?.runtime?.id) {
+            document.removeEventListener("keydown", g, !0);
+            return;
+          }
+          if (
+            globalPrefs.ctrlShiftRReload !== !1 &&
+            r.ctrlKey &&
+            r.shiftKey &&
+            (r.key === "r" || r.key === "R")
+          ) {
+            r.preventDefault();
+            r.stopPropagation();
+            const he = globalThis.chrome?.runtime;
+            if (!he || !he.id) {
+              window.location.reload();
+              return !1;
+            }
+            ot("Clearing cache & reloading…");
+            try {
+              he.sendMessage(
+                { type: "CLEAR_SESSION_CACHE", hostname: Vt(en()) },
+                () => {
+                  setTimeout(() => window.location.reload(), 300);
+                },
+              );
+            } catch {
+              window.location.reload();
+            }
+            return !1;
+          }
           if (
             (r.ctrlKey && r.altKey && (r.key === "d" || r.key === "D")) ||
             (r.altKey && r.code === "KeyS")
@@ -38805,10 +44369,220 @@ function Zu() {
         setTimeout(() => Wa(Yn), 50));
     }));
 }
+// Organization Favicon & Tab Title Customizer Module
+function initOrgFaviconAndTitleCustomizer() {
+  if (typeof window === "undefined" || !window.location) return;
+
+  // Palette of vibrant, easily distinguishable org colors
+  const ORG_PALETTE = [
+    "#ef4444", // Red
+    "#f97316", // Orange
+    "#f59e0b", // Amber
+    "#10b981", // Emerald
+    "#06b6d4", // Cyan
+    "#3b82f6", // Blue
+    "#6366f1", // Indigo
+    "#8b5cf6", // Purple
+    "#ec4899", // Pink
+    "#14b8a6", // Teal
+    "#84cc16", // Lime
+    "#e11d48", // Rose
+  ];
+
+  function hashColor(str) {
+    if (!str) return "#3b82f6";
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) - hash + str.charCodeAt(i);
+      hash = hash & hash;
+    }
+    const idx = Math.abs(hash) % ORG_PALETTE.length;
+    return ORG_PALETTE[idx];
+  }
+
+  function getInitials(name) {
+    if (!name) return "SF";
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  // Generate dynamic SVG data URL favicon with colored circle badge or full pill
+  function generateFaviconDataUrl(badgeText, color, isSandbox) {
+    const cleanText = (badgeText || "SF").slice(0, 3).toUpperCase();
+    const bgFill = color || "#3b82f6";
+    const badgeColor = isSandbox ? "#f59e0b" : "#ffffff";
+    const textColor = "#ffffff";
+
+    // Crisp high-resolution SVG favicon (64x64)
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+        <defs>
+          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="${bgFill}" stop-opacity="1" />
+            <stop offset="100%" stop-color="${bgFill}" stop-opacity="0.85" />
+          </linearGradient>
+          <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="rgba(0,0,0,0.3)" />
+          </filter>
+        </defs>
+        <!-- Background rounded squircle / cloud icon -->
+        <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#grad)" filter="url(#shadow)" />
+        <rect x="2" y="2" width="60" height="60" rx="14" fill="none" stroke="${badgeColor}" stroke-width="2.5" opacity="0.9" />
+        
+        <!-- Org label initials -->
+        <text x="32" y="${cleanText.length > 2 ? 37 : 39}" 
+              text-anchor="middle" 
+              fill="${textColor}" 
+              font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" 
+              font-weight="900" 
+              font-size="${cleanText.length > 2 ? 21 : 24}" 
+              letter-spacing="-0.5px">${cleanText}</text>
+
+        <!-- Sandbox indicator dot if applicable -->
+        ${isSandbox ? '<circle cx="52" cy="12" r="5.5" fill="#f59e0b" stroke="#ffffff" stroke-width="1.5" />' : ''}
+      </svg>
+    `.trim();
+
+    return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+  }
+
+  // Update or inject link rel="icon"
+  function setFavicon(dataUrl) {
+    if (!dataUrl) return;
+    try {
+      const existingIcons = document.querySelectorAll("link[rel*='icon']");
+      let iconLink = document.querySelector("link[data-sf-spotlight-favicon='true']");
+      if (!iconLink) {
+        iconLink = document.createElement("link");
+        iconLink.rel = "shortcut icon";
+        iconLink.type = "image/svg+xml";
+        iconLink.setAttribute("data-sf-spotlight-favicon", "true");
+        document.head.appendChild(iconLink);
+      }
+      iconLink.href = dataUrl;
+
+      // Disable default salesforce favicons to prevent browser overriding back
+      existingIcons.forEach((el) => {
+        if (el !== iconLink) {
+          el.remove();
+        }
+      });
+    } catch (e) {
+      console.warn("[SF-Spotlight] Favicon update failed:", e);
+    }
+  }
+
+  // Update tab title with Org Name prefix
+  function setTabTitle(orgLabel) {
+    if (!orgLabel) return;
+    try {
+      const current = document.title || "";
+      const prefix = `[${orgLabel}]`;
+      if (!current.startsWith(prefix)) {
+        // Strip previous bracketed tag if any
+        const clean = current.replace(/^\[[^\]]+\]\s*/, "");
+        document.title = `${prefix} ${clean}`;
+      }
+    } catch {}
+  }
+
+  // Main customizer runner
+  async function applyOrgBrand() {
+    try {
+      const creds = await it();
+      if (!creds || !creds.instanceUrl || !creds.sessionId) return;
+
+      const runtime = globalThis.chrome?.runtime;
+      if (!runtime?.sendMessage) return;
+
+      runtime.sendMessage(
+        {
+          type: "GET_ORG_INFO",
+          instanceUrl: creds.instanceUrl,
+          sessionId: creds.sessionId,
+        },
+        (res) => {
+          if (!res?.success || !res.data) return;
+
+          const orgData = res.data;
+          const orgName = (orgData.Name || "").trim();
+          const isSandbox = !!orgData.IsSandbox;
+          const instanceName = (orgData.InstanceName || "").trim();
+
+          // Check custom overrides saved in settings/prefs
+          const storage = globalThis.chrome?.storage?.local;
+          const applyWithPrefs = (prefs) => {
+            const orgFaviconEnabled = prefs?.orgFaviconEnabled !== false; // default true
+            const orgTitleEnabled = prefs?.orgTitleEnabled !== false; // default true
+            const customColor = prefs?.orgCustomColor || null;
+            const customLabel = prefs?.orgCustomLabel || null;
+
+            const displayLabel = customLabel || (orgName ? getInitials(orgName) : (instanceName || "SF"));
+            const brandColor = customColor || hashColor(orgName || instanceName || creds.instanceUrl);
+
+            if (orgFaviconEnabled) {
+              const faviconUrl = generateFaviconDataUrl(displayLabel, brandColor, isSandbox);
+              setFavicon(faviconUrl);
+
+              // Periodic re-check in case Salesforce SPA dynamically rewrites favicon
+              if (!window._sfFaviconInterval) {
+                window._sfFaviconInterval = setInterval(() => {
+                  const active = document.querySelector("link[data-sf-spotlight-favicon='true']");
+                  if (!active || active.href !== faviconUrl) {
+                    setFavicon(faviconUrl);
+                  }
+                }, 3000);
+              }
+            }
+
+            if (orgTitleEnabled && orgName) {
+              const shortOrgTag = customLabel || orgName.split(/\s+/)[0] || orgName;
+              setTabTitle(shortOrgTag);
+
+              if (!window._sfTitleInterval) {
+                window._sfTitleInterval = setInterval(() => {
+                  const cur = document.title || "";
+                  if (!cur.startsWith(`[${shortOrgTag}]`)) {
+                    setTabTitle(shortOrgTag);
+                  }
+                }, 3000);
+              }
+            }
+          };
+
+          if (storage) {
+            storage.get(["sf_spotlight_org_brand"], (items) => {
+              applyWithPrefs(items?.sf_spotlight_org_brand || {});
+            });
+          } else {
+            applyWithPrefs({});
+          }
+        }
+      );
+    } catch (e) {
+      console.warn("[SF-Spotlight] applyOrgBrand error:", e);
+    }
+  }
+
+  // Execute after short delay when page loads
+    // Live re-apply on storage change
+  try {
+    globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
+      if (area === "local" && changes?.sf_spotlight_org_brand) {
+        applyOrgBrand();
+      }
+    });
+  } catch {}
+
+  setTimeout(applyOrgBrand, 1200);
+}
+
 function zs() {
   pn
     ? Zu()
     : (Ju(),
+      initOrgFaviconAndTitleCustomizer(),
       wc({
         isEnabled: () => qi,
         getTheme: () => mt,

@@ -2,9 +2,9 @@
 "update_url": "https://clients2.google.com/service/update2/crx",
 
   "manifest_version": 3,
-  "name": "SF Spotlight",
+  "name": "SFPilot",
   "version": "3.0.0",
-  "description": "Quick Navigation to Salesforce Setting and Records and Analyze Salesforce system logs",
+  "description": "SFPilot - Your Salesforce co-pilot for navigation, log analysis, debugging, and org management",
   "icons": {
     "16": "icons/Spotlite-Icon-16.png",
     "32": "icons/Spotlite-Icon-32.png",
@@ -12,7 +12,7 @@
     "128": "icons/Spotlite-Icon-128.png"
   },
     "action": {
-    "default_title": "SF Spotlight",
+    "default_title": "SFPilot",
     "default_icon": {
       "16": "icons/Spotlite-Icon-16.png",
       "32": "icons/Spotlite-Icon-32.png",
@@ -24,7 +24,8 @@
     "activeTab",
     "storage",
     "cookies",
-    "contextMenus"
+    "contextMenus",
+    "tabGroups"
   ],
   "host_permissions": [
     "https://*.salesforce.com/*",
@@ -40,7 +41,12 @@
     "https://*.visualforce.mil/*",
     "https://*.crmforce.mil/*",
     "https://*.force.com.mcas.ms/*",
-    "https://*.builder.salesforce-experience.com/*"
+    "https://*.builder.salesforce-experience.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.openai.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://dashscope-intl.aliyuncs.com/*",
+    "https://openrouter.ai/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -93,13 +99,13 @@
         "https://*.force.com/*",
         "https://*.builder.salesforce-experience.com/*"
       ],
-      "js": ["content-ui.js"],
+      "js": ["content-ui.js", "ai-agent.js"],
       "run_at": "document_end"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["index.html", "spotlight.html", "chunks/*", "*.js", "*.css", "assets/*", "icons/*"],
+      "resources": ["index.html", "sfpilot.html", "chunks/*", "*.js", "*.css", "assets/*", "icons/*"],
       "matches": [
         "https://*.salesforce.com/*",
         "https://*.salesforce-setup.com/*",
@@ -123,5 +129,5 @@
       ]
     }
   ],
-  "incognito": "split"
+  "incognito": "spanning"
 }
